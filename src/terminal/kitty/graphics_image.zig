@@ -457,7 +457,7 @@ pub const LoadingImage = struct {
                 self.image.id,
             },
         );
-        const cwd = std.fs.cwd();
+        const cwd: std.Io.Dir = .cwd();
         const f = try cwd.createFile(filename, .{});
         defer f.close();
 

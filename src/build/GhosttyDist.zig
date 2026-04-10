@@ -141,7 +141,7 @@ pub fn init(b: *std.Build, cfg: *const Config) !GhosttyDist {
         // On the flip side, if the test fails we won't know why so
         // that sucks but we should have already ran tests at this point.
         // NOTE(mitchellh): temporarily disabled to diagnose heisenbug
-        //_ = step.captureStdErr(.{});
+        //_ = step.captureStdErr();
 
         break :step step;
     };
@@ -237,12 +237,11 @@ pub const Resource = struct {
 
     /// Returns true if the dist path exists at build time.
     pub fn exists(self: *const Resource, b: *std.Build) bool {
-        const io = b.graph.io;
-        if (b.build_root.handle.access(io, self.dist, .{})) {
+        if (b.build_root.handle.access(b.graph.io, self.dist, .{})) {
             // If we have a ".git" directory then we're a git checkout
             // and we never want to use the dist path. This shouldn't happen
             // so show a warning to the user.
-            if (b.build_root.handle.access(io, ".git", .{})) {
+            if (b.build_root.handle.access(b.graph.io, ".git", .{})) {
                 std.log.warn(
                     "dist resource '{s}' should not be in a git checkout",
                     .{self.dist},
