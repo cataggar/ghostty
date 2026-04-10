@@ -64,12 +64,12 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
     const t = target.result;
     const is_windows = t.os.tag == .windows;
-    lib.root_module.link_libc = true;
 
     if (target.result.os.tag.isDarwin()) {
         const apple_sdk = @import("apple_sdk");
@@ -103,12 +103,6 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
 
         var flags: std.ArrayList([]const u8) = .empty;
         defer flags.deinit(b.allocator);
-        if (target.result.abi == .msvc) {
-            try flags.appendSlice(b.allocator, &.{
-                "-fno-sanitize=undefined",
-                "-fno-sanitize-trap=undefined",
-            });
-        }
         lib.root_module.addCSourceFiles(.{
             .root = upstream.path(""),
             .flags = flags.items,

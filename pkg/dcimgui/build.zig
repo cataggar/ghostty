@@ -22,10 +22,10 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-    lib.root_module.link_libc = true;
     // On MSVC, we must not use linkLibCpp because Zig unconditionally
     // passes -nostdinc++ and then adds its bundled libc++/libc++abi
     // include paths, which conflict with MSVC's own C++ runtime headers.
@@ -60,12 +60,6 @@ pub fn build(b: *std.Build) !void {
         "-DIMGUI_USE_WCHAR32=1",
         "-DIMGUI_DISABLE_OBSOLETE_FUNCTIONS=1",
     });
-    if (target.result.abi == .msvc) {
-        try flags.appendSlice(b.allocator, &.{
-            "-fno-sanitize=undefined",
-            "-fno-sanitize-trap=undefined",
-        });
-    }
     if (freetype) try flags.appendSlice(b.allocator, &.{
         "-DIMGUI_ENABLE_FREETYPE=1",
     });
@@ -113,7 +107,7 @@ pub fn build(b: *std.Build) !void {
             });
 
             if (b.systemIntegrationOption("freetype", .{})) {
-                lib.root_module.linkSystemLibrary("freetype2", dynamic_link_opts);
+                lib.root_module.linkSystemLibrary("freetype2", .{});
             } else {
                 const freetype_dep = b.dependency("freetype", .{
                     .target = target,

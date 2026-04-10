@@ -47,10 +47,10 @@ fn buildGlslang(
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-    lib.root_module.link_libc = true;
     // On MSVC, we must not use linkLibCpp because Zig unconditionally
     // passes -nostdinc++ and then adds its bundled libc++/libc++abi
     // include paths, which conflict with MSVC's own C++ runtime headers.

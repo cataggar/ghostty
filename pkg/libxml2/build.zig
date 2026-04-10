@@ -11,10 +11,10 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-    lib.root_module.link_libc = true;
 
     if (upstream_) |upstream| lib.root_module.addIncludePath(upstream.path("include"));
     lib.root_module.addIncludePath(b.path("override/include"));

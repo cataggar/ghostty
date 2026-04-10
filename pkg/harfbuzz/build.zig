@@ -54,7 +54,7 @@ pub fn build(b: *std.Build) !void {
         var it = module.import_table.iterator();
         while (it.next()) |entry| test_exe.root_module.addImport(entry.key_ptr.*, entry.value_ptr.*);
         if (b.systemIntegrationOption("freetype", .{})) {
-            test_exe.root_module.linkSystemLibrary("freetype2", dynamic_link_opts);
+            test_exe.root_module.linkSystemLibrary("freetype2", .{});
         } else {
             test_exe.root_module.linkLibrary(freetype.artifact("freetype"));
         }
@@ -64,8 +64,8 @@ pub fn build(b: *std.Build) !void {
     }
 
     if (b.systemIntegrationOption("harfbuzz", .{})) {
-        module.linkSystemLibrary("harfbuzz", dynamic_link_opts);
-        test_exe.root_module.linkSystemLibrary("harfbuzz", dynamic_link_opts);
+        module.linkSystemLibrary("harfbuzz", .{});
+        test_exe.root_module.linkSystemLibrary("harfbuzz", .{});
     } else {
         const lib = try buildLib(b, module, .{
             .target = target,
@@ -87,6 +87,7 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
 
     const coretext_enabled = options.coretext_enabled;
     const freetype_enabled = options.freetype_enabled;
+    const dynamic_link_opts = options.dynamic_link_opts;
 
     const freetype = b.dependency("freetype", .{
         .target = target,
@@ -99,10 +100,10 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-    lib.root_module.link_libc = true;
     // On MSVC, we must not use linkLibCpp because Zig unconditionally
     // passes -nostdinc++ and then adds its bundled libc++/libc++abi
     // include paths, which conflict with MSVC's own C++ runtime headers.
@@ -116,22 +117,11 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         try apple_sdk.addPaths(b, lib);
     }
 
-    const dynamic_link_opts = options.dynamic_link_opts;
-
     var flags: std.ArrayList([]const u8) = .empty;
     defer flags.deinit(b.allocator);
     try flags.appendSlice(b.allocator, &.{
         "-DHAVE_STDBOOL_H",
     });
-    // Disable ubsan for MSVC: Zig's ubsan runtime cannot be bundled
-    // on Windows (LNK4229), leaving __ubsan_handle_* unresolved when
-    // the static archive is consumed by an external linker.
-    if (target.result.abi == .msvc) {
-        try flags.appendSlice(b.allocator, &.{
-            "-fno-sanitize=undefined",
-            "-fno-sanitize-trap=undefined",
-        });
-    }
     if (target.result.os.tag != .windows) {
         try flags.appendSlice(b.allocator, &.{
             "-DHAVE_UNISTD_H",

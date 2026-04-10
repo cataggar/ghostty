@@ -9,10 +9,10 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-    lib.root_module.link_libc = true;
     if (target.result.os.tag == .linux) {
         lib.root_module.linkSystemLibrary("m", .{});
     }
@@ -54,12 +54,6 @@ pub fn build(b: *std.Build) !void {
             "-DPNG_INTEL_SSE_OPT=0",
             "-DPNG_MIPS_MSA_OPT=0",
         });
-        if (target.result.abi == .msvc) {
-            try flags.appendSlice(b.allocator, &.{
-                "-fno-sanitize=undefined",
-                "-fno-sanitize-trap=undefined",
-            });
-        }
 
         lib.root_module.addCSourceFiles(.{
             .root = upstream.path(""),

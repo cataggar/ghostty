@@ -40,16 +40,16 @@ pub fn distResources(b: *std.Build) struct {
         .name = "framegen",
         .root_module = b.createModule(.{
             .target = b.graph.host,
+            .link_libc = true,
         }),
     });
-    exe.root_module.addCSourceFile(.{
+    exe.addCSourceFile(.{
         .file = b.path("src/build/framegen/main.c"),
         .flags = &.{},
     });
-    exe.root_module.link_libc = true;
 
     if (b.systemIntegrationOption("zlib", .{})) {
-        exe.root_module.linkSystemLibrary("zlib", .{
+        exe.linkSystemLibrary2("zlib", .{
             .preferred_link_mode = .dynamic,
             .search_strategy = .mode_first,
         });
@@ -58,7 +58,7 @@ pub fn distResources(b: *std.Build) struct {
             .target = b.graph.host,
             .optimize = .ReleaseFast,
         })) |zlib_dep| {
-            exe.root_module.linkLibrary(zlib_dep.artifact("z"));
+            exe.linkLibrary(zlib_dep.artifact("z"));
         }
     }
 
