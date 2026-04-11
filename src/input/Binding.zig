@@ -103,7 +103,7 @@ pub const Parser = struct {
             // based parser that parses the trigger fully, then yields the
             // action after. The loop below is a total mess.
             var offset: usize = 0;
-            while (std.mem.findScalar(
+            while (std.mem.indexOfScalar(
                 u8,
                 input[offset..],
                 '=',
@@ -152,7 +152,7 @@ pub const Parser = struct {
         var input: []const u8 = raw_input;
         while (true) {
             // Find the next prefix
-            const idx = std.mem.find(u8, input, ":") orelse break;
+            const idx = std.mem.indexOf(u8, input, ":") orelse break;
             const prefix = input[0..idx];
 
             // If the prefix is one of our flags then set it.
@@ -228,7 +228,7 @@ const SequenceIterator = struct {
     pub fn next(self: *SequenceIterator) Error!?Trigger {
         if (self.done()) return null;
         const rem = self.input[self.i..];
-        const idx = std.mem.find(u8, rem, ">") orelse rem.len;
+        const idx = std.mem.indexOf(u8, rem, ">") orelse rem.len;
         defer self.i += idx + 1;
         return try .parse(rem[0..idx]);
     }
@@ -347,29 +347,6 @@ pub const Action = union(enum) {
     reset,
 
     /// Copy the selected text to the clipboard.
-    ///
-    /// Valid values:
-    ///
-    ///   - `plain`
-    ///
-    ///     Copy the selection as plain text only.
-    ///
-    ///   - `vt`
-    ///
-    ///     Copy the selection as plain text, preserving terminal escape
-    ///     sequences (such as colors and styles).
-    ///
-    ///   - `html`
-    ///
-    ///     Copy the selection as HTML, preserving colors and styles as
-    ///     HTML markup.
-    ///
-    ///   - `mixed` (default)
-    ///
-    ///     Place multiple representations on the clipboard at once
-    ///     (e.g. plain text and HTML), each tagged with its content type
-    ///     so the receiving OS or application can pick the most appropriate
-    ///     representation when pasting.
     copy_to_clipboard: CopyToClipboard,
 
     /// Paste the contents of the default clipboard.
@@ -421,8 +398,6 @@ pub const Action = union(enum) {
 
     /// Navigate the search results. If there is no active search, this
     /// is not performed.
-    ///
-    /// Valid values: `previous`, `next`.
     navigate_search: NavigateSearch,
 
     /// Start a search if it isn't started already. This doesn't set any
@@ -706,21 +681,10 @@ pub const Action = union(enum) {
     /// of the `confirm-close-surface` configuration setting.
     close_surface,
 
-    /// Close the specified tabs and all splits therein.
+    /// Close the current tab and all splits therein, close all other tabs, or
+    /// close every tab to the right of the current one depending on the mode.
     ///
-    /// Valid values:
-    ///
-    ///   - `this` (default)
-    ///
-    ///     Close the current tab and all splits within it.
-    ///
-    ///   - `other`
-    ///
-    ///     Close every tab in the current window except the current tab.
-    ///
-    ///   - `right`
-    ///
-    ///     Close every tab to the right of the current tab.
+    /// If the mode is not specified, defaults to closing the current tab.
     ///
     /// This might trigger a close confirmation popup, depending on the value
     /// of the `confirm-close-surface` configuration setting.
@@ -1135,7 +1099,7 @@ pub const Action = union(enum) {
             // If we don't have a `,`, default to the plain format. This is
             // also very important for backwards compatibility before Ghostty
             // 1.3 which didn't support output formats.
-            const idx = std.mem.findScalar(u8, param, ',') orelse return .{
+            const idx = std.mem.indexOfScalar(u8, param, ',') orelse return .{
                 .action = try Binding.Action.parseEnum(
                     WriteScreen.Action,
                     param,
@@ -1254,7 +1218,7 @@ pub const Action = union(enum) {
         // Split our action by colon. A colon may not exist for some
         // actions so it is optional. The part preceding the colon is the
         // action name.
-        const colonIdx = std.mem.find(u8, input, ":");
+        const colonIdx = std.mem.indexOf(u8, input, ":");
         const action = input[0..(colonIdx orelse input.len)];
 
         // An action name is always required
@@ -1438,33 +1402,35 @@ pub const Action = union(enum) {
 
         const all_fields = @typeInfo(Action).@"union".fields;
 
-        // Find all fields that are scoped to `s`
-        var i: usize = 0;
-        var names: [all_fields.len][:0]const u8 = undefined;
-        var union_types: [all_fields.len]type = undefined;
-        var enum_values: [all_fields.len]comptime_int = undefined;
+        // Find all fields that are app-scoped
+        var i: comptime_int = 0;
+        var names: [all_fields.len][]const u8 = undefined;
+        var types: [all_fields.len]type = undefined;
+        var attrs: [all_fields.len]std.builtin.Type.UnionField.Attributes = undefined;
+        var raw_values: [all_fields.len]comptime_int = undefined;
+
         for (all_fields) |field| {
             const action = @unionInit(Action, field.name, undefined);
             if (action.scope() == s) {
                 names[i] = field.name;
-                union_types[i] = field.type;
-                enum_values[i] = i;
+                types[i] = field.type;
+                attrs[i] = .{ .@"align" = field.alignment };
+                raw_values[i] = i;
                 i += 1;
             }
         }
 
+        const TagInt = std.math.IntFittingRange(0, i);
+        var values: [i]TagInt = undefined;
+        for (raw_values, &values) |raw, *v| v.* = raw;
+
         // Build our union
         return @Union(
             .auto,
-            @Enum(
-                std.math.IntFittingRange(0, i),
-                .exhaustive,
-                names[0..i],
-                enum_values[0..i],
-            ),
-            names[0..i],
-            union_types[0..i],
-            &@splat(.{}),
+            @Enum(TagInt, .exhaustive, names, &values),
+            &names,
+            &types,
+            &attrs,
         );
     }
 
@@ -1711,7 +1677,7 @@ pub const Trigger = struct {
         var result: Trigger = .{};
         var rem: []const u8 = input;
         loop: while (rem.len > 0) {
-            const idx = std.mem.findScalar(u8, rem, '+') orelse rem.len;
+            const idx = std.mem.indexOfScalar(u8, rem, '+') orelse rem.len;
             const part = rem[0..idx];
             rem = if (idx >= rem.len) "" else rem[idx + 1 ..];
 
@@ -2654,8 +2620,9 @@ pub const Set = struct {
     /// Get an entry for the given key event. This will attempt to find
     /// a binding using multiple parts of the event in the following order:
     ///
-    ///   1. Physical key (event.physical_key)
-    ///   2. Unshifted Unicode codepoint (event.unshifted_codepoint)
+    ///   1. Translated key (event.key)
+    ///   2. Physical key (event.physical_key)
+    ///   3. Unshifted Unicode codepoint (event.unshifted_codepoint)
     ///
     pub fn getEvent(self: *const Set, event: KeyEvent) ?Entry {
         var trigger: Trigger = .{

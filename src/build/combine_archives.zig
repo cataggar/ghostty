@@ -12,10 +12,9 @@
 const std = @import("std");
 
 pub fn main(init: std.process.Init) !void {
-    const alloc = init.gpa;
-    const io = init.io;
+    const alloc = init.arena.allocator();
+    const args = try init.minimal.args.toSlice(alloc);
 
-    const args = try init.minimal.args.toSlice(init.arena.allocator());
     if (args.len < 4) {
         std.log.err("usage: combine_archives <zig_exe> <output> <input...>", .{});
         std.process.exit(1);
@@ -26,31 +25,27 @@ pub fn main(init: std.process.Init) !void {
     const inputs = args[3..];
 
     // Build the MRI script.
-    var script: std.ArrayListUnmanaged(u8) = .empty;
-    try script.appendSlice(alloc, "CREATE ");
-    try script.appendSlice(alloc, output_path);
-    try script.append(alloc, '\n');
+    var script: std.Io.Writer.Allocating = .init(alloc);
+    try script.writer.print("CREATE {s}\n", .{output_path});
     for (inputs) |input| {
-        try script.appendSlice(alloc, "ADDLIB ");
-        try script.appendSlice(alloc, input);
-        try script.append(alloc, '\n');
+        try script.writer.print("ADDLIB {s}\n", .{input});
     }
-    try script.appendSlice(alloc, "SAVE\nEND\n");
+    try script.writer.writeAll("SAVE\nEND\n");
 
-    var child = try std.process.spawn(io, .{
+    var child = try std.process.spawn(init.io, .{
         .argv = &.{ zig_exe, "ar", "-M" },
         .stdin = .pipe,
         .stdout = .inherit,
         .stderr = .inherit,
     });
 
-    try child.stdin.?.writeStreamingAll(io, script.items);
-    child.stdin.?.close(io);
+    try child.stdin.?.writeStreamingAll(init.io, script.written());
+    child.stdin.?.close(init.io);
     child.stdin = null;
 
-    const term = try child.wait(io);
-    if (term != .exited or term.exited != 0) {
-        std.log.err("zig ar -M exited with non-zero status", .{});
+    const term = try child.wait(init.io);
+    if (term.exited != 0) {
+        std.log.err("zig ar -M exited with code {d}", .{term.exited});
         std.process.exit(1);
     }
 }

@@ -419,9 +419,11 @@ pub const Action = union(Key) {
     /// Sync with: ghostty_action_u
     pub const CValue = cvalue: {
         const key_fields = @typeInfo(Key).@"enum".fields;
-        var union_names: [key_fields.len][:0]const u8 = undefined;
-        var union_types: [key_fields.len]type = undefined;
-        for (key_fields, 0..) |field, i| {
+        var names: [key_fields.len][]const u8 = undefined;
+        var types: [key_fields.len]type = undefined;
+        var attrs: [key_fields.len]std.builtin.Type.UnionField.Attributes = undefined;
+
+        for (key_fields, &names, &types, &attrs) |field, *name, *ty, *attr| {
             const action = @unionInit(Action, field.name, undefined);
             const Type = t: {
                 const Type = @TypeOf(@field(action, field.name));
@@ -430,11 +432,12 @@ pub const Action = union(Key) {
                 break :t Type;
             };
 
-            union_names[i] = field.name;
-            union_types[i] = Type;
+            name.* = field.name;
+            ty.* = Type;
+            attr.* = .{ .@"align" = @alignOf(Type) };
         }
 
-        break :cvalue @Union(.@"extern", null, &union_names, &union_types, &@splat(.{}));
+        break :cvalue @Union(.@"extern", null, &names, &types, &attrs);
     };
 
     /// Sync with: ghostty_action_s
@@ -996,5 +999,5 @@ pub const SearchSelected = struct {
 };
 
 test {
-    _ = std.testing.refAllDecls(@This());
+    _ = std.testing.refAllDeclsRecursive(@This());
 }
