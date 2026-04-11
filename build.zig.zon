@@ -9,20 +9,21 @@
 
         .libxev = .{
             // mitchellh/libxev
-            .url = "https://github.com/mitchellh/libxev/archive/05c89fbbb140254510fa812dce1a35c289bec4ca.tar.gz",
+            .url = "https://github.com/mitchellh/libxev/archive/a82a04eabb46b0611c72d6d0e32db2d9dcf2e745.tar.gz",
             .hash = "libxev-0.0.0-86vtcwIRFACVrx54GaHsMFFlyC4dTi0tcVh10V7btRUc",
             .lazy = true,
         },
         .vaxis = .{
             // rockorager/libvaxis
-            .url = "https://github.com/rockorager/libvaxis/archive/4e5a065940825f147fa5ce0df54d1ef0d50ecee7.tar.gz",
-            .hash = "vaxis-0.6.0-BWNV_N3QCQA7Xn50MsCk3MSgvbM8kbCIstA4FMck1k5v",
+            // TODO: See https://github.com/rockorager/libvaxis/pull/316
+            .url = "https://github.com/rockorager/libvaxis/archive/6dff795b77e930fc9c9a4dc5851faf1d6e703636.tar.gz",
+            .hash = "vaxis-0.6.0-BWNV_EnQCQArQLgoFAs30nhVr6dIHdso3NNXJ9PKcdTH",
             .lazy = true,
         },
         .z2d = .{
             // vancluever/z2d
-            .url = "https://github.com/vancluever/z2d/archive/2f661fb5120f65e875bf6f37d082674c08858c7b.tar.gz",
-            .hash = "z2d-0.11.1-pre-j5P_HtbzDwADWjqO2TdR36XPyD-GdJRwRywnnhjalqej",
+            .url = "https://github.com/vancluever/z2d/archive/4eab47ca696fb2b62f005125c0aa4ba8d2eba5ee.tar.gz",
+            .hash = "z2d-0.11.0-j5P_HtLzDwBGyQt49DrT0v4BuVqI_SRs6CXsuj7eBVhR",
             .lazy = true,
         },
         .zig_objc = .{
@@ -39,26 +40,26 @@
         },
         .uucode = .{
             // jacobsandlund/uucode
-            .url = "https://github.com/jacobsandlund/uucode/archive/2826a37a4562284fdacd8fa029d49509cc9bffcd.tar.gz",
+            .url = "git+https://github.com/jacobsandlund/uucode#2826a37a4562284fdacd8fa029d49509cc9bffcd",
             .hash = "uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA",
         },
         .zig_wayland = .{
             // codeberg ifreund/zig-wayland
-            .url = "https://codeberg.org/ifreund/zig-wayland/archive/7616d5f6aa526408ca8cd6acc5a4a8159859354c.tar.gz",
-            .hash = "wayland-0.7.0-dev-lQa1krD8AQBaaBiyXLInUl7k9cWLHhDTn_M_WnvbneJx",
+            .url = "https://codeberg.org/ifreund/zig-wayland/archive/4a150a04f76f7329e80280661355c04328369d1f.tar.gz",
+            .hash = "wayland-0.6.0-dev-lQa1krD8AQBlMqwuhAMJjPQKXvpRByZBxxqMVAZ7yzbG",
             .lazy = true,
         },
         .zf = .{
             // natecraddock/zf
-            .url = "https://github.com/natecraddock/zf/archive/70c8c8d693977638542dd1e2655de9e03f306e72.tar.gz",
-            .hash = "zf-0.10.3-OIRy8XuRAAA2qkTMFYohbQArJddx8GlHldm3nDdSz1lY",
+            .url = "https://github.com/natecraddock/zf/archive/91c8283b4804d9dbb4eb10b37e9884fb5593245a.tar.gz",
+            .hash = "zf-0.11.0-OIRy8X-RAAAwaRXHMYpj2uvBnuGTZWEE_3V7acqHQNtW",
             .lazy = true,
         },
         .gobject = .{
             // https://github.com/ghostty-org/zig-gobject based on zig_gobject
             // Temporary until we generate them at build time automatically.
-            .url = "https://github.com/ghostty-org/zig-gobject/archive/6971b412dc77003c52f5e8d16e7d0a828fc95539.tar.gz",
-            .hash = "ghostty_gobject-0.8.0-nU248b48AACZ3uAiQxs2JpRNjGEN2BUa0XchQOjPBpFP",
+            .url = "https://github.com/ghostty-org/zig-gobject/releases/download/0.8.0-2026-04-13-24-1/ghostty-gobject-0.8.0-2026-04-13-24-1.tar.zst",
+            .hash = "gobject-0.3.1-Skun7HhMnwBOgnunKXpCmltm6076SYIDU3KGVgNdobJC",
             .lazy = true,
         },
 
@@ -116,8 +117,8 @@
         .apple_sdk = .{ .path = "./pkg/apple-sdk" },
         .android_ndk = .{ .path = "./pkg/android-ndk" },
         .iterm2_themes = .{
-            .url = "https://deps.files.ghostty.org/ghostty-themes-release-20260511-160054-2671288.tgz",
-            .hash = "N-V-__8AAPy1AwDnEoq1ww42uq58nusIeQgR16W4-5SQZFIM",
+            .url = "https://deps.files.ghostty.org/ghostty-themes-release-20260323-152405-a2c7b60.tgz",
+            .hash = "N-V-__8AAL6FAwBDPampKgDjoxlJYDIn2jv0VaINS4W6CXJN",
             .lazy = true,
         },
     },
