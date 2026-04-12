@@ -11,7 +11,6 @@ const list_keybinds = @import("list_keybinds.zig");
 const list_themes = @import("list_themes.zig");
 const list_colors = @import("list_colors.zig");
 const list_actions = @import("list_actions.zig");
-const ssh = @import("ssh.zig");
 const ssh_cache = @import("ssh_cache.zig");
 const edit_config = @import("edit_config.zig");
 const show_config = @import("show_config.zig");
@@ -21,7 +20,6 @@ const crash_report = @import("crash_report.zig");
 const show_face = @import("show_face.zig");
 const boo = @import("boo.zig");
 const new_window = @import("new_window.zig");
-const toggle_quick_terminal = @import("toggle_quick_terminal.zig");
 
 /// Special commands that can be invoked via CLI flags. These are all
 /// invoked by using `+<action>` as a CLI flag. The only exception is
@@ -47,9 +45,6 @@ pub const Action = enum {
 
     /// List keybind actions
     @"list-actions",
-
-    /// Wrap `ssh` to configure Ghostty terminal integration on remote hosts
-    ssh,
 
     /// Manage SSH terminfo cache for automatic remote host setup
     @"ssh-cache",
@@ -78,9 +73,6 @@ pub const Action = enum {
     // Use IPC to tell the running Ghostty to open a new window.
     @"new-window",
 
-    // Use IPC to tell the running Ghostty to toggle the quick terminal.
-    @"toggle-quick-terminal",
-
     pub fn detectSpecialCase(arg: []const u8) ?SpecialCase(Action) {
         // If we see a "-e" and we haven't seen a command yet, then
         // we are done looking for commands. This special case enables
@@ -108,8 +100,8 @@ pub const Action = enum {
     pub const help_error = error.ActionHelpRequested;
 
     /// Run the action. This returns the exit code to exit with.
-    pub fn run(self: Action, alloc: Allocator) !u8 {
-        return self.runMain(alloc) catch |err| switch (err) {
+    pub fn run(self: Action, alloc: Allocator, io: std.Io, env: std.process.Environ) !u8 {
+        return self.runMain(alloc, io, env) catch |err| switch (err) {
             // If help is requested, then we use some comptime trickery
             // to find this action in the help strings and output that.
             help_error => err: {
@@ -142,26 +134,24 @@ pub const Action = enum {
         };
     }
 
-    fn runMain(self: Action, alloc: Allocator) !u8 {
+    fn runMain(self: Action, alloc: Allocator, io: std.Io, env: std.process.Environ) !u8 {
         return switch (self) {
-            .version => try version.run(alloc),
-            .help => try help.run(alloc),
-            .@"list-fonts" => try list_fonts.run(alloc),
-            .@"list-keybinds" => try list_keybinds.run(alloc),
-            .@"list-themes" => try list_themes.run(alloc),
-            .@"list-colors" => try list_colors.run(alloc),
-            .@"list-actions" => try list_actions.run(alloc),
-            .@"ssh-cache" => try ssh_cache.run(alloc),
-            .ssh => try ssh.run(alloc),
-            .@"edit-config" => try edit_config.run(alloc),
-            .@"show-config" => try show_config.run(alloc),
-            .@"explain-config" => try explain_config.run(alloc),
-            .@"validate-config" => try validate_config.run(alloc),
-            .@"crash-report" => try crash_report.run(alloc),
-            .@"show-face" => try show_face.run(alloc),
-            .boo => try boo.run(alloc),
-            .@"new-window" => try new_window.run(alloc),
-            .@"toggle-quick-terminal" => try toggle_quick_terminal.run(alloc),
+            .version => try version.run(alloc, io, env),
+            .help => try help.run(alloc, io, env),
+            .@"list-fonts" => try list_fonts.run(alloc, io, env),
+            .@"list-keybinds" => try list_keybinds.run(alloc, io, env),
+            .@"list-themes" => try list_themes.run(alloc, io, env),
+            .@"list-colors" => try list_colors.run(alloc, io, env),
+            .@"list-actions" => try list_actions.run(alloc, io, env),
+            .@"ssh-cache" => try ssh_cache.run(alloc, io, env),
+            .@"edit-config" => try edit_config.run(alloc, io, env),
+            .@"show-config" => try show_config.run(alloc, io, env),
+            .@"explain-config" => try explain_config.run(alloc, io, env),
+            .@"validate-config" => try validate_config.run(alloc, io, env),
+            .@"crash-report" => try crash_report.run(alloc, io, env),
+            .@"show-face" => try show_face.run(alloc, io, env),
+            .boo => try boo.run(alloc, io, env),
+            .@"new-window" => try new_window.run(alloc, io, env),
         };
     }
 
@@ -194,7 +184,6 @@ pub const Action = enum {
                 .@"list-colors" => list_colors.Options,
                 .@"list-actions" => list_actions.Options,
                 .@"ssh-cache" => ssh_cache.Options,
-                .ssh => ssh.Options,
                 .@"edit-config" => edit_config.Options,
                 .@"show-config" => show_config.Options,
                 .@"explain-config" => explain_config.Options,
@@ -203,7 +192,6 @@ pub const Action = enum {
                 .@"show-face" => show_face.Options,
                 .boo => boo.Options,
                 .@"new-window" => new_window.Options,
-                .@"toggle-quick-terminal" => toggle_quick_terminal.Options,
             };
         }
     }
