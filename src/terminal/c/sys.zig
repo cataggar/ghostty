@@ -102,9 +102,9 @@ pub fn set(
     value: ?*const anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(Option, @intFromEnum(option)) == null) {
+        _ = std.enums.fromInt(Option, @intFromEnum(option)) orelse {
             return .invalid_value;
-        }
+        };
     }
 
     return switch (option) {
@@ -148,35 +148,34 @@ fn emitLog(level: LogLevel, scope: []const u8, message: []const u8) void {
 const LogEmitter = struct {
     c_level: LogLevel,
     scope_text: []const u8,
-    buf: [2048]u8 = undefined,
-    pos: usize = 0,
+    writer: std.Io.Writer,
 
-    fn write(self: *@This(), bytes: []const u8) error{}!usize {
-        var remaining = bytes;
-        while (remaining.len > 0) {
-            const space = self.buf.len - self.pos;
-            if (space == 0) {
-                self.flush();
-                continue;
-            }
-
-            const n = @min(remaining.len, space);
-            @memcpy(self.buf[self.pos..][0..n], remaining[0..n]);
-            self.pos += n;
-            remaining = remaining[n..];
-        }
-
-        return bytes.len;
+    fn init(c_level: LogLevel, scope_text: []const u8, buf: []u8) LogEmitter {
+        return .{
+            .c_level = c_level,
+            .scope_text = scope_text,
+            .writer = .{
+                .vtable = &.{ .drain = drain },
+                .buffer = buf,
+            },
+        };
     }
 
-    fn flush(self: *@This()) void {
-        if (self.pos == 0) return;
-        emitLog(
-            self.c_level,
-            self.scope_text,
-            self.buf[0..self.pos],
-        );
-        self.pos = 0;
+    fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) error{}!usize {
+        const self: *LogEmitter = @fieldParentPtr("writer", w);
+
+        emitLog(self.c_level, self.scope_text, w.buffer[0..w.end]);
+        w.end = 0;
+
+        var written: usize = data[data.len].len * splat;
+        for (data[0 .. data.len - 1]) |s| {
+            emitLog(self.c_level, self.scope_text, s);
+            written += s.len;
+        }
+        for (0..splat) |_| {
+            emitLog(self.c_level, self.scope_text, data[data.len]);
+        }
+        return written;
     }
 };
 
@@ -197,14 +196,11 @@ pub fn logFn(
     const scope_text: []const u8 = if (scope == .default) "" else @tagName(scope);
     const c_level = LogLevel.fromStd(level);
 
-    var ctx: LogEmitter = .{
-        .c_level = c_level,
-        .scope_text = scope_text,
-    };
-    var buf: [4096]u8 = undefined;
-    const formatted = std.fmt.bufPrint(&buf, format, args) catch &buf;
-    _ = ctx.write(formatted) catch {};
-    ctx.flush();
+    var buf: [2048]u8 = undefined;
+    var ctx: LogEmitter = .init(c_level, scope_text, &buf);
+
+    ctx.writer.print(format, args) catch {};
+    ctx.writer.flush() catch {};
 }
 
 /// Built-in log callback that writes to stderr.
@@ -212,7 +208,7 @@ pub fn logFn(
 /// Formats each message as "[level](scope): message\n". Can be passed
 /// directly to ghostty_sys_set(GHOSTTY_SYS_OPT_LOG, &ghostty_sys_log_stderr).
 ///
-/// Writes directly to stderr file descriptor.
+/// Uses std.debug.lockStderrWriter for thread-safe, mutex-protected output.
 /// On freestanding/wasm targets this is a no-op (no stderr available).
 pub fn logStderr(
     _: ?*anyopaque,
@@ -234,14 +230,16 @@ pub fn logStderr(
         .debug => "debug",
     };
 
-    var buf: [4096]u8 = undefined;
-    const formatted = if (scope.len > 0)
-        std.fmt.bufPrint(&buf, "[{s}]({s}): {s}\n", .{ level_text, scope, message }) catch &buf
-    else
-        std.fmt.bufPrint(&buf, "[{s}]: {s}\n", .{ level_text, message }) catch &buf;
+    var buffer: [64]u8 = undefined;
+    var stderr = std.debug.lockStderr(&buffer);
+    defer std.debug.unlockStderr();
+    const writer = &stderr.file_writer.interface;
 
-    const stderr_fd = std.posix.system.STDERR_FILENO;
-    _ = std.posix.system.write(stderr_fd, formatted.ptr, formatted.len);
+    if (scope.len > 0) {
+        writer.print("[{s}]({s}): {s}\n", .{ level_text, scope, message }) catch {};
+    } else {
+        writer.print("[{s}]: {s}\n", .{ level_text, message }) catch {};
+    }
 }
 
 test "set decode_png with null clears" {

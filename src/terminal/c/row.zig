@@ -68,9 +68,9 @@ pub fn get(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(RowData, @intFromEnum(data)) == null) {
+        _ = std.enums.fromInt(RowData, @intFromEnum(data)) orelse {
             return .invalid_value;
-        }
+        };
     }
 
     return switch (data) {

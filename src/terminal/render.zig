@@ -536,16 +536,16 @@ pub const RenderState = struct {
                     .bg_color_rgb => {
                         @branchHint(.unlikely);
                         cells_style[x] = .{ .bg_color = .{ .rgb = .{
-                            .r = page_cell.colorRgb().r,
-                            .g = page_cell.colorRgb().g,
-                            .b = page_cell.colorRgb().b,
+                            .r = page_cell.content.color_rgb.r,
+                            .g = page_cell.content.color_rgb.g,
+                            .b = page_cell.content.color_rgb.b,
                         } } };
                     },
 
                     .bg_color_palette => {
                         @branchHint(.unlikely);
                         cells_style[x] = .{ .bg_color = .{
-                            .palette = page_cell.colorPalette(),
+                            .palette = page_cell.content.color_palette.data,
                         } };
                     },
                 }

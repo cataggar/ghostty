@@ -110,9 +110,9 @@ pub const MemoryPool = struct {
     }
 
     pub fn reset(self: *MemoryPool, mode: ResetMode) void {
-        _ = self.pages.reset(self.page_alloc, mode);
-        _ = self.nodes.reset(self.alloc, mode);
-        _ = self.pins.reset(self.alloc, mode);
+        _ = self.pages.reset(mode);
+        _ = self.nodes.reset(mode);
+        _ = self.pins.reset(mode);
     }
 };
 
@@ -390,7 +390,7 @@ pub fn init(
 
     // We always track our viewport pin to ensure this is never an allocation
     try tw.check(.viewport_pin);
-    const viewport_pin = try pool.pins.create(pool.alloc);
+    const viewport_pin = try pool.pins.create(pool.page_alloc);
     viewport_pin.* = .{ .node = page_list.first.? };
     var tracked_pins: PinSet = .{};
     errdefer tracked_pins.deinit(pool.alloc);
@@ -440,7 +440,6 @@ fn initPages(
     const cap = initialCapacity(cols);
     const layout = Page.layout(cap);
     const pooled = layout.total_size <= std_size;
-    const page_alloc = pool.page_alloc;
 
     // Guaranteed by comptime checks in initialCapacity but
     // redundant here for safety.
@@ -452,7 +451,7 @@ fn initPages(
         var it = page_list.first;
         while (it) |node| : (it = node.next) {
             if (node.data.memory.len > std_size) {
-                page_alloc.free(node.data.memory);
+                pool.page_alloc.free(node.data.memory);
             }
         }
     }
@@ -460,7 +459,7 @@ fn initPages(
     var rem = rows;
     while (rem > 0) {
         try tw.check(.page_node);
-        const node = try pool.nodes.create(pool.alloc);
+        const node = try pool.nodes.create(pool.page_alloc);
         errdefer pool.nodes.destroy(node);
 
         const page_buf = if (pooled) buf: {
@@ -468,7 +467,7 @@ fn initPages(
             break :buf try pool.pages.create(pool.page_alloc);
         } else buf: {
             try tw.check(.page_buf_non_std);
-            break :buf try page_alloc.alignedAlloc(
+            break :buf try pageAllocator().alignedAlloc(
                 u8,
                 .fromByteUnits(std.heap.page_size_min),
                 layout.total_size,
@@ -477,7 +476,7 @@ fn initPages(
         errdefer if (pooled)
             pool.pages.destroy(page_buf)
         else
-            page_alloc.free(page_buf);
+            pageAllocator().free(page_buf);
 
         // In runtime safety modes we have to memset because the Zig allocator
         // interface will always memset to 0xAA for undefined. On freestanding
@@ -637,11 +636,10 @@ pub fn deinit(self: *PageList) void {
 
     // Go through our linked list and deallocate all pages that are
     // not standard size.
-    const page_alloc = self.pool.page_alloc;
     var it = self.pages.first;
     while (it) |node| : (it = node.next) {
         if (node.data.memory.len > std_size) {
-            page_alloc.free(node.data.memory);
+            pageAllocator().free(node.data.memory);
         }
     }
 
@@ -678,11 +676,10 @@ pub fn reset(self: *PageList) void {
     // are non-standard size since those were allocated outside
     // the pool.
     {
-        const page_alloc = self.pool.page_alloc;
         var it = self.pages.first;
         while (it) |node| : (it = node.next) {
             if (node.data.memory.len > std_size) {
-                page_alloc.free(node.data.memory);
+                pageAllocator().free(node.data.memory);
             }
         }
     }
@@ -694,7 +691,7 @@ pub fn reset(self: *PageList) void {
     _ = self.pool.pages.reset(self.pool.page_alloc, .{
         .retain_with_limit = page_count * PagePool.item_size,
     });
-    _ = self.pool.nodes.reset(self.pool.alloc, .{
+    _ = self.pool.nodes.reset(self.pool.page_alloc, .{
         .retain_with_limit = page_count * NodePool.item_size,
     });
 
@@ -704,23 +701,24 @@ pub fn reset(self: *PageList) void {
     {
         // Note: we only have to do this for the page pool because the
         // nodes are always fully overwritten on each allocation.
+        const page_arena = &self.pool.pages.arena_state;
+
         // WARN: Since ArenaAllocator's Node is not public API,
-        // we have to hardcode its layout here. We do a comptime assert
-        // on Zig version to verify we check it on every bump.
-        const ArenaNode = extern struct {
-            size_raw: usize,
-            end_index: usize,
-            next: ?*@This(),
-        };
-        var it: ?*ArenaNode = @ptrCast(self.pool.pages.arena_state.used_list);
-        while (it) |node| : (it = node.next) {
-            // The total allocation size (clear the resizing flag in LSB)
-            const total_size = node.size_raw & ~@as(usize, 1);
-            // The fully allocated buffer
-            const alloc_buf = @as([*]u8, @ptrCast(node))[0..total_size];
-            // The buffer minus our header
-            const data_buf = alloc_buf[@sizeOf(ArenaNode)..];
-            @memset(data_buf, 0);
+        // we have to use some reflection trickery to get its exact type.
+        const ArenaNode = @typeInfo(@typeInfo(@TypeOf(page_arena.used_list)).optional.child).pointer.child;
+
+        for ([_]?*ArenaNode{ page_arena.used_list, page_arena.free_list }) |head| {
+            var l = head;
+            while (l) |n| : (l = n.next) {
+                // SAFETY: We never use this in any context where thread-safety
+                // and atomicity becomes relevant, so this should be fine to do.
+                var s = n.size;
+                s.resizing = false;
+
+                // The fully allocated buffer
+                const buf = @as([*]u8, @ptrCast(n))[0..@as(usize, @bitCast(s))];
+                @memset(buf, 0);
+            }
         }
     }
 
@@ -811,7 +809,7 @@ pub fn clone(
 
     // Create our viewport. In a clone, the viewport always goes
     // to the top.
-    const viewport_pin = try pool.pins.create(pool.alloc);
+    const viewport_pin = try pool.pins.create();
     var tracked_pins: PinSet = .{};
     errdefer tracked_pins.deinit(pool.alloc);
     try tracked_pins.putNoClobber(pool.alloc, viewport_pin, {});
@@ -819,11 +817,10 @@ pub fn clone(
     // Our list of pages
     var page_list: List = .{};
     errdefer {
-        const page_alloc = pool.page_alloc;
         var page_it = page_list.first;
         while (page_it) |node| : (page_it = node.next) {
             if (node.data.memory.len > std_size) {
-                page_alloc.free(node.data.memory);
+                pageAllocator().free(node.data.memory);
             }
         }
     }
@@ -866,7 +863,7 @@ pub fn clone(
                 if (p.node != chunk.node or
                     p.y < chunk.start or
                     p.y >= chunk.end) continue;
-                const new_p = try pool.pins.create(pool.alloc);
+                const new_p = try pool.pins.create();
                 new_p.* = p.*;
                 new_p.node = node;
                 new_p.y -= chunk.start;
@@ -937,10 +934,6 @@ pub const Resize = struct {
     pub const Cursor = struct {
         x: size.CellCountInt,
         y: size.CellCountInt,
-
-        /// When set, this pin preserves right-side blank cells up to the cursor
-        /// during reflow.
-        pin: ?*Pin = null,
     };
 };
 
@@ -1019,6 +1012,10 @@ fn resizeCols(
 ) Allocator.Error!void {
     assert(cols != self.cols);
 
+    // Update our cols. We have to do this early because grow() that we
+    // may call below relies on this to calculate the proper page size.
+    self.cols = cols;
+
     // If we have a cursor position (x,y), then we try under any col resizing
     // to keep the same number remaining active rows beneath it. This is a
     // very special case if you can imagine clearing the screen (i.e.
@@ -1027,11 +1024,10 @@ fn resizeCols(
     // pull down scrollback.
     const preserved_cursor: ?struct {
         tracked_pin: *Pin,
-        untrack: bool,
         remaining_rows: usize,
         wrapped_rows: usize,
     } = if (cursor) |c| cursor: {
-        const p = if (c.pin) |cursor_pin| cursor_pin.* else self.pin(.{ .active = .{
+        const p = self.pin(.{ .active = .{
             .x = c.x,
             .y = c.y,
         } }) orelse break :cursor null;
@@ -1054,21 +1050,12 @@ fn resizeCols(
         };
 
         break :cursor .{
-            .tracked_pin = c.pin orelse try self.trackPin(p),
-            .untrack = c.pin == null,
+            .tracked_pin = try self.trackPin(p),
             .remaining_rows = self.rows - c.y - 1,
             .wrapped_rows = wrapped,
         };
     } else null;
-    defer if (preserved_cursor) |c| {
-        if (c.untrack) self.untrackPin(c.tracked_pin);
-    };
-
-    // Update our cols. We have to do this early because grow() that we
-    // may call below relies on this to calculate the proper page size, but
-    // after preserved_cursor so that the cursor pin can resolve coordinates in
-    // the old active coordinate space.
-    self.cols = cols;
+    defer if (preserved_cursor) |c| self.untrackPin(c.tracked_pin);
 
     // Create the first node that contains our reflow.
     const first_rewritten_node = node: {
@@ -1122,11 +1109,7 @@ fn resizeCols(
     {
         var reflow_cursor: ReflowCursor = .init(first_rewritten_node);
         while (it.next()) |row| {
-            try reflow_cursor.reflowRow(
-                self,
-                row,
-                if (preserved_cursor) |c| c.tracked_pin else null,
-            );
+            try reflow_cursor.reflowRow(self, row);
 
             // Once we're done reflowing a page, destroy it immediately.
             // This frees memory and makes it more likely in memory
@@ -1242,7 +1225,6 @@ const ReflowCursor = struct {
         self: *ReflowCursor,
         list: *PageList,
         row: Pin,
-        cursor_pin: ?*Pin,
     ) Allocator.Error!void {
         const src_page: *Page = &row.node.data;
         const src_row = row.rowAndCell().row;
@@ -1270,8 +1252,6 @@ const ReflowCursor = struct {
                 if (&p.node.data != src_page or
                     p.y != src_y) continue;
 
-                if (cursor_pin != null and p == cursor_pin.?) continue;
-
                 // If this pin is in the blanks on the right and past the end
                 // of the dst col width then we move it to the end of the dst
                 // col width instead.
@@ -1283,14 +1263,6 @@ const ReflowCursor = struct {
                 // We increase our col len to at least include this pin.
                 // This ensures that blank rows with pins are processed,
                 // so that the pins can be properly remapped.
-                cols_len = @max(cols_len, p.x + 1);
-            }
-        }
-
-        // If the cursor is after blanks on the right, those cells are still
-        // before the next write and must reflow with it.
-        if (cursor_pin) |p| {
-            if (&p.node.data == src_page and p.y == src_y) {
                 cols_len = @max(cols_len, p.x + 1);
             }
         }
@@ -1453,7 +1425,7 @@ const ReflowCursor = struct {
                             // head and wrap before handling it.
                             self.page_cell.* = .{
                                 .content_tag = .codepoint,
-                                .content = 0,
+                                .content = .{ .codepoint = .{ .data = 0 } },
                                 .wide = .spacer_head,
                             };
 
@@ -1473,7 +1445,7 @@ const ReflowCursor = struct {
                         // Edge case, when resizing to 1 column, wide
                         // characters are just destroyed and replaced
                         // with empty narrow cells.
-                        self.page_cell.content = 0;
+                        self.page_cell.content.codepoint = .{ .data = 0 };
                         self.page_cell.wide = .narrow;
                         self.cursorForward();
 
@@ -1531,7 +1503,7 @@ const ReflowCursor = struct {
         //     self.y,
         //     self.x,
         //     self.page.size.cols,
-        //     cell.codepoint(),
+        //     cell.content.codepoint,
         //     cell.wide,
         //     self.page_cell.wide,
         // });
@@ -1593,7 +1565,7 @@ const ReflowCursor = struct {
 
                 // Unsafe builds we throw away grapheme data!
                 self.page_cell.content_tag = .codepoint;
-                self.page_cell.content = 0xFFFD;
+                self.page_cell.content = .{ .codepoint = .{ .data = 0xFFFD } };
             };
         }
 
@@ -3398,12 +3370,11 @@ inline fn createPageExt(
     serial: *u64,
     total_size: ?*usize,
 ) Allocator.Error!*List.Node {
-    var page = try pool.nodes.create(pool.alloc);
+    var page = try pool.nodes.create(pool.page_alloc);
     errdefer pool.nodes.destroy(page);
 
     const layout = Page.layout(cap);
     const pooled = layout.total_size <= std_size;
-    const page_alloc = pool.page_alloc;
 
     // It would be better to encode this into the Zig error handling
     // system but that is a big undertaking and we only have a few
@@ -3416,7 +3387,7 @@ inline fn createPageExt(
     const page_buf = if (pooled)
         try pool.pages.create(pool.page_alloc)
     else
-        try page_alloc.alignedAlloc(
+        try pageAllocator().alignedAlloc(
             u8,
             .fromByteUnits(std.heap.page_size_min),
             layout.total_size,
@@ -3424,7 +3395,7 @@ inline fn createPageExt(
     errdefer if (pooled)
         pool.pages.destroy(page_buf)
     else
-        page_alloc.free(page_buf);
+        pageAllocator().free(page_buf);
 
     // In runtime safety modes, allocators fill with 0xAA. On freestanding
     // (WASM), the WasmAllocator reuses freed slots without zeroing.
@@ -3474,8 +3445,7 @@ fn destroyNodeExt(
         @memset(page.memory, 0);
         pool.pages.destroy(@ptrCast(page.memory.ptr));
     } else {
-        const page_alloc = pool.page_alloc;
-        page_alloc.free(page.memory);
+        pageAllocator().free(page.memory);
     }
 
     pool.nodes.destroy(node);
@@ -6837,14 +6807,14 @@ test "PageList scroll clear" {
         const cell = s.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?;
         cell.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'A',
+            .content = .{ .codepoint = 'A' },
         };
     }
     {
         const cell = s.getCell(.{ .active = .{ .x = 0, .y = 1 } }).?;
         cell.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'A',
+            .content = .{ .codepoint = 'A' },
         };
     }
 
@@ -7451,7 +7421,7 @@ test "PageList increaseCapacity to increase styles" {
                 const rac = page.getRowAndCell(x, y);
                 rac.cell.* = .{
                     .content_tag = .codepoint,
-                    .content = @intCast(x),
+                    .content = .{ .codepoint = @intCast(x) },
                 };
             }
         }
@@ -7476,7 +7446,7 @@ test "PageList increaseCapacity to increase styles" {
                 const rac = page.getRowAndCell(x, y);
                 try testing.expectEqual(
                     @as(u21, @intCast(x)),
-                    rac.cell.codepoint(),
+                    rac.cell.content.codepoint,
                 );
             }
         }
@@ -7501,7 +7471,7 @@ test "PageList increaseCapacity to increase graphemes" {
                 const rac = page.getRowAndCell(x, y);
                 rac.cell.* = .{
                     .content_tag = .codepoint,
-                    .content = @intCast(x),
+                    .content = .{ .codepoint = @intCast(x) },
                 };
             }
         }
@@ -7520,7 +7490,7 @@ test "PageList increaseCapacity to increase graphemes" {
                 const rac = page.getRowAndCell(x, y);
                 try testing.expectEqual(
                     @as(u21, @intCast(x)),
-                    rac.cell.codepoint(),
+                    rac.cell.content.codepoint,
                 );
             }
         }
@@ -7545,7 +7515,7 @@ test "PageList increaseCapacity to increase hyperlinks" {
                 const rac = page.getRowAndCell(x, y);
                 rac.cell.* = .{
                     .content_tag = .codepoint,
-                    .content = @intCast(x),
+                    .content = .{ .codepoint = @intCast(x) },
                 };
             }
         }
@@ -7564,7 +7534,7 @@ test "PageList increaseCapacity to increase hyperlinks" {
                 const rac = page.getRowAndCell(x, y);
                 try testing.expectEqual(
                     @as(u21, @intCast(x)),
-                    rac.cell.codepoint(),
+                    rac.cell.content.codepoint,
                 );
             }
         }
@@ -7589,7 +7559,7 @@ test "PageList increaseCapacity to increase string_bytes" {
                 const rac = page.getRowAndCell(x, y);
                 rac.cell.* = .{
                     .content_tag = .codepoint,
-                    .content = @intCast(x),
+                    .content = .{ .codepoint = @intCast(x) },
                 };
             }
         }
@@ -7608,7 +7578,7 @@ test "PageList increaseCapacity to increase string_bytes" {
                 const rac = page.getRowAndCell(x, y);
                 try testing.expectEqual(
                     @as(u21, @intCast(x)),
-                    rac.cell.codepoint(),
+                    rac.cell.content.codepoint,
                 );
             }
         }
@@ -7953,7 +7923,7 @@ test "PageList cellIterator" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -8003,7 +7973,7 @@ test "PageList cellIterator reverse" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -8320,7 +8290,7 @@ test "PageList highlightSemanticContent prompt" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'A',
+                .content = .{ .codepoint = 'A' },
                 .semantic_content = .prompt,
             };
         }
@@ -8330,7 +8300,7 @@ test "PageList highlightSemanticContent prompt" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'B',
+                .content = .{ .codepoint = 'B' },
                 .semantic_content = .input,
             };
         }
@@ -8374,7 +8344,7 @@ test "PageList highlightSemanticContent prompt with output" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -8384,7 +8354,7 @@ test "PageList highlightSemanticContent prompt with output" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'l',
+                .content = .{ .codepoint = 'l' },
                 .semantic_content = .input,
             };
         }
@@ -8394,7 +8364,7 @@ test "PageList highlightSemanticContent prompt with output" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'o',
+                .content = .{ .codepoint = 'o' },
                 .semantic_content = .output,
             };
         }
@@ -8439,7 +8409,7 @@ test "PageList highlightSemanticContent prompt multiline" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -8450,7 +8420,7 @@ test "PageList highlightSemanticContent prompt multiline" {
             const cell = page.getRowAndCell(x, 6).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'c',
+                .content = .{ .codepoint = 'c' },
                 .semantic_content = .input,
             };
         }
@@ -8494,7 +8464,7 @@ test "PageList highlightSemanticContent prompt only" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -8538,7 +8508,7 @@ test "PageList highlightSemanticContent prompt to end of screen" {
             const cell = page.getRowAndCell(x, 15).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -8547,7 +8517,7 @@ test "PageList highlightSemanticContent prompt to end of screen" {
             const cell = page.getRowAndCell(x, 15).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'c',
+                .content = .{ .codepoint = 'c' },
                 .semantic_content = .input,
             };
         }
@@ -8587,7 +8557,7 @@ test "PageList highlightSemanticContent input basic" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -8597,7 +8567,7 @@ test "PageList highlightSemanticContent input basic" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'l',
+                .content = .{ .codepoint = 'l' },
                 .semantic_content = .input,
             };
         }
@@ -8642,7 +8612,7 @@ test "PageList highlightSemanticContent input with output" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -8652,7 +8622,7 @@ test "PageList highlightSemanticContent input with output" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'c',
+                .content = .{ .codepoint = 'c' },
                 .semantic_content = .input,
             };
         }
@@ -8662,7 +8632,7 @@ test "PageList highlightSemanticContent input with output" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'o',
+                .content = .{ .codepoint = 'o' },
                 .semantic_content = .output,
             };
         }
@@ -8707,7 +8677,7 @@ test "PageList highlightSemanticContent input multiline with continuation" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -8717,7 +8687,7 @@ test "PageList highlightSemanticContent input multiline with continuation" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'c',
+                .content = .{ .codepoint = 'c' },
                 .semantic_content = .input,
             };
         }
@@ -8729,7 +8699,7 @@ test "PageList highlightSemanticContent input multiline with continuation" {
             const cell = page.getRowAndCell(x, 6).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '>',
+                .content = .{ .codepoint = '>' },
                 .semantic_content = .prompt,
             };
         }
@@ -8739,7 +8709,7 @@ test "PageList highlightSemanticContent input multiline with continuation" {
             const cell = page.getRowAndCell(x, 6).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'd',
+                .content = .{ .codepoint = 'd' },
                 .semantic_content = .input,
             };
         }
@@ -8784,7 +8754,7 @@ test "PageList highlightSemanticContent input no input returns null" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -8794,7 +8764,7 @@ test "PageList highlightSemanticContent input no input returns null" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'o',
+                .content = .{ .codepoint = 'o' },
                 .semantic_content = .output,
             };
         }
@@ -8831,7 +8801,7 @@ test "PageList highlightSemanticContent input to end of screen" {
             const cell = page.getRowAndCell(x, 15).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -8840,7 +8810,7 @@ test "PageList highlightSemanticContent input to end of screen" {
             const cell = page.getRowAndCell(x, 15).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'c',
+                .content = .{ .codepoint = 'c' },
                 .semantic_content = .input,
             };
         }
@@ -8880,7 +8850,7 @@ test "PageList highlightSemanticContent input prompt only returns null" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -8927,7 +8897,7 @@ test "PageList highlightSemanticContent output basic" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -8937,7 +8907,7 @@ test "PageList highlightSemanticContent output basic" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'l',
+                .content = .{ .codepoint = 'l' },
                 .semantic_content = .input,
             };
         }
@@ -8947,7 +8917,7 @@ test "PageList highlightSemanticContent output basic" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'o',
+                .content = .{ .codepoint = 'o' },
                 .semantic_content = .output,
             };
         }
@@ -8998,7 +8968,7 @@ test "PageList highlightSemanticContent output multiline" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -9008,7 +8978,7 @@ test "PageList highlightSemanticContent output multiline" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'l',
+                .content = .{ .codepoint = 'l' },
                 .semantic_content = .input,
             };
         }
@@ -9018,7 +8988,7 @@ test "PageList highlightSemanticContent output multiline" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'o',
+                .content = .{ .codepoint = 'o' },
                 .semantic_content = .output,
             };
         }
@@ -9029,7 +8999,7 @@ test "PageList highlightSemanticContent output multiline" {
             const cell = page.getRowAndCell(x, 6).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'o',
+                .content = .{ .codepoint = 'o' },
                 .semantic_content = .output,
             };
         }
@@ -9040,7 +9010,7 @@ test "PageList highlightSemanticContent output multiline" {
             const cell = page.getRowAndCell(x, 7).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'o',
+                .content = .{ .codepoint = 'o' },
                 .semantic_content = .output,
             };
         }
@@ -9089,7 +9059,7 @@ test "PageList highlightSemanticContent output stops at next prompt" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -9099,7 +9069,7 @@ test "PageList highlightSemanticContent output stops at next prompt" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'l',
+                .content = .{ .codepoint = 'l' },
                 .semantic_content = .input,
             };
         }
@@ -9109,7 +9079,7 @@ test "PageList highlightSemanticContent output stops at next prompt" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'o',
+                .content = .{ .codepoint = 'o' },
                 .semantic_content = .output,
             };
         }
@@ -9120,7 +9090,7 @@ test "PageList highlightSemanticContent output stops at next prompt" {
             const cell = page.getRowAndCell(x, 6).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'o',
+                .content = .{ .codepoint = 'o' },
                 .semantic_content = .output,
             };
         }
@@ -9129,7 +9099,7 @@ test "PageList highlightSemanticContent output stops at next prompt" {
             const cell = page.getRowAndCell(x, 6).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -9173,7 +9143,7 @@ test "PageList highlightSemanticContent output to end of screen" {
             const cell = page.getRowAndCell(x, 15).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -9182,7 +9152,7 @@ test "PageList highlightSemanticContent output to end of screen" {
             const cell = page.getRowAndCell(x, 15).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'c',
+                .content = .{ .codepoint = 'c' },
                 .semantic_content = .input,
             };
         }
@@ -9191,7 +9161,7 @@ test "PageList highlightSemanticContent output to end of screen" {
             const cell = page.getRowAndCell(x, 15).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'o',
+                .content = .{ .codepoint = 'o' },
                 .semantic_content = .output,
             };
         }
@@ -9202,7 +9172,7 @@ test "PageList highlightSemanticContent output to end of screen" {
             const cell = page.getRowAndCell(x, 16).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'o',
+                .content = .{ .codepoint = 'o' },
                 .semantic_content = .output,
             };
         }
@@ -9246,7 +9216,7 @@ test "PageList highlightSemanticContent output no output returns null" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -9256,7 +9226,7 @@ test "PageList highlightSemanticContent output no output returns null" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'c',
+                .content = .{ .codepoint = 'c' },
                 .semantic_content = .input,
             };
         }
@@ -9306,7 +9276,7 @@ test "PageList highlightSemanticContent output skips empty cells" {
             const cell = page.getRowAndCell(x, 5).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = '$',
+                .content = .{ .codepoint = '$' },
                 .semantic_content = .prompt,
             };
         }
@@ -9320,7 +9290,7 @@ test "PageList highlightSemanticContent output skips empty cells" {
             const cell = page.getRowAndCell(x, 6).cell;
             cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'l',
+                .content = .{ .codepoint = 'l' },
                 .semantic_content = .input,
             };
         }
@@ -9334,7 +9304,7 @@ test "PageList highlightSemanticContent output skips empty cells" {
                 const cell = page.getRowAndCell(x, y).cell;
                 cell.* = .{
                     .content_tag = .codepoint,
-                    .content = 'o',
+                    .content = .{ .codepoint = 'o' },
                     .semantic_content = .output,
                 };
             }
@@ -9615,7 +9585,7 @@ test "PageList erase a one-row active" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'A',
+            .content = .{ .codepoint = 'A' },
         };
     }
 
@@ -9625,7 +9595,7 @@ test "PageList erase a one-row active" {
     // The row should be empty
     {
         const get = s.getCell(.{ .active = .{ .x = 0, .y = 0 } }).?;
-        try testing.expectEqual(@as(u21, 0), get.cell.codepoint());
+        try testing.expectEqual(@as(u21, 0), get.cell.content.codepoint);
     }
 }
 
@@ -9871,7 +9841,7 @@ test "PageList clone partial trimmed left reclaims styles" {
             rac.row.styled = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'A',
+                .content = .{ .codepoint = 'A' },
                 .style_id = style_id,
             };
             page.styles.use(page.memory, style_id);
@@ -10097,7 +10067,7 @@ test "PageList resize (no reflow) less rows" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'A',
+            .content = .{ .codepoint = 'A' },
         };
     }
 
@@ -10131,7 +10101,7 @@ test "PageList resize (no reflow) one rows" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'A',
+            .content = .{ .codepoint = 'A' },
         };
     }
 
@@ -10165,7 +10135,7 @@ test "PageList resize (no reflow) less rows cursor on bottom" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = @intCast(y),
+            .content = .{ .codepoint = @intCast(y) },
         };
     }
 
@@ -10178,7 +10148,7 @@ test "PageList resize (no reflow) less rows cursor on bottom" {
             .x = cursor.x,
             .y = cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, 9), get.cell.codepoint());
+        try testing.expectEqual(@as(u21, 9), get.cell.content.codepoint);
     }
 
     // Resize
@@ -10217,7 +10187,7 @@ test "PageList resize (no reflow) less rows cursor in scrollback" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = @intCast(y),
+            .content = .{ .codepoint = @intCast(y) },
         };
     }
 
@@ -10230,7 +10200,7 @@ test "PageList resize (no reflow) less rows cursor in scrollback" {
             .x = cursor.x,
             .y = cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, 2), get.cell.codepoint());
+        try testing.expectEqual(@as(u21, 2), get.cell.content.codepoint);
     }
 
     // Resize
@@ -10268,7 +10238,7 @@ test "PageList resize (no reflow) less rows trims blank lines" {
         const rac = page.getRowAndCell(0, 0);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'A',
+            .content = .{ .codepoint = 'A' },
         };
     }
 
@@ -10277,7 +10247,7 @@ test "PageList resize (no reflow) less rows trims blank lines" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .bg_color_rgb,
-            .content = @bitCast(pagepkg.Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
+            .content = .{ .color_rgb = .{ .r = 0xFF, .g = 0, .b = 0 } },
         };
     }
 
@@ -10290,7 +10260,7 @@ test "PageList resize (no reflow) less rows trims blank lines" {
             .x = cursor.x,
             .y = cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, 'A'), get.cell.codepoint());
+        try testing.expectEqual(@as(u21, 'A'), get.cell.content.codepoint);
     }
 
     // Resize
@@ -10327,7 +10297,7 @@ test "PageList resize (no reflow) less rows trims blank lines cursor in blank li
         const rac = page.getRowAndCell(0, 0);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'A',
+            .content = .{ .codepoint = 'A' },
         };
     }
 
@@ -10336,7 +10306,7 @@ test "PageList resize (no reflow) less rows trims blank lines cursor in blank li
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .bg_color_rgb,
-            .content = @bitCast(pagepkg.Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
+            .content = .{ .color_rgb = .{ .r = 0xFF, .g = 0, .b = 0 } },
         };
     }
 
@@ -10377,7 +10347,7 @@ test "PageList resize (no reflow) less rows trims blank lines erases pages" {
         const rac = page.getRowAndCell(0, 0);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'A',
+            .content = .{ .codepoint = 'A' },
         };
     }
 
@@ -10403,7 +10373,7 @@ test "PageList resize (no reflow) more rows extends blank lines" {
         const rac = page.getRowAndCell(0, 0);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'A',
+            .content = .{ .codepoint = 'A' },
         };
     }
 
@@ -10412,7 +10382,7 @@ test "PageList resize (no reflow) more rows extends blank lines" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .bg_color_rgb,
-            .content = @bitCast(pagepkg.Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
+            .content = .{ .color_rgb = .{ .r = 0xFF, .g = 0, .b = 0 } },
         };
     }
 
@@ -10523,7 +10493,7 @@ test "PageList resize (no reflow) less cols clears graphemes" {
         const rac = page.getRowAndCell(9, 0);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'A',
+            .content = .{ .codepoint = 'A' },
         };
         try page.appendGrapheme(rac.row, rac.cell, 'A');
     }
@@ -10575,14 +10545,14 @@ test "PageList resize (no reflow) more cols with spacer head" {
             rac.row.wrap = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_head,
             };
         }
@@ -10590,7 +10560,7 @@ test "PageList resize (no reflow) more cols with spacer head" {
             const rac = page.getRowAndCell(0, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = '😀',
+                .content = .{ .codepoint = '😀' },
                 .wide = .wide,
             };
         }
@@ -10598,7 +10568,7 @@ test "PageList resize (no reflow) more cols with spacer head" {
             const rac = page.getRowAndCell(1, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_tail,
             };
         }
@@ -10615,18 +10585,18 @@ test "PageList resize (no reflow) more cols with spacer head" {
 
         {
             const rac = page.getRowAndCell(0, 0);
-            try testing.expectEqual(@as(u21, 'x'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
             // try testing.expect(!rac.row.wrap);
         }
         {
             const rac = page.getRowAndCell(1, 0);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(2, 0);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
         }
     }
@@ -10658,14 +10628,14 @@ test "PageList resize (no reflow) grow cols fast path with spacer head" {
             const rac = page.getRowAndCell(0, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
             const rac = page.getRowAndCell(4, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_head,
             };
             rac.row.wrap = true;
@@ -10676,7 +10646,7 @@ test "PageList resize (no reflow) grow cols fast path with spacer head" {
             const rac = page.getRowAndCell(4, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_head,
             };
             rac.row.wrap = true;
@@ -10906,7 +10876,7 @@ test "PageList resize (no reflow) more cols forces smaller cap" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'A',
+                .content = .{ .codepoint = 'A' },
             };
         }
     }
@@ -10922,7 +10892,7 @@ test "PageList resize (no reflow) more cols forces smaller cap" {
         const rac = offset.rowAndCell();
         const cells = offset.node.data.getCells(rac.row);
         try testing.expectEqual(@as(usize, cap2.cols), cells.len);
-        try testing.expectEqual(@as(u21, 'A'), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 'A'), cells[0].content.codepoint);
     }
 }
 
@@ -10941,7 +10911,7 @@ test "PageList resize (no reflow) more rows adds blank rows if cursor at bottom"
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = @intCast(y),
+            .content = .{ .codepoint = @intCast(y) },
         };
     }
 
@@ -10963,7 +10933,7 @@ test "PageList resize (no reflow) more rows adds blank rows if cursor at bottom"
             .x = original_cursor.x,
             .y = original_cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, 3), get.cell.codepoint());
+        try testing.expectEqual(@as(u21, 3), get.cell.content.codepoint);
     }
 
     // Resize
@@ -10995,7 +10965,7 @@ test "PageList resize (no reflow) more rows adds blank rows if cursor at bottom"
     for (0..3) |y| {
         const get = s.getCell(.{ .active = .{ .y = @intCast(y) } }).?;
         const expected: u21 = @intCast(y + 2);
-        try testing.expectEqual(expected, get.cell.codepoint());
+        try testing.expectEqual(expected, get.cell.content.codepoint);
     }
 }
 
@@ -11012,7 +10982,7 @@ test "PageList resize reflow more cols no wrapped rows" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'A',
+                .content = .{ .codepoint = 'A' },
             };
         }
     }
@@ -11027,7 +10997,7 @@ test "PageList resize reflow more cols no wrapped rows" {
         const rac = offset.rowAndCell();
         const cells = offset.node.data.getCells(rac.row);
         try testing.expectEqual(@as(usize, 10), cells.len);
-        try testing.expectEqual(@as(u21, 'A'), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 'A'), cells[0].content.codepoint);
     }
 }
 
@@ -11052,7 +11022,7 @@ test "PageList resize reflow more cols wrapped rows" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'A',
+                .content = .{ .codepoint = 'A' },
             };
         }
     }
@@ -11079,8 +11049,8 @@ test "PageList resize reflow more cols wrapped rows" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(!rac.row.wrap);
         try testing.expectEqual(@as(usize, 4), cells.len);
-        try testing.expectEqual(@as(u21, 'A'), cells[0].codepoint());
-        try testing.expectEqual(@as(u21, 'A'), cells[2].codepoint());
+        try testing.expectEqual(@as(u21, 'A'), cells[0].content.codepoint);
+        try testing.expectEqual(@as(u21, 'A'), cells[2].content.codepoint);
     }
 }
 
@@ -11106,7 +11076,7 @@ test "PageList resize reflow invalidates viewport offset cache" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'A',
+                .content = .{ .codepoint = 'A' },
             };
         }
     }
@@ -11167,7 +11137,7 @@ test "PageList resize reflow more cols creates multiple pages" {
             const rac = page.getRowAndCell(0, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'A',
+                .content = .{ .codepoint = 'A' },
             };
         }
     }
@@ -11231,7 +11201,7 @@ test "PageList resize reflow more cols wrap across page boundary" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11246,7 +11216,7 @@ test "PageList resize reflow more cols wrap across page boundary" {
             const rac = page2.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11321,10 +11291,10 @@ test "PageList resize reflow more cols wrap across page boundary" {
         try testing.expect(!row.wrap_continuation);
 
         const cells = p.cells(.all);
-        try testing.expectEqual(@as(u21, 0), cells[0].codepoint());
-        try testing.expectEqual(@as(u21, 1), cells[1].codepoint());
-        try testing.expectEqual(@as(u21, 0), cells[2].codepoint());
-        try testing.expectEqual(@as(u21, 1), cells[3].codepoint());
+        try testing.expectEqual(@as(u21, 0), cells[0].content.codepoint);
+        try testing.expectEqual(@as(u21, 1), cells[1].content.codepoint);
+        try testing.expectEqual(@as(u21, 0), cells[2].content.codepoint);
+        try testing.expectEqual(@as(u21, 1), cells[3].content.codepoint);
     }
 }
 
@@ -11362,7 +11332,7 @@ test "PageList resize reflow more cols wrap across page boundary cursor in secon
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11377,7 +11347,7 @@ test "PageList resize reflow more cols wrap across page boundary cursor in secon
             const rac = page2.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11407,10 +11377,10 @@ test "PageList resize reflow more cols wrap across page boundary cursor in secon
         try testing.expect(!row.wrap);
 
         const cells = p2.cells(.all);
-        try testing.expectEqual(@as(u21, 0), cells[0].codepoint());
-        try testing.expectEqual(@as(u21, 1), cells[1].codepoint());
-        try testing.expectEqual(@as(u21, 0), cells[2].codepoint());
-        try testing.expectEqual(@as(u21, 1), cells[3].codepoint());
+        try testing.expectEqual(@as(u21, 0), cells[0].content.codepoint);
+        try testing.expectEqual(@as(u21, 1), cells[1].content.codepoint);
+        try testing.expectEqual(@as(u21, 0), cells[2].content.codepoint);
+        try testing.expectEqual(@as(u21, 1), cells[3].content.codepoint);
     }
 }
 
@@ -11448,7 +11418,7 @@ test "PageList resize reflow less cols wrap across page boundary cursor in secon
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11463,7 +11433,7 @@ test "PageList resize reflow less cols wrap across page boundary cursor in secon
             const rac = page2.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11549,10 +11519,10 @@ test "PageList resize reflow less cols wrap across page boundary cursor in secon
         try testing.expect(!row.wrap_continuation);
 
         const cells = p2.cells(.all);
-        try testing.expectEqual(@as(u21, 0), cells[0].codepoint());
-        try testing.expectEqual(@as(u21, 1), cells[1].codepoint());
-        try testing.expectEqual(@as(u21, 2), cells[2].codepoint());
-        try testing.expectEqual(@as(u21, 3), cells[3].codepoint());
+        try testing.expectEqual(@as(u21, 0), cells[0].content.codepoint);
+        try testing.expectEqual(@as(u21, 1), cells[1].content.codepoint);
+        try testing.expectEqual(@as(u21, 2), cells[2].content.codepoint);
+        try testing.expectEqual(@as(u21, 3), cells[3].content.codepoint);
     }
     {
         // PAGE 0 ROW 7897, ACTIVE 5
@@ -11562,10 +11532,10 @@ test "PageList resize reflow less cols wrap across page boundary cursor in secon
         try testing.expect(row.wrap_continuation);
 
         const cells = p2.cells(.all);
-        try testing.expectEqual(@as(u21, 4), cells[0].codepoint());
-        try testing.expectEqual(@as(u21, 0), cells[1].codepoint());
-        try testing.expectEqual(@as(u21, 1), cells[2].codepoint());
-        try testing.expectEqual(@as(u21, 2), cells[3].codepoint());
+        try testing.expectEqual(@as(u21, 4), cells[0].content.codepoint);
+        try testing.expectEqual(@as(u21, 0), cells[1].content.codepoint);
+        try testing.expectEqual(@as(u21, 1), cells[2].content.codepoint);
+        try testing.expectEqual(@as(u21, 2), cells[3].content.codepoint);
     }
     {
         // PAGE 0 ROW 7898, ACTIVE 6
@@ -11575,8 +11545,8 @@ test "PageList resize reflow less cols wrap across page boundary cursor in secon
         try testing.expect(row.wrap_continuation);
 
         const cells = p2.cells(.all);
-        try testing.expectEqual(@as(u21, 3), cells[0].codepoint());
-        try testing.expectEqual(@as(u21, 4), cells[1].codepoint());
+        try testing.expectEqual(@as(u21, 3), cells[0].content.codepoint);
+        try testing.expectEqual(@as(u21, 4), cells[1].content.codepoint);
     }
     {
         // PAGE 0 ROW 7899, ACTIVE 7
@@ -11610,7 +11580,7 @@ test "PageList resize reflow more cols cursor in wrapped row" {
             const rac = page.getRowAndCell(x, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11623,7 +11593,7 @@ test "PageList resize reflow more cols cursor in wrapped row" {
             const rac = page.getRowAndCell(x, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11661,7 +11631,7 @@ test "PageList resize reflow more cols cursor in not wrapped row" {
             const rac = page.getRowAndCell(x, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11674,7 +11644,7 @@ test "PageList resize reflow more cols cursor in not wrapped row" {
             const rac = page.getRowAndCell(x, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11712,7 +11682,7 @@ test "PageList resize reflow more cols cursor in wrapped row that isn't unwrappe
             const rac = page.getRowAndCell(x, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11726,7 +11696,7 @@ test "PageList resize reflow more cols cursor in wrapped row that isn't unwrappe
             const rac = page.getRowAndCell(x, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11739,7 +11709,7 @@ test "PageList resize reflow more cols cursor in wrapped row that isn't unwrappe
             const rac = page.getRowAndCell(x, 2);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -11840,7 +11810,7 @@ test "PageList resize reflow exceeds hyperlink memory forcing capacity increase"
         rac.row.wrap = true;
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'X',
+            .content = .{ .codepoint = 'X' },
         };
         try page.setHyperlink(rac.row, rac.cell, id);
         try std.testing.expectError(
@@ -11864,7 +11834,7 @@ test "PageList resize reflow exceeds hyperlink memory forcing capacity increase"
         rac.row.wrap_continuation = true;
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'X',
+            .content = .{ .codepoint = 'X' },
         };
         try page.setHyperlink(rac.row, rac.cell, id);
         try std.testing.expectError(
@@ -11930,7 +11900,7 @@ test "PageList resize reflow exceeds grapheme memory forcing capacity increase" 
         rac.row.wrap = true;
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'X',
+            .content = .{ .codepoint = 'X' },
         };
         try page.setGraphemes(
             rac.row,
@@ -11963,7 +11933,7 @@ test "PageList resize reflow exceeds grapheme memory forcing capacity increase" 
         rac.row.wrap = true;
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'X',
+            .content = .{ .codepoint = 'X' },
         };
         try page.setGraphemes(
             rac.row,
@@ -12039,7 +12009,7 @@ test "PageList resize reflow exceeds style memory forcing capacity increase" {
             rac.row.styled = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'X',
+                .content = .{ .codepoint = 'X' },
                 .style_id = id,
             };
         }
@@ -12066,7 +12036,7 @@ test "PageList resize reflow exceeds style memory forcing capacity increase" {
             rac.row.styled = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'X',
+                .content = .{ .codepoint = 'X' },
                 .style_id = id,
             };
         }
@@ -12091,14 +12061,14 @@ test "PageList resize reflow more cols unwrap wide spacer head" {
             rac.row.wrap = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_head,
             };
         }
@@ -12107,7 +12077,7 @@ test "PageList resize reflow more cols unwrap wide spacer head" {
             rac.row.wrap_continuation = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = '😀',
+                .content = .{ .codepoint = '😀' },
                 .wide = .wide,
             };
         }
@@ -12115,7 +12085,7 @@ test "PageList resize reflow more cols unwrap wide spacer head" {
             const rac = page.getRowAndCell(1, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_tail,
             };
         }
@@ -12132,18 +12102,18 @@ test "PageList resize reflow more cols unwrap wide spacer head" {
 
         {
             const rac = page.getRowAndCell(0, 0);
-            try testing.expectEqual(@as(u21, 'x'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
             try testing.expect(!rac.row.wrap);
         }
         {
             const rac = page.getRowAndCell(1, 0);
-            try testing.expectEqual(@as(u21, '😀'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, '😀'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.wide, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(2, 0);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
         }
     }
@@ -12164,14 +12134,14 @@ test "PageList resize reflow more cols unwrap wide spacer head across two rows" 
             rac.row.wrap = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
@@ -12180,14 +12150,14 @@ test "PageList resize reflow more cols unwrap wide spacer head across two rows" 
             rac.row.wrap = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
             const rac = page.getRowAndCell(1, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_head,
             };
         }
@@ -12196,7 +12166,7 @@ test "PageList resize reflow more cols unwrap wide spacer head across two rows" 
             rac.row.wrap_continuation = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = '😀',
+                .content = .{ .codepoint = '😀' },
                 .wide = .wide,
             };
         }
@@ -12204,7 +12174,7 @@ test "PageList resize reflow more cols unwrap wide spacer head across two rows" 
             const rac = page.getRowAndCell(1, 2);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_tail,
             };
         }
@@ -12221,33 +12191,33 @@ test "PageList resize reflow more cols unwrap wide spacer head across two rows" 
 
         {
             const rac = page.getRowAndCell(0, 0);
-            try testing.expectEqual(@as(u21, 'x'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
             try testing.expect(rac.row.wrap);
         }
         {
             const rac = page.getRowAndCell(1, 0);
-            try testing.expectEqual(@as(u21, 'x'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(2, 0);
-            try testing.expectEqual(@as(u21, 'x'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(3, 0);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.spacer_head, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(0, 1);
-            try testing.expectEqual(@as(u21, '😀'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, '😀'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.wide, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(1, 1);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
         }
     }
@@ -12268,14 +12238,14 @@ test "PageList resize reflow more cols unwrap still requires wide spacer head" {
             rac.row.wrap = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
@@ -12283,7 +12253,7 @@ test "PageList resize reflow more cols unwrap still requires wide spacer head" {
             rac.row.wrap_continuation = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = '😀',
+                .content = .{ .codepoint = '😀' },
                 .wide = .wide,
             };
         }
@@ -12291,7 +12261,7 @@ test "PageList resize reflow more cols unwrap still requires wide spacer head" {
             const rac = page.getRowAndCell(1, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_tail,
             };
         }
@@ -12308,28 +12278,28 @@ test "PageList resize reflow more cols unwrap still requires wide spacer head" {
 
         {
             const rac = page.getRowAndCell(0, 0);
-            try testing.expectEqual(@as(u21, 'x'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
             try testing.expect(rac.row.wrap);
         }
         {
             const rac = page.getRowAndCell(1, 0);
-            try testing.expectEqual(@as(u21, 'x'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(2, 0);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.spacer_head, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(0, 1);
-            try testing.expectEqual(@as(u21, '😀'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, '😀'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.wide, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(1, 1);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
         }
     }
@@ -12351,7 +12321,7 @@ test "PageList resize reflow less cols no reflow preserves semantic prompt" {
             const rac = page.getRowAndCell(x, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -12444,7 +12414,7 @@ test "PageList resize reflow less cols no wrapped rows" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -12462,7 +12432,7 @@ test "PageList resize reflow less cols no wrapped rows" {
             const rac = offset_copy.rowAndCell();
             const cells = offset.node.data.getCells(rac.row);
             try testing.expectEqual(@as(usize, 5), cells.len);
-            try testing.expectEqual(@as(u21, @intCast(x)), cells[x].codepoint());
+            try testing.expectEqual(@as(u21, @intCast(x)), cells[x].content.codepoint);
         }
     }
 }
@@ -12480,7 +12450,7 @@ test "PageList resize reflow less cols wrapped rows" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -12507,7 +12477,7 @@ test "PageList resize reflow less cols wrapped rows" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 0), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 0), cells[0].content.codepoint);
     }
     {
         const offset = it.next().?;
@@ -12515,7 +12485,7 @@ test "PageList resize reflow less cols wrapped rows" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(!rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 2), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 2), cells[0].content.codepoint);
     }
     {
         // First row should be wrapped
@@ -12524,7 +12494,7 @@ test "PageList resize reflow less cols wrapped rows" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 0), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 0), cells[0].content.codepoint);
     }
     {
         const offset = it.next().?;
@@ -12532,7 +12502,7 @@ test "PageList resize reflow less cols wrapped rows" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(!rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 2), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 2), cells[0].content.codepoint);
     }
 }
 
@@ -12550,7 +12520,7 @@ test "PageList resize reflow less cols wrapped rows with graphemes" {
                 const rac = page.getRowAndCell(x, y);
                 rac.cell.* = .{
                     .content_tag = .codepoint,
-                    .content = @intCast(x),
+                    .content = .{ .codepoint = @intCast(x) },
                 };
             }
 
@@ -12583,7 +12553,7 @@ test "PageList resize reflow less cols wrapped rows with graphemes" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 0), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 0), cells[0].content.codepoint);
     }
     {
         const offset = it.next().?;
@@ -12592,7 +12562,7 @@ test "PageList resize reflow less cols wrapped rows with graphemes" {
         try testing.expect(!rac.row.wrap);
         try testing.expect(rac.row.grapheme);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 2), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 2), cells[0].content.codepoint);
 
         const cps = page.lookupGrapheme(rac.cell).?;
         try testing.expectEqual(@as(usize, 1), cps.len);
@@ -12605,7 +12575,7 @@ test "PageList resize reflow less cols wrapped rows with graphemes" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 0), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 0), cells[0].content.codepoint);
     }
     {
         const offset = it.next().?;
@@ -12614,7 +12584,7 @@ test "PageList resize reflow less cols wrapped rows with graphemes" {
         try testing.expect(!rac.row.wrap);
         try testing.expect(rac.row.grapheme);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 2), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 2), cells[0].content.codepoint);
 
         const cps = page.lookupGrapheme(rac.cell).?;
         try testing.expectEqual(@as(usize, 1), cps.len);
@@ -12635,7 +12605,7 @@ test "PageList resize reflow less cols cursor in wrapped row" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -12671,28 +12641,28 @@ test "PageList resize reflow less cols wraps spacer head" {
             rac.row.wrap = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
             const rac = page.getRowAndCell(2, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
             const rac = page.getRowAndCell(3, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_head,
             };
         }
@@ -12701,7 +12671,7 @@ test "PageList resize reflow less cols wraps spacer head" {
             rac.row.wrap_continuation = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = '😀',
+                .content = .{ .codepoint = '😀' },
                 .wide = .wide,
             };
         }
@@ -12709,7 +12679,7 @@ test "PageList resize reflow less cols wraps spacer head" {
             const rac = page.getRowAndCell(1, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_tail,
             };
         }
@@ -12726,28 +12696,28 @@ test "PageList resize reflow less cols wraps spacer head" {
 
         {
             const rac = page.getRowAndCell(0, 0);
-            try testing.expectEqual(@as(u21, 'x'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
             try testing.expect(rac.row.wrap);
         }
         {
             const rac = page.getRowAndCell(1, 0);
-            try testing.expectEqual(@as(u21, 'x'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(2, 0);
-            try testing.expectEqual(@as(u21, 'x'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(0, 1);
-            try testing.expectEqual(@as(u21, '😀'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, '😀'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.wide, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(1, 1);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
         }
     }
@@ -12765,7 +12735,7 @@ test "PageList resize reflow less cols cursor goes to scrollback" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -12796,7 +12766,7 @@ test "PageList resize reflow less cols cursor in unchanged row" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -12830,7 +12800,7 @@ test "PageList resize reflow less cols cursor in blank cell" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -12864,7 +12834,7 @@ test "PageList resize reflow less cols cursor in final blank cell" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -12898,7 +12868,7 @@ test "PageList resize reflow less cols cursor in wrapped blank cell" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -12932,7 +12902,7 @@ test "PageList resize reflow less cols blank lines" {
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -12950,7 +12920,7 @@ test "PageList resize reflow less cols blank lines" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 0), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 0), cells[0].content.codepoint);
     }
     {
         const offset = it.next().?;
@@ -12958,7 +12928,7 @@ test "PageList resize reflow less cols blank lines" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(!rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 2), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 2), cells[0].content.codepoint);
     }
 }
 
@@ -12975,7 +12945,7 @@ test "PageList resize reflow less cols blank lines between" {
             const rac = page.getRowAndCell(x, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -12984,7 +12954,7 @@ test "PageList resize reflow less cols blank lines between" {
             const rac = page.getRowAndCell(x, 2);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -13006,7 +12976,7 @@ test "PageList resize reflow less cols blank lines between" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 0), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 0), cells[0].content.codepoint);
     }
     {
         const offset = it.next().?;
@@ -13014,7 +12984,7 @@ test "PageList resize reflow less cols blank lines between" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(!rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 2), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 2), cells[0].content.codepoint);
     }
 }
 
@@ -13030,14 +13000,14 @@ test "PageList resize reflow less cols blank lines between no scrollback" {
         const rac = page.getRowAndCell(0, 0);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'A',
+            .content = .{ .codepoint = 'A' },
         };
     }
     {
         const rac = page.getRowAndCell(0, 2);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'C',
+            .content = .{ .codepoint = 'C' },
         };
     }
 
@@ -13053,13 +13023,13 @@ test "PageList resize reflow less cols blank lines between no scrollback" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(!rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 'A'), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 'A'), cells[0].content.codepoint);
     }
     {
         const offset = it.next().?;
         const rac = offset.rowAndCell();
         const cells = offset.node.data.getCells(rac.row);
-        try testing.expectEqual(@as(u21, 0), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 0), cells[0].content.codepoint);
     }
     {
         const offset = it.next().?;
@@ -13067,7 +13037,7 @@ test "PageList resize reflow less cols blank lines between no scrollback" {
         const cells = offset.node.data.getCells(rac.row);
         try testing.expect(!rac.row.wrap);
         try testing.expectEqual(@as(usize, 2), cells.len);
-        try testing.expectEqual(@as(u21, 'C'), cells[0].codepoint());
+        try testing.expectEqual(@as(u21, 'C'), cells[0].content.codepoint);
     }
 }
 
@@ -13084,7 +13054,7 @@ test "PageList resize reflow less cols cursor not on last line preserves locatio
             const rac = page.getRowAndCell(x, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
             };
         }
     }
@@ -13133,7 +13103,7 @@ test "PageList resize reflow less cols copy style" {
             const rac = page.getRowAndCell(x, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = @intCast(x),
+                .content = .{ .codepoint = @intCast(x) },
                 .style_id = style_id,
             };
             page.styles.use(page.memory, style_id);
@@ -13183,7 +13153,7 @@ test "PageList resize reflow less cols to eliminate a wide char" {
             const rac = page.getRowAndCell(0, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = '😀',
+                .content = .{ .codepoint = '😀' },
                 .wide = .wide,
             };
         }
@@ -13191,7 +13161,7 @@ test "PageList resize reflow less cols to eliminate a wide char" {
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_tail,
             };
         }
@@ -13208,7 +13178,7 @@ test "PageList resize reflow less cols to eliminate a wide char" {
 
         {
             const rac = page.getRowAndCell(0, 0);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
         }
     }
@@ -13228,14 +13198,14 @@ test "PageList resize reflow less cols to wrap a wide char" {
             const rac = page.getRowAndCell(0, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'x',
+                .content = .{ .codepoint = 'x' },
             };
         }
         {
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = '😀',
+                .content = .{ .codepoint = '😀' },
                 .wide = .wide,
             };
         }
@@ -13243,7 +13213,7 @@ test "PageList resize reflow less cols to wrap a wide char" {
             const rac = page.getRowAndCell(2, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_tail,
             };
         }
@@ -13260,23 +13230,23 @@ test "PageList resize reflow less cols to wrap a wide char" {
 
         {
             const rac = page.getRowAndCell(0, 0);
-            try testing.expectEqual(@as(u21, 'x'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 'x'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.narrow, rac.cell.wide);
             try testing.expect(rac.row.wrap);
         }
         {
             const rac = page.getRowAndCell(1, 0);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.spacer_head, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(0, 1);
-            try testing.expectEqual(@as(u21, '😀'), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, '😀'), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.wide, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(1, 1);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
         }
     }
@@ -13301,7 +13271,7 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
             const rac = page.getRowAndCell(0, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0x1F468, // First codepoint of the grapheme
+                .content = .{ .codepoint = 0x1F468 }, // First codepoint of the grapheme
                 .wide = .wide,
             };
             try page.setGraphemes(rac.row, rac.cell, &.{
@@ -13314,7 +13284,7 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_tail,
             };
         }
@@ -13323,7 +13293,7 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
             const rac = page.getRowAndCell(2, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0x1F468, // First codepoint of the grapheme
+                .content = .{ .codepoint = 0x1F468 }, // First codepoint of the grapheme
                 .wide = .wide,
             };
             try page.setGraphemes(rac.row, rac.cell, &.{
@@ -13336,7 +13306,7 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
             const rac = page.getRowAndCell(3, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 0,
+                .content = .{ .codepoint = 0 },
                 .wide = .spacer_tail,
             };
         }
@@ -13353,7 +13323,7 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
 
         {
             const rac = page.getRowAndCell(0, 0);
-            try testing.expectEqual(@as(u21, 0x1F468), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0x1F468), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.wide, rac.cell.wide);
 
             const cps = page.lookupGrapheme(rac.cell).?;
@@ -13370,18 +13340,18 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
         }
         {
             const rac = page.getRowAndCell(1, 0);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
         }
         {
             const rac = page.getRowAndCell(2, 0);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.spacer_head, rac.cell.wide);
         }
 
         {
             const rac = page.getRowAndCell(0, 0);
-            try testing.expectEqual(@as(u21, 0x1F468), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0x1F468), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.wide, rac.cell.wide);
 
             const cps = page.lookupGrapheme(rac.cell).?;
@@ -13395,7 +13365,7 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
         }
         {
             const rac = page.getRowAndCell(1, 1);
-            try testing.expectEqual(@as(u21, 0), rac.cell.codepoint());
+            try testing.expectEqual(@as(u21, 0), rac.cell.content.codepoint);
             try testing.expectEqual(pagepkg.Cell.Wide.spacer_tail, rac.cell.wide);
         }
     }
@@ -13419,7 +13389,7 @@ test "PageList resize reflow less cols copy kitty placeholder" {
             rac.row.kitty_virtual_placeholder = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = kitty.graphics.unicode.placeholder,
+                .content = .{ .codepoint = kitty.graphics.unicode.placeholder },
             };
         }
     }
@@ -13460,7 +13430,7 @@ test "PageList resize reflow more cols clears kitty placeholder" {
             rac.row.kitty_virtual_placeholder = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = kitty.graphics.unicode.placeholder,
+                .content = .{ .codepoint = kitty.graphics.unicode.placeholder },
             };
         }
     }
@@ -13503,7 +13473,7 @@ test "PageList resize reflow wrap moves kitty placeholder" {
             rac.row.kitty_virtual_placeholder = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = kitty.graphics.unicode.placeholder,
+                .content = .{ .codepoint = kitty.graphics.unicode.placeholder },
             };
         }
     }
@@ -13664,7 +13634,7 @@ test "PageList resize reflow grapheme map capacity exceeded" {
             const rac = page.getRowAndCell(0, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'A',
+                .content = .{ .codepoint = 'A' },
             };
             try page.appendGrapheme(rac.row, rac.cell, @as(u21, @intCast(0x0301)));
         }
@@ -13678,7 +13648,7 @@ test "PageList resize reflow grapheme map capacity exceeded" {
             const rac = page.getRowAndCell(0, y);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = 'B',
+                .content = .{ .codepoint = 'B' },
             };
             try page.appendGrapheme(rac.row, rac.cell, @as(u21, @intCast(0x0302)));
         }
@@ -13726,7 +13696,7 @@ test "PageList resize grow cols with unwrap fixes viewport pin" {
             for (0..s.cols) |x| {
                 page.getRowAndCell(x, y).cell.* = .{
                     .content_tag = .codepoint,
-                    .content = 'A',
+                    .content = .{ .codepoint = 'A' },
                 };
             }
         }
@@ -13932,7 +13902,7 @@ test "PageList resize (no reflow) more cols remaps pins in backfill path" {
     const marker: u21 = 'X';
     tracked.rowAndCell().cell.* = .{
         .content_tag = .codepoint,
-        .content = marker,
+        .content = .{ .codepoint = marker },
     };
 
     try s.resize(.{ .cols = new_cols, .reflow = false });
@@ -13952,7 +13922,7 @@ test "PageList resize (no reflow) more cols remaps pins in backfill path" {
     // Verify the pin still points to the cell with our marker content.
     const cell = tracked.rowAndCell().cell;
     try testing.expectEqual(.codepoint, cell.content_tag);
-    try testing.expectEqual(marker, cell.codepoint());
+    try testing.expectEqual(marker, cell.content.codepoint);
 }
 
 test "PageList compact std_size page returns null" {
@@ -14001,7 +13971,7 @@ test "PageList compact oversized page" {
                 const rac = page.getRowAndCell(x, y);
                 rac.cell.* = .{
                     .content_tag = .codepoint,
-                    .content = @intCast(x + y * s.cols),
+                    .content = .{ .codepoint = @intCast(x + y * s.cols) },
                 };
             }
         }
@@ -14055,7 +14025,7 @@ test "PageList compact oversized page" {
             const rac = page.getRowAndCell(x, y);
             try testing.expectEqual(
                 @as(u21, @intCast(x + y * s.cols)),
-                rac.cell.codepoint(),
+                rac.cell.content.codepoint,
             );
         }
     }
@@ -14103,7 +14073,7 @@ test "PageList split at middle row" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = @intCast(y),
+            .content = .{ .codepoint = @intCast(y) },
         };
     }
 
@@ -14126,13 +14096,13 @@ test "PageList split at middle row" {
     // Verify content in first page is preserved (rows 0-4 have codepoints 0-4)
     for (0..5) |y| {
         const rac = first_page.getRowAndCell(0, y);
-        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.codepoint());
+        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint);
     }
 
     // Verify content in second page (original rows 5-9, now at y=0-4)
     for (0..5) |y| {
         const rac = second_page.getRowAndCell(0, y);
-        try testing.expectEqual(@as(u21, @intCast(y + 5)), rac.cell.codepoint());
+        try testing.expectEqual(@as(u21, @intCast(y + 5)), rac.cell.content.codepoint);
     }
 }
 
@@ -14150,7 +14120,7 @@ test "PageList split at row 0 is no-op" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = @intCast(y),
+            .content = .{ .codepoint = @intCast(y) },
         };
     }
 
@@ -14166,7 +14136,7 @@ test "PageList split at row 0 is no-op" {
     try testing.expectEqual(@as(usize, 10), page.size.rows);
     for (0..10) |y| {
         const rac = page.getRowAndCell(0, y);
-        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.codepoint());
+        try testing.expectEqual(@as(u21, @intCast(y)), rac.cell.content.codepoint);
     }
 }
 
@@ -14184,7 +14154,7 @@ test "PageList split at last row" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = @intCast(y),
+            .content = .{ .codepoint = @intCast(y) },
         };
     }
 
@@ -14206,7 +14176,7 @@ test "PageList split at last row" {
 
     // Verify content in second page (original row 9, now at y=0)
     const rac = second_page.getRowAndCell(0, 0);
-    try testing.expectEqual(@as(u21, 9), rac.cell.codepoint());
+    try testing.expectEqual(@as(u21, 9), rac.cell.content.codepoint);
 }
 
 test "PageList split single row page returns OutOfSpace" {
@@ -14552,7 +14522,7 @@ test "PageList split preserves styled cells" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'S',
+            .content = .{ .codepoint = 'S' },
             .style_id = style_id,
         };
         rac.row.styled = true;
@@ -14577,7 +14547,7 @@ test "PageList split preserves styled cells" {
     // Verify styled cells are preserved in new page
     for (0..3) |y| {
         const rac = second_page.getRowAndCell(0, y);
-        try testing.expectEqual(@as(u21, 'S'), rac.cell.codepoint());
+        try testing.expectEqual(@as(u21, 'S'), rac.cell.content.codepoint);
         try testing.expect(rac.cell.style_id != 0);
 
         const got_style = second_page.styles.get(second_page.memory, rac.cell.style_id);
@@ -14600,7 +14570,7 @@ test "PageList split preserves grapheme clusters" {
         const rac = page.getRowAndCell(0, 6);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 0x1F468, // Man emoji
+            .content = .{ .codepoint = 0x1F468 }, // Man emoji
         };
         try page.setGraphemes(rac.row, rac.cell, &.{
             0x200D, // ZWJ
@@ -14624,7 +14594,7 @@ test "PageList split preserves grapheme clusters" {
     // Verify grapheme is preserved in new page (original row 6 is now row 1)
     {
         const rac = second_page.getRowAndCell(0, 1);
-        try testing.expectEqual(@as(u21, 0x1F468), rac.cell.codepoint());
+        try testing.expectEqual(@as(u21, 0x1F468), rac.cell.content.codepoint);
         try testing.expect(rac.row.grapheme);
 
         const cps = second_page.lookupGrapheme(rac.cell).?;
@@ -14652,7 +14622,7 @@ test "PageList split preserves hyperlinks" {
         const rac = page.getRowAndCell(0, 7);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = 'L',
+            .content = .{ .codepoint = 'L' },
         };
         try page.setHyperlink(rac.row, rac.cell, hyperlink_id);
     }
@@ -14673,7 +14643,7 @@ test "PageList split preserves hyperlinks" {
     // Verify hyperlink is preserved in new page (original row 7 is now row 2)
     {
         const rac = second_page.getRowAndCell(0, 2);
-        try testing.expectEqual(@as(u21, 'L'), rac.cell.codepoint());
+        try testing.expectEqual(@as(u21, 'L'), rac.cell.content.codepoint);
         try testing.expect(rac.cell.hyperlink);
 
         const link_id = second_page.lookupHyperlink(rac.cell).?;

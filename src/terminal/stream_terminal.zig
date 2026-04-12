@@ -113,8 +113,10 @@ pub const Handler = struct {
         self: *Handler,
         comptime action: Action.Tag,
         value: Action.Value(action),
-    ) !void {
-        try self.vtFallible(action, value);
+    ) void {
+        self.vtFallible(action, value) catch |err| {
+            log.warn("error handling VT action action={} err={}", .{ action, err });
+        };
     }
 
     inline fn vtFallible(
@@ -554,8 +556,8 @@ pub const Handler = struct {
         _ = op;
         if (requests.items.len == 0) return;
 
-        for (requests.items) |*req| {
-            switch (req.*) {
+        for (requests.items) |req| {
+            switch (req) {
                 .set => |set| {
                     switch (set.target) {
                         .palette => |i| {

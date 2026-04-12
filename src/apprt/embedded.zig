@@ -336,7 +336,6 @@ pub const App = struct {
     ) (Allocator.Error || std.posix.WriteError || apprt.ipc.Errors)!bool {
         switch (action) {
             .new_window => return false,
-            .toggle_quick_terminal => return false,
         }
     }
 };
@@ -372,7 +371,7 @@ pub const Platform = union(PlatformTag) {
 
     /// Initialize a Platform a tag and configuration from the C ABI.
     pub fn init(tag_int: c_int, c_platform: C) !Platform {
-        const tag = std.enums.fromInt(PlatformTag, tag_int) orelse return error.InvalidEnumValue;
+        const tag = try std.enums.fromInt(PlatformTag, tag_int);
         return switch (tag) {
             .macos => if (MacOS != void) macos: {
                 const config = c_platform.macos;
@@ -1467,8 +1466,8 @@ pub const CAPI = struct {
     /// if it were sent to the surface right now. The "right now"
     /// is important because things like trigger sequences are only
     /// valid until the next key event.
-    export fn ghostty_config_key_is_binding(
-        config: *Config,
+    export fn ghostty_app_key_is_binding(
+        app: *App,
         event: KeyEvent,
     ) bool {
         const core_event = event.keyEvent().core() orelse {
@@ -1476,7 +1475,7 @@ pub const CAPI = struct {
             return false;
         };
 
-        return config.keyEventIsBinding(core_event);
+        return app.core_app.keyEventIsBinding(app, core_event);
     }
 
     /// Notify the app that the keyboard was changed. This causes the
@@ -1894,7 +1893,7 @@ pub const CAPI = struct {
         const stage = std.enums.fromInt(
             input.MousePressureStage,
             stage_raw,
-        ) orelse {
+        ) catch {
             log.warn(
                 "invalid mouse pressure stage value={}",
                 .{stage_raw},

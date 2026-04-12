@@ -573,7 +573,10 @@ pub const ImageStorage = struct {
                     _ = ctx;
 
                     // If they're usage matches, then its based on time.
-                    if (lhs.used == rhs.used) return switch (std.math.order(lhs.time.nanoseconds, rhs.time.nanoseconds)) {
+                    if (lhs.used == rhs.used) return switch (std.math.order(
+                        lhs.time.nanoseconds,
+                        rhs.time.nanoseconds,
+                    )) {
                         .lt => true,
                         .gt => false,
                         .eq => lhs.id < rhs.id,

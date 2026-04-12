@@ -83,7 +83,7 @@ pub const Command = union(Key) {
     /// 4, 5, 10-19, 104, 105, 110-119
     color_operation: struct {
         op: color.Operation,
-        requests: color.List = .empty,
+        requests: color.List = .{},
         terminator: Terminator = .st,
     },
 
@@ -232,9 +232,12 @@ pub const Command = union(Key) {
     };
 
     comptime {
-        // Ensure the size doesn't grow unexpectedly. If this fires, you
-        // likely added a new field — verify it's needed.
-        assert(@sizeOf(Command) <= 80);
+        // @compileLog(@sizeOf(Command));
+        assert(@sizeOf(Command) == switch (@sizeOf(usize)) {
+            4 => 36,
+            8 => 48,
+            else => unreachable,
+        });
     }
 };
 

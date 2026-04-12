@@ -941,7 +941,7 @@ pub const PageFormatter = struct {
                 // Setup our div. We use a buffer here that should always
                 // fit the stuff we need, in order to make counting bytes easier.
                 var buf: [1024]u8 = undefined;
-                var buf_writer = std.Io.Writer.fixed(&buf);
+                var buf_writer: std.Io.Writer = .fixed(&buf);
 
                 // Monospace and whitespace preserving
                 buf_writer.writeAll("<div style=\"font-family: monospace; white-space: pre;") catch return error.WriteFailed;
@@ -969,8 +969,8 @@ pub const PageFormatter = struct {
 
             .vt => {
                 // OSC 10 sets foreground color, OSC 11 sets background color
-                var buf: [512]u8 = undefined;
-                var buf_writer = std.Io.Writer.fixed(&buf);
+                var buf: [1024]u8 = undefined;
+                var buf_writer: std.Io.Writer = .fixed(&buf);
                 if (self.opts.foreground) |fg| {
                     buf_writer.print(
                         "\x1b]10;rgb:{x:0>2}/{x:0>2}/{x:0>2}\x1b\\",
@@ -1373,7 +1373,7 @@ pub const PageFormatter = struct {
             return;
         }
 
-        try self.writeCodepointWithReplacement(writer, cell.codepoint());
+        try self.writeCodepointWithReplacement(writer, cell.content.codepoint.data);
         if (comptime tag == .codepoint_grapheme) {
             for (self.page.lookupGrapheme(cell).?) |cp| {
                 try self.writeCodepointWithReplacement(writer, cp);
@@ -1473,16 +1473,16 @@ pub const PageFormatter = struct {
 
             .bg_color_palette => .{
                 .bg_color = .{
-                    .palette = cell.colorPalette(),
+                    .palette = cell.content.color_palette.data,
                 },
             },
 
             .bg_color_rgb => .{
                 .bg_color = .{
                     .rgb = .{
-                        .r = cell.colorRgb().r,
-                        .g = cell.colorRgb().g,
-                        .b = cell.colorRgb().b,
+                        .r = cell.content.color_rgb.r,
+                        .g = cell.content.color_rgb.g,
+                        .b = cell.content.color_rgb.b,
                     },
                 },
             },
@@ -5284,12 +5284,12 @@ test "TerminalFormatter html with palette" {
     const output = builder.writer.buffered();
 
     // Verify palette CSS variables are emitted
-    try testing.expect(std.mem.find(u8, output, "<style>:root{") != null);
-    try testing.expect(std.mem.find(u8, output, "--vt-palette-0: #123456;") != null);
-    try testing.expect(std.mem.find(u8, output, "--vt-palette-1: #abcdef;") != null);
-    try testing.expect(std.mem.find(u8, output, "--vt-palette-255: #ff00ff;") != null);
-    try testing.expect(std.mem.find(u8, output, "}</style>") != null);
-    try testing.expect(std.mem.find(u8, output, "test") != null);
+    try testing.expect(std.mem.indexOf(u8, output, "<style>:root{") != null);
+    try testing.expect(std.mem.indexOf(u8, output, "--vt-palette-0: #123456;") != null);
+    try testing.expect(std.mem.indexOf(u8, output, "--vt-palette-1: #abcdef;") != null);
+    try testing.expect(std.mem.indexOf(u8, output, "--vt-palette-255: #ff00ff;") != null);
+    try testing.expect(std.mem.indexOf(u8, output, "}</style>") != null);
+    try testing.expect(std.mem.indexOf(u8, output, "test") != null);
 }
 
 test "Page html with background and foreground colors" {
@@ -6043,15 +6043,15 @@ test "Page VT background color on trailing blank cells" {
     // The red background should appear BEFORE the newline, not after.
 
     // Find position of CRLF
-    const crlf_pos = std.mem.find(u8, output, "\r\n") orelse {
+    const crlf_pos = std.mem.indexOf(u8, output, "\r\n") orelse {
         // No CRLF found, fail the test
         return error.TestUnexpectedResult;
     };
 
     // Check that red background (48;5;1) appears BEFORE the newline (on line 1)
     const line1 = output[0..crlf_pos];
-    const has_red_bg_line1 = std.mem.find(u8, line1, "\x1b[41m") != null or
-        std.mem.find(u8, line1, "\x1b[48;5;1m") != null;
+    const has_red_bg_line1 = std.mem.indexOf(u8, line1, "\x1b[41m") != null or
+        std.mem.indexOf(u8, line1, "\x1b[48;5;1m") != null;
 
     // This should be true but currently fails due to the bug
     try testing.expect(has_red_bg_line1);
@@ -6269,7 +6269,7 @@ test "Page HTML hyperlink point map maps closing to previous cell" {
     try testing.expectEqual(expected_output.len, point_map.items.len);
 
     // The </a> closing tag bytes should all map to the last cell of the link
-    const closing_idx = comptime std.mem.find(u8, expected_output, "</a>").?;
+    const closing_idx = comptime std.mem.indexOf(u8, expected_output, "</a>").?;
     const expected_coord = point_map.items[closing_idx - 1];
     for (closing_idx..closing_idx + "</a>".len) |i| {
         try testing.expectEqual(expected_coord, point_map.items[i]);

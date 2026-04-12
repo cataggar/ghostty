@@ -19,7 +19,6 @@ const size_report = @import("../size_report.zig");
 const cell_c = @import("cell.zig");
 const row_c = @import("row.zig");
 const grid_ref_c = @import("grid_ref.zig");
-const grid_ref_tracked_c = @import("grid_ref_tracked.zig");
 const style_c = @import("style.zig");
 const color = @import("../color.zig");
 const Result = @import("result.zig").Result;
@@ -253,11 +252,16 @@ fn new_(
     errdefer alloc.destroy(wrapper);
 
     // Setup our terminal
-    t.* = try .init(alloc, .{
-        .cols = opts.cols,
-        .rows = opts.rows,
-        .max_scrollback = opts.max_scrollback,
-    });
+    t.* = try .init(
+        alloc,
+        std.Io.Threaded.global_single_threaded.io(),
+        std.process.Environ.empty, // FIXME: How do we smuggle the C environ state in here??
+        .{
+            .cols = opts.cols,
+            .rows = opts.rows,
+            .max_scrollback = opts.max_scrollback,
+        },
+    );
     errdefer t.deinit(alloc);
 
     // Setup our stream with trampolines always installed so that
@@ -346,10 +350,10 @@ pub fn set(
     value: ?*const anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(Option, @intFromEnum(option)) == null) {
+        _ = std.enums.fromInt(Option, @intFromEnum(option)) orelse {
             log.warn("terminal_set invalid option value={d}", .{@intFromEnum(option)});
             return .invalid_value;
-        }
+        };
     }
 
     const wrapper = terminal_ orelse return .invalid_value;
@@ -614,10 +618,10 @@ pub fn get(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(TerminalData, @intFromEnum(data)) == null) {
+        _ = std.enums.fromInt(TerminalData, @intFromEnum(data)) orelse {
             log.warn("terminal_get invalid data value={d}", .{@intFromEnum(data)});
             return .invalid_value;
-        }
+        };
     }
 
     return switch (data) {
@@ -724,41 +728,15 @@ pub fn grid_ref(
     out_ref: ?*grid_ref_c.CGridRef,
 ) callconv(lib.calling_conv) Result {
     const t: *ZigTerminal = (terminal_ orelse return .invalid_value).terminal;
-    const zig_pt: point.Point = .fromC(pt);
+    const zig_pt: point.Point = switch (pt.tag) {
+        .active => .{ .active = pt.value.active },
+        .viewport => .{ .viewport = pt.value.viewport },
+        .screen => .{ .screen = pt.value.screen },
+        .history => .{ .history = pt.value.history },
+    };
     const p = t.screens.active.pages.pin(zig_pt) orelse
         return .invalid_value;
     if (out_ref) |out| out.* = grid_ref_c.CGridRef.fromPin(p);
-    return .success;
-}
-
-pub fn grid_ref_track(
-    terminal_: Terminal,
-    pt: point.Point.C,
-    out_ref: ?*grid_ref_tracked_c.CTrackedGridRef,
-) callconv(lib.calling_conv) Result {
-    const wrapper = terminal_ orelse return .invalid_value;
-    const out = out_ref orelse return .invalid_value;
-    out.* = null;
-
-    const t: *ZigTerminal = wrapper.terminal;
-    const list = &t.screens.active.pages;
-    const p = list.pin(.fromC(pt)) orelse return .invalid_value;
-    const tracked_pin = list.trackPin(p) catch return .out_of_memory;
-
-    const alloc = t.gpa();
-    const ref = alloc.create(grid_ref_tracked_c.TrackedGridRef) catch {
-        list.untrackPin(tracked_pin);
-        return .out_of_memory;
-    };
-    ref.* = .{
-        .alloc = alloc,
-        .terminal = wrapper,
-        .screen_key = t.screens.active_key,
-        .screen_generation = t.screens.generation(t.screens.active_key),
-        .pin = tracked_pin,
-    };
-
-    out.* = ref;
     return .success;
 }
 
@@ -1077,29 +1055,6 @@ test "vt_write split escape sequence" {
     defer testing.allocator.free(str);
     // If the escape sequence leaked, we'd see "[1mBold" as literal text.
     try testing.expectEqualStrings("Hello Bold", str);
-}
-
-test "vt_write split combining mark after base at right edge" {
-    var t: Terminal = null;
-    try testing.expectEqual(Result.success, new(
-        &lib.alloc.test_allocator,
-        &t,
-        .{
-            .cols = 2,
-            .rows = 2,
-            .max_scrollback = 0,
-        },
-    ));
-    defer free(t);
-
-    // Put "å" in the final column, then send its combining low line in a
-    // separate write so the mark arrives while the cursor has a pending wrap.
-    vt_write(t, "xå", 3);
-    vt_write(t, "\xcc\xb2", 2);
-
-    const str = try t.?.terminal.plainString(testing.allocator);
-    defer testing.allocator.free(str);
-    try testing.expectEqualStrings("xå̲", str);
 }
 
 test "get cols and rows" {
