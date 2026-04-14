@@ -18,11 +18,10 @@ pub const Feature = struct {
     value: u32,
 
     pub fn fromString(str: []const u8) ?Feature {
-        var reader: std.Io.Reader = .fixed(str);
-        return .fromReader(&reader);
+        return .fromReader(.fixed(str));
     }
 
-    /// Parse a single font feature setting from a std.Io.Reader, with a version
+    /// Parse a single font feature setting from a std.io.Reader, with a version
     /// of the syntax of HarfBuzz's font feature strings. Stops at end of stream
     /// or when a ',' is encountered.
     ///
@@ -65,7 +64,9 @@ pub const Feature = struct {
             // If we're fast-forwarding from an error we just wanna
             // stop at the first boundary and ignore all other bytes.
             .err => {
-                _ = reader.discardDelimiterInclusive(',') catch {};
+                reader.discardDelimiterExclusive(',') catch {};
+                // Discard the delimiter too
+                reader.takeByte(1) catch {};
                 return null;
             },
 
@@ -191,27 +192,23 @@ pub const Feature = struct {
     /// The string that this produces should be valid to parse.
     pub fn toString(self: *const Feature, buf: []u8) !void {
         var writer: std.Io.Writer = .fixed(buf);
-        try self.format("", .{}, &writer);
+        try self.format(&writer);
     }
 
     /// Formatter for logging
     pub fn format(
         self: Feature,
-        comptime layout: []const u8,
-        opts: std.fmt.FormatOptions,
         writer: *std.Io.Writer,
     ) !void {
-        _ = layout;
-        _ = opts;
         if (self.value <= 1) {
             // Format boolean options as "+tag" for on and "-tag" for off.
-            try std.fmt.format(writer, "{c}{s}", .{
+            try writer.print("{c}{s}", .{
                 "-+"[self.value],
                 self.tag,
             });
         } else {
             // Format non-boolean tags as "tag=value".
-            try std.fmt.format(writer, "{s}={d}", .{
+            try writer.print("{s}={d}", .{
                 self.tag,
                 self.value,
             });
@@ -244,12 +241,12 @@ pub const FeatureList = struct {
     ) !void {
         var reader: std.Io.Reader = .fixed(str);
         while (reader.seek < reader.end) {
-            const i = reader.seek;
+            const i = reader.pos;
             if (Feature.fromReader(&reader)) |feature| {
                 try self.features.append(alloc, feature);
             } else log.warn(
                 "failed to parse font feature setting: \"{s}\"",
-                .{reader.buffer[i..reader.seek]},
+                .{reader.data[i..reader.seek]},
             );
         }
     }
