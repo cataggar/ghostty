@@ -478,6 +478,7 @@ fn detectAppleSDK(b: *std.Build, target: std.Target) bool {
         b.graph.io,
         .{
             .target = &target,
+            .environ_map = &b.graph.environ_map,
             .verbose = false,
         },
     ) catch return false;
