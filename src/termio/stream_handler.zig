@@ -127,6 +127,10 @@ pub const StreamHandler = struct {
         self: *StreamHandler,
         msg: apprt.surface.Message,
     ) void {
+        // FIXME(apk2/ghostty-zig016): WIP zig-0.16 port references `io`
+        // here without it being a field of StreamHandler. Stub to allow
+        // analysis; this function isn't exercised from apk2 today.
+        const io: std.Io = undefined;
         // See messageWriter which has similar logic and explains why
         // we may have to do this.
         if (self.surface_mailbox.push(msg, .{ .instant = {} }) == 0) {
@@ -137,6 +141,8 @@ pub const StreamHandler = struct {
     }
 
     inline fn messageWriter(self: *StreamHandler, msg: termio.Message) void {
+        // FIXME(apk2/ghostty-zig016): see surfaceMessageWriter.
+        const io: std.Io = undefined;
         self.termio_mailbox.send(msg, self.renderer_state.mutex, io);
         self.termio_messaged = true;
     }
@@ -149,6 +155,8 @@ pub const StreamHandler = struct {
         self: *StreamHandler,
         msg: renderer.Message,
     ) void {
+        // FIXME(apk2/ghostty-zig016): see surfaceMessageWriter.
+        const io: std.Io = undefined;
         // See termio.Mailbox.send for more details on how this works.
 
         // Try instant first. If it works then we can return.

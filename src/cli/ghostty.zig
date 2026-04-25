@@ -169,23 +169,7 @@ pub const Action = enum {
             .@"crash-report" => try crash_report.run(alloc, io, env),
             .@"show-face" => try show_face.run(alloc, io, env),
             .boo => try boo.run(alloc, io, env),
-            .@"new-window" => try new_window.run(alloc, io, env),
-            .help => try help.run(alloc, io, args),
-            .@"list-fonts" => try list_fonts.run(alloc, io, args),
-            // .@"list-keybinds" => try list_keybinds.run(alloc, io, args),
-            // .@"list-themes" => try list_themes.run(alloc, io, args),
-            // .@"list-colors" => try list_colors.run(alloc, io, args),
-            .@"list-actions" => try list_actions.run(alloc, io, args),
-            .@"ssh-cache" => try ssh_cache.run(alloc, io, env, args),
-            .@"edit-config" => try edit_config.run(alloc, io, env, args),
-            .@"show-config" => try show_config.run(alloc, io, env, args),
-            .@"explain-config" => try explain_config.run(alloc, io, env, args),
-            .@"validate-config" => try validate_config.run(alloc, io, env, args),
-            .@"crash-report" => try crash_report.run(alloc, io, args),
-            // .@"boo" => try boo.run(alloc, io, args),
-            .@"show-face" => try show_face.run(alloc, io, env, args),
             .@"new-window" => try new_window.run(alloc, io, env, args),
->>>>>>> conflict 1 of 1 ends
         };
     }
 

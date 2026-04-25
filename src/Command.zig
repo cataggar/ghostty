@@ -158,6 +158,7 @@ pub const RtPostForkInfo = if (@hasDecl(apprt.runtime, "post_fork")) apprt.runti
 ///
 /// After this is successful, self.pid is available.
 pub fn start(self: *Command, alloc: Allocator, io: std.Io) !void {
+    _ = io;
     // Use an arena allocator for the temporary allocations we need in this func.
     // IMPORTANT: do all allocation prior to the fork(). I believe it is undefined
     // behavior if you malloc between fork and exec. The source of the Zig

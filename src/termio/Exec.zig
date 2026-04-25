@@ -326,6 +326,8 @@ fn termiosTimer(
     _: *xev.Completion,
     r: xev.Timer.RunError!void,
 ) xev.CallbackAction {
+    // FIXME(apk2/ghostty-zig016): see Subprocess.init for context.
+    const io: std.Io = undefined;
     // log.debug("termios timer fired", .{});
 
     // This should never happen because we guard starting our
@@ -620,6 +622,12 @@ const Subprocess = struct {
     /// Initialize the subprocess. This will NOT start it, this only sets
     /// up the internal state necessary to start it later.
     pub fn init(gpa: Allocator, cfg: Config) !Subprocess {
+        // FIXME(apk2/ghostty-zig016): the WIP zig-0.16 port of ghostty
+        // references `io` and `global_state` here without plumbing them
+        // through. Stub both so the file analyzes; this function is not
+        // yet exercised from apk2's lib_vt.zig consumption path.
+        const io: std.Io = undefined;
+        const global_state: struct { environ_map: std.process.Environ.Map } = undefined;
         // We have a lot of maybe-allocations that all share the same lifetime
         // so use an arena so we don't end up in an accounting nightmare.
         var arena = std.heap.ArenaAllocator.init(gpa);
@@ -896,6 +904,10 @@ const Subprocess = struct {
         read: Pty.Fd,
         write: Pty.Fd,
     } {
+        // FIXME(apk2/ghostty-zig016): WIP zig-0.16 port references `io`
+        // and `global_state` here without plumbing. Stub both; this code
+        // path is not exercised from apk2's lib_vt.zig consumption.
+        const io: std.Io = undefined;
         assert(self.pty == null and self.process == null);
 
         // This function is funny because on POSIX systems it can

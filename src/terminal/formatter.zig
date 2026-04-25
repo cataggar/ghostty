@@ -97,7 +97,7 @@ pub const Options = struct {
 
     /// Replace matching Unicode codepoints with some other values.
     /// This will use the last matching range found in the list.
-    codepoint_map: ?std.MultiArrayList(CodepointMap) = .{},
+    codepoint_map: ?std.MultiArrayList(CodepointMap) = .empty,
 
     /// Set a background and foreground color to use for the "screen".
     /// For styled formats, this will emit the proper sequences or styles.
@@ -5646,7 +5646,7 @@ test "Page codepoint_map single replacement" {
     const page = &pages.pages.last.?.data;
 
     // Replace 'o' with 'x'
-    var map: std.MultiArrayList(CodepointMap) = .{};
+    var map: std.MultiArrayList(CodepointMap) = .empty;
     defer map.deinit(alloc);
     try map.append(alloc, .{
         .range = .{ 'o', 'o' },
@@ -5705,7 +5705,7 @@ test "Page codepoint_map conflicting replacement prefers last" {
     const page = &pages.pages.last.?.data;
 
     // Replace 'o' with 'x', then with 'y' - should prefer last
-    var map: std.MultiArrayList(CodepointMap) = .{};
+    var map: std.MultiArrayList(CodepointMap) = .empty;
     defer map.deinit(alloc);
     try map.append(alloc, .{
         .range = .{ 'o', 'o' },
@@ -5747,7 +5747,7 @@ test "Page codepoint_map replace with string" {
     const page = &pages.pages.last.?.data;
 
     // Replace 'o' with a multi-byte string
-    var map: std.MultiArrayList(CodepointMap) = .{};
+    var map: std.MultiArrayList(CodepointMap) = .empty;
     defer map.deinit(alloc);
     try map.append(alloc, .{
         .range = .{ 'o', 'o' },
@@ -5803,7 +5803,7 @@ test "Page codepoint_map range replacement" {
     const page = &pages.pages.last.?.data;
 
     // Replace 'b' through 'e' with 'X'
-    var map: std.MultiArrayList(CodepointMap) = .{};
+    var map: std.MultiArrayList(CodepointMap) = .empty;
     defer map.deinit(alloc);
     try map.append(alloc, .{
         .range = .{ 'b', 'e' },
@@ -5841,7 +5841,7 @@ test "Page codepoint_map multiple ranges" {
     const page = &pages.pages.last.?.data;
 
     // Replace 'a'-'m' with 'A' and 'n'-'z' with 'Z'
-    var map: std.MultiArrayList(CodepointMap) = .{};
+    var map: std.MultiArrayList(CodepointMap) = .empty;
     defer map.deinit(alloc);
     try map.append(alloc, .{
         .range = .{ 'a', 'm' },
@@ -5885,7 +5885,7 @@ test "Page codepoint_map unicode replacement" {
     const page = &pages.pages.last.?.data;
 
     // Replace lightning bolt with fire emoji
-    var map: std.MultiArrayList(CodepointMap) = .{};
+    var map: std.MultiArrayList(CodepointMap) = .empty;
     defer map.deinit(alloc);
     try map.append(alloc, .{
         .range = .{ '⚡', '⚡' },
@@ -5950,7 +5950,7 @@ test "Page codepoint_map with styled formats" {
     const page = &pages.pages.last.?.data;
 
     // Replace 'e' with 'X' in styled text
-    var map: std.MultiArrayList(CodepointMap) = .{};
+    var map: std.MultiArrayList(CodepointMap) = .empty;
     defer map.deinit(alloc);
     try map.append(alloc, .{
         .range = .{ 'e', 'e' },
@@ -5991,7 +5991,7 @@ test "Page codepoint_map empty map" {
     const page = &pages.pages.last.?.data;
 
     // Empty map should not change anything
-    var map: std.MultiArrayList(CodepointMap) = .{};
+    var map: std.MultiArrayList(CodepointMap) = .empty;
     defer map.deinit(alloc);
 
     var opts: Options = .plain;

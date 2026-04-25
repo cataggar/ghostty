@@ -82,7 +82,7 @@ pub fn build(b: *std.Build) !void {
         "-fno-sanitize-trap=undefined",
     });
 
-    if (target.result.os.tag == .freebsd or target.result.abi == .musl) {
+    if (target.result.os.tag == .freebsd or target.result.abi == .musl or target.result.abi.isAndroid()) {
         try flags.append(b.allocator, "-fPIC");
     }
 
