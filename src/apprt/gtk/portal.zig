@@ -59,7 +59,7 @@ fn buildRequestPath(alloc: Allocator, unique_name: []const u8, token: usize) All
 
 /// Try and parse the token out of a request path.
 pub fn parseRequestPathToken(request_path: []const u8) ?usize {
-    const index = std.mem.lastIndexOfScalar(u8, request_path, '/') orelse return null;
+    const index = std.mem.rfindScalar(u8, request_path, '/') orelse return null;
     const token = request_path[index + 1 ..];
     return std.fmt.parseUnsigned(usize, token, 16) catch return null;
 }

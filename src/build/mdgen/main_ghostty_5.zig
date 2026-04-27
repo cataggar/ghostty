@@ -2,7 +2,7 @@ const std = @import("std");
 const gen = @import("mdgen.zig");
 
 pub fn main() !void {
-    var gpa: std.heap.GeneralPurposeAllocator(.{}) = .init;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     const alloc = gpa.allocator();
 
     var buffer: [1024]u8 = undefined;

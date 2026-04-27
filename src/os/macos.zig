@@ -159,19 +159,19 @@ test "cacheDir paths" {
     {
         const cache_path = try cacheDir(alloc, "");
         defer alloc.free(cache_path);
-        try testing.expect(std.mem.indexOf(u8, cache_path, "Caches") != null);
-        try testing.expect(std.mem.indexOf(u8, cache_path, build_config.bundle_id) != null);
+        try testing.expect(std.mem.find(u8, cache_path, "Caches") != null);
+        try testing.expect(std.mem.find(u8, cache_path, build_config.bundle_id) != null);
     }
 
     // Test with subdir
     {
         const cache_path = try cacheDir(alloc, "test");
         defer alloc.free(cache_path);
-        try testing.expect(std.mem.indexOf(u8, cache_path, "Caches") != null);
-        try testing.expect(std.mem.indexOf(u8, cache_path, build_config.bundle_id) != null);
+        try testing.expect(std.mem.find(u8, cache_path, "Caches") != null);
+        try testing.expect(std.mem.find(u8, cache_path, build_config.bundle_id) != null);
 
         const bundle_path = try std.fmt.allocPrint(alloc, "{s}/test", .{build_config.bundle_id});
         defer alloc.free(bundle_path);
-        try testing.expect(std.mem.indexOf(u8, cache_path, bundle_path) != null);
+        try testing.expect(std.mem.find(u8, cache_path, bundle_path) != null);
     }
 }

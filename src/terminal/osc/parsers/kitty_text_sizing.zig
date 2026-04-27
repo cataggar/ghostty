@@ -83,7 +83,7 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
     };
     const data = cap.trailing();
 
-    const payload_start = std.mem.indexOfScalar(u8, data, ';') orelse {
+    const payload_start = std.mem.findScalar(u8, data, ';') orelse {
         log.warn("missing semicolon before payload", .{});
         parser.state = .invalid;
         return null;

@@ -103,7 +103,7 @@ pub const Parser = struct {
             // based parser that parses the trigger fully, then yields the
             // action after. The loop below is a total mess.
             var offset: usize = 0;
-            while (std.mem.indexOfScalar(
+            while (std.mem.findScalar(
                 u8,
                 input[offset..],
                 '=',
@@ -152,7 +152,7 @@ pub const Parser = struct {
         var input: []const u8 = raw_input;
         while (true) {
             // Find the next prefix
-            const idx = std.mem.indexOf(u8, input, ":") orelse break;
+            const idx = std.mem.find(u8, input, ":") orelse break;
             const prefix = input[0..idx];
 
             // If the prefix is one of our flags then set it.
@@ -228,7 +228,7 @@ const SequenceIterator = struct {
     pub fn next(self: *SequenceIterator) Error!?Trigger {
         if (self.done()) return null;
         const rem = self.input[self.i..];
-        const idx = std.mem.indexOf(u8, rem, ">") orelse rem.len;
+        const idx = std.mem.find(u8, rem, ">") orelse rem.len;
         defer self.i += idx + 1;
         return try .parse(rem[0..idx]);
     }
@@ -1135,7 +1135,7 @@ pub const Action = union(enum) {
             // If we don't have a `,`, default to the plain format. This is
             // also very important for backwards compatibility before Ghostty
             // 1.3 which didn't support output formats.
-            const idx = std.mem.indexOfScalar(u8, param, ',') orelse return .{
+            const idx = std.mem.findScalar(u8, param, ',') orelse return .{
                 .action = try Binding.Action.parseEnum(
                     WriteScreen.Action,
                     param,
@@ -1254,7 +1254,7 @@ pub const Action = union(enum) {
         // Split our action by colon. A colon may not exist for some
         // actions so it is optional. The part preceding the colon is the
         // action name.
-        const colonIdx = std.mem.indexOf(u8, input, ":");
+        const colonIdx = std.mem.find(u8, input, ":");
         const action = input[0..(colonIdx orelse input.len)];
 
         // An action name is always required
@@ -1438,31 +1438,34 @@ pub const Action = union(enum) {
 
         const all_fields = @typeInfo(Action).@"union".fields;
 
-        // Find all fields that are app-scoped
+        // Find all fields that are scoped to `s`
         var i: usize = 0;
-        var union_fields: [all_fields.len]std.builtin.Type.UnionField = undefined;
-        var enum_fields: [all_fields.len]std.builtin.Type.EnumField = undefined;
+        var names: [all_fields.len][:0]const u8 = undefined;
+        var union_types: [all_fields.len]type = undefined;
+        var enum_values: [all_fields.len]comptime_int = undefined;
         for (all_fields) |field| {
             const action = @unionInit(Action, field.name, undefined);
             if (action.scope() == s) {
-                union_fields[i] = field;
-                enum_fields[i] = .{ .name = field.name, .value = i };
+                names[i] = field.name;
+                union_types[i] = field.type;
+                enum_values[i] = i;
                 i += 1;
             }
         }
 
         // Build our union
-        return @Type(.{ .@"union" = .{
-            .layout = .auto,
-            .tag_type = @Type(.{ .@"enum" = .{
-                .tag_type = std.math.IntFittingRange(0, i),
-                .fields = enum_fields[0..i],
-                .decls = &.{},
-                .is_exhaustive = true,
-            } }),
-            .fields = union_fields[0..i],
-            .decls = &.{},
-        } });
+        return @Union(
+            .auto,
+            @Enum(
+                std.math.IntFittingRange(0, i),
+                .exhaustive,
+                names[0..i],
+                enum_values[0..i],
+            ),
+            names[0..i],
+            union_types[0..i],
+            &@splat(.{}),
+        );
     }
 
     /// Returns the scoped version of this action. If the action is not
@@ -1708,7 +1711,7 @@ pub const Trigger = struct {
         var result: Trigger = .{};
         var rem: []const u8 = input;
         loop: while (rem.len > 0) {
-            const idx = std.mem.indexOfScalar(u8, rem, '+') orelse rem.len;
+            const idx = std.mem.findScalar(u8, rem, '+') orelse rem.len;
             const part = rem[0..idx];
             rem = if (idx >= rem.len) "" else rem[idx + 1 ..];
 

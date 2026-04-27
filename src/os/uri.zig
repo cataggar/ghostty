@@ -30,7 +30,7 @@ pub fn parse(text: []const u8, options: ParseOptions) ParseError!std.Uri {
 
         // We can assume that the initial Uri.parse already validated the
         // scheme, so we only need to find its bounds within the string.
-        const scheme_end = std.mem.indexOf(u8, text, "://") orelse {
+        const scheme_end = std.mem.find(u8, text, "://") orelse {
             return error.InvalidFormat;
         };
         const scheme = text[0..scheme_end];
@@ -40,7 +40,7 @@ pub fn parse(text: []const u8, options: ParseOptions) ParseError!std.Uri {
         // for this case because the resulting slice can be unambiguously
         // determined to be a MAC address (or not).
         const host_start = scheme_end + "://".len;
-        const host_end = std.mem.indexOfScalarPos(u8, text, host_start, '/') orelse text.len;
+        const host_end = std.mem.findScalarPos(u8, text, host_start, '/') orelse text.len;
         const mac_address = text[host_start..host_end];
         if (!isValidMacAddress(mac_address)) return error.InvalidMacAddress;
 

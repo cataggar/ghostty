@@ -6114,7 +6114,7 @@ fn completeClipboardPaste(
                 // If we're bracketed and the paste contains and ending
                 // bracket then something naughty might be going on and we
                 // never trust it.
-                if (std.mem.indexOf(u8, data, "\x1B[201~") != null) break :unsafe true;
+                if (std.mem.find(u8, data, "\x1B[201~") != null) break :unsafe true;
 
                 // If we are bracketed and configured to trust that then the
                 // paste is not unsafe.

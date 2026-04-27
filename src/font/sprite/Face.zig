@@ -88,7 +88,7 @@ const ranges: []const Range = ranges: {
             if (!@hasDecl(s, decl.name)) continue;
             if (!std.mem.startsWith(u8, decl.name, "draw")) continue;
 
-            const sep = std.mem.indexOfScalar(u8, decl.name, '_') orelse decl.name.len;
+            const sep = std.mem.findScalar(u8, decl.name, '_') orelse decl.name.len;
 
             const min = std.fmt.parseInt(u21, decl.name[4..sep], 16) catch unreachable;
 

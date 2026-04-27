@@ -620,7 +620,7 @@ pub const RGB = packed struct(u24) {
         i += 1;
 
         const r = r: {
-            const slice = if (std.mem.indexOfScalarPos(u8, value, i, '/')) |end|
+            const slice = if (std.mem.findScalarPos(u8, value, i, '/')) |end|
                 value[i..end]
             else {
                 @branchHint(.cold);
@@ -636,7 +636,7 @@ pub const RGB = packed struct(u24) {
         };
 
         const g = g: {
-            const slice = if (std.mem.indexOfScalarPos(u8, value, i, '/')) |end|
+            const slice = if (std.mem.findScalarPos(u8, value, i, '/')) |end|
                 value[i..end]
             else {
                 @branchHint(.cold);

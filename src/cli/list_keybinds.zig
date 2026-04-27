@@ -340,7 +340,7 @@ fn prettyPrint(alloc: Allocator, keybinds: Config.Keybinds) !u8 {
 
             const action = try std.fmt.allocPrint(alloc, "{f}", .{act});
             // If our action has an argument, we print the argument in a different color
-            if (std.mem.indexOfScalar(u8, action, ':')) |idx| {
+            if (std.mem.findScalar(u8, action, ':')) |idx| {
                 const print_result = win.print(&.{
                     .{ .text = action[0..idx] },
                     .{ .text = action[idx .. idx + 1], .style = .{ .dim = true } },

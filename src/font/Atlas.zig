@@ -652,7 +652,7 @@ test "writing data from a larger source" {
 
     // None of the `8`s from the source data outside of the
     // specified region should have made it on to the atlas.
-    try testing.expectEqual(null, std.mem.indexOfScalar(u8, atlas.data, 8));
+    try testing.expectEqual(null, std.mem.findScalar(u8, atlas.data, 8));
 }
 
 test "grow" {

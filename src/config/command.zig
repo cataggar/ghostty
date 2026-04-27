@@ -51,7 +51,7 @@ pub const Command = union(enum) {
         // If we have a `:` then we MIGHT have a prefix to specify what
         // tag we should use.
         const tag: std.meta.Tag(Self), const str: []const u8 = tag: {
-            if (std.mem.indexOfScalar(u8, trimmed, ':')) |idx| {
+            if (std.mem.findScalar(u8, trimmed, ':')) |idx| {
                 const prefix = trimmed[0..idx];
                 if (std.mem.eql(u8, prefix, "direct")) {
                     break :tag .{ .direct, trimmed[idx + 1 ..] };

@@ -100,46 +100,45 @@ pub const ModeState = struct {
 /// A packed struct of all the settable modes. This shouldn't
 /// be used directly but rather through the ModeState struct.
 pub const ModePacked = packed_struct: {
-    const StructField = std.builtin.Type.StructField;
-    var fields: [entries.len]StructField = undefined;
+    var names: [entries.len][:0]const u8 = undefined;
+    var types: [entries.len]type = undefined;
+    const Attr = struct { default_value_ptr: ?*const anyopaque = null };
+    var attrs: [entries.len]Attr = undefined;
     for (entries, 0..) |entry, i| {
-        fields[i] = .{
-            .name = entry.name,
-            .type = bool,
+        names[i] = entry.name;
+        types[i] = bool;
+        attrs[i] = .{
             .default_value_ptr = &entry.default,
-            .is_comptime = false,
-            .alignment = 0,
         };
     }
 
-    break :packed_struct @Type(.{ .@"struct" = .{
-        .layout = .@"packed",
-        .fields = &fields,
-        .decls = &.{},
-        .is_tuple = false,
-    } });
+    break :packed_struct @Struct(
+        .@"packed",
+        null,
+        &names,
+        &types,
+        &attrs,
+    );
 };
 
 /// An enum(u16) of the available modes. See entries for available values.
 pub const Mode = mode_enum: {
-    const EnumField = std.builtin.Type.EnumField;
-    var fields: [entries.len]EnumField = undefined;
+    var names: [entries.len][:0]const u8 = undefined;
+    var values: [entries.len]comptime_int = undefined;
     for (entries, 0..) |entry, i| {
-        fields[i] = .{
-            .name = entry.name,
-            .value = @as(ModeTag.Backing, @bitCast(ModeTag{
-                .value = entry.value,
-                .ansi = entry.ansi,
-            })),
-        };
+        names[i] = entry.name;
+        values[i] = @as(ModeTag.Backing, @bitCast(ModeTag{
+            .value = entry.value,
+            .ansi = entry.ansi,
+        }));
     }
 
-    break :mode_enum @Type(.{ .@"enum" = .{
-        .tag_type = ModeTag.Backing,
-        .fields = &fields,
-        .decls = &.{},
-        .is_exhaustive = true,
-    } });
+    break :mode_enum @Enum(
+        ModeTag.Backing,
+        .exhaustive,
+        &names,
+        &values,
+    );
 };
 
 /// The tag type for our enum is a u16 but we use a packed struct

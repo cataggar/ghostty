@@ -721,7 +721,7 @@ const Command = extern struct {
                 const pwd = surface.getPwd();
 
                 if (pwd) |p| {
-                    if (std.mem.indexOf(u8, title, p) == null) {
+                    if (std.mem.find(u8, title, p) == null) {
                         j.description = alloc.dupeZ(u8, p) catch null;
                     }
                 }
