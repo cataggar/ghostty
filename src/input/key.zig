@@ -352,22 +352,21 @@ pub const Key = enum(c_int) {
         )) |key| return key;
 
         // We need to convert FooBar to foo_bar
-        var fbs = std.io.fixedBufferStream(&result);
-        const w = fbs.writer();
+        var fbs: std.Io.Writer = .fixed(&result);
         for (code, 0..) |ch, i| switch (ch) {
-            'a'...'z' => w.writeByte(ch) catch return null,
+            'a'...'z' => fbs.writeByte(ch) catch return null,
 
             // Caps and numbers trigger underscores
             'A'...'Z', '0'...'9' => {
-                if (i > 0) w.writeByte('_') catch return null;
-                w.writeByte(std.ascii.toLower(ch)) catch return null;
+                if (i > 0) fbs.writeByte('_') catch return null;
+                fbs.writeByte(std.ascii.toLower(ch)) catch return null;
             },
 
             // We don't know of any key codes that aren't alphanumeric.
             else => return null,
         };
 
-        return std.meta.stringToEnum(Key, fbs.getWritten());
+        return std.meta.stringToEnum(Key, fbs.buffered());
     }
 
     /// Converts a Ghostty key enum value to a W3C key code.
@@ -379,24 +378,23 @@ pub const Key = enum(c_int) {
                 const name = @tagName(tag);
 
                 var buf: [128]u8 = undefined;
-                var fbs = std.io.fixedBufferStream(&buf);
-                const w = fbs.writer();
+                var fbs: std.Io.Writer = .fixed(&buf);
                 var i: usize = 0;
                 while (i < name.len) {
                     if (i == 0) {
-                        w.writeByte(std.ascii.toUpper(name[i])) catch unreachable;
+                        fbs.writeByte(std.ascii.toUpper(name[i])) catch unreachable;
                     } else if (name[i] == '_') {
                         i += 1;
-                        w.writeByte(std.ascii.toUpper(name[i])) catch unreachable;
+                        fbs.writeByte(std.ascii.toUpper(name[i])) catch unreachable;
                     } else {
-                        w.writeByte(name[i]) catch unreachable;
+                        fbs.writeByte(name[i]) catch unreachable;
                     }
 
                     i += 1;
                 }
 
                 const written = buf;
-                const result = written[0..fbs.getWritten().len];
+                const result = written[0..fbs.buffered().len];
                 break :w3c result;
             },
         };

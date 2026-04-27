@@ -246,10 +246,9 @@ pub const Glyf = struct {
         /// The lifetime of this struct, then, is the same as the
         /// lifetime of the data that is used to initialize it.
         pub fn init(data: []const u8) error{EndOfStream}!Entry {
-            var fbs = std.io.fixedBufferStream(data);
-            const reader = fbs.reader();
-            const header = try reader.readStructEndian(Header, .big);
-            return .{ .header = header, .data = data[fbs.pos..] };
+            var reader: std.Io.Reader = .fixed(data);
+            const header = try reader.takeStruct(Header, .big);
+            return .{ .header = header, .data = data[reader.seek..] };
         }
 
         /// Identifies what type (simple or composite) of entry this is.
@@ -299,8 +298,7 @@ pub const Glyf = struct {
         /// NOTE: Currently produces errors when given composite glyphs
         ///       or any glyphs that have hinting instructions included.
         pub fn size(self: Entry) SizeError!usize {
-            var fbs = std.io.fixedBufferStream(self.data);
-            const reader = fbs.reader();
+            var reader: std.Io.Reader = .fixed(self.data);
             switch (self.entryType()) {
                 // https://learn.microsoft.com/en-us/typography/opentype/spec/glyf#simple-glyph-description
                 .simple => {
@@ -329,7 +327,7 @@ pub const Glyf = struct {
                     // of each contour, in increasing numeric order.
                     var max_point_index: isize = -1;
                     for (0..num_contours) |_| {
-                        const index = try reader.readInt(sfnt.uint16, .big);
+                        const index = try reader.takeInt(sfnt.uint16, .big);
                         // The endpoints are supposed to monotonically increase.
                         if (index <= max_point_index) return error.EndPointsOutOfOrder;
                         max_point_index = index;
@@ -342,7 +340,7 @@ pub const Glyf = struct {
                     // If instructionLength is zero, no instructions
                     // are present for this glyph, and this field is
                     // followed directly by the flags field.
-                    const instructions_length = try reader.readInt(sfnt.uint16, .big);
+                    const instructions_length = try reader.takeInt(sfnt.uint16, .big);
 
                     // Since we don't have code that validates instruction
                     // byte code, we just reject all glyphs that contain any.
@@ -373,7 +371,7 @@ pub const Glyf = struct {
                     var x_coords_len: usize = 0;
                     var y_coords_len: usize = 0;
                     while (i <= max_point_index) : (i += 1) {
-                        const flag: SimpleFlags = @bitCast(try reader.readByte());
+                        const flag: SimpleFlags = @bitCast(try reader.takeByte());
 
                         // Determine how many bytes the x and y coordinates will
                         // be represented with in the corresponding arrays, add
@@ -393,7 +391,7 @@ pub const Glyf = struct {
                             // that count, and the x_coords_len and y_coords_len
                             // must be increased by the correct number of bytes
                             // as well.
-                            const repeat_count: usize = try reader.readByte();
+                            const repeat_count: usize = try reader.takeByte();
                             i += repeat_count;
                             x_coords_len += repeat_count * flag.xBytes();
                             y_coords_len += repeat_count * flag.yBytes();
@@ -415,7 +413,7 @@ pub const Glyf = struct {
                     // We determined the length of this section (in bytes)
                     // above while processing the flags, so that we can just
                     // skip that many bytes to validate this field.
-                    try reader.skipBytes(x_coords_len, .{});
+                    try reader.discardAll(x_coords_len);
 
                     // uint8 or int16 yCoordinates[variable]
                     //
@@ -426,7 +424,7 @@ pub const Glyf = struct {
                     // We determined the length of this section (in bytes)
                     // above while processing the flags, so that we can just
                     // skip that many bytes to validate this field.
-                    try reader.skipBytes(y_coords_len, .{});
+                    try reader.discardAll(y_coords_len);
                 },
 
                 .composite => {
@@ -441,7 +439,7 @@ pub const Glyf = struct {
             }
 
             // No issues found, the glyf entry is valid, return its length.
-            return @sizeOf(Header) + fbs.pos;
+            return @sizeOf(Header) + reader.seek;
         }
 
         /// Decode this simple glyph entry into an owned outline.
