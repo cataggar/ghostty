@@ -10277,7 +10277,7 @@ test "PageList resize (no reflow) less rows trims blank lines" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .bg_color_rgb,
-            .content = @bitCast(Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
+            .content = @bitCast(pagepkg.Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
         };
     }
 
@@ -10336,7 +10336,7 @@ test "PageList resize (no reflow) less rows trims blank lines cursor in blank li
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .bg_color_rgb,
-            .content = @bitCast(Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
+            .content = @bitCast(pagepkg.Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
         };
     }
 
@@ -10412,7 +10412,7 @@ test "PageList resize (no reflow) more rows extends blank lines" {
         const rac = page.getRowAndCell(0, y);
         rac.cell.* = .{
             .content_tag = .bg_color_rgb,
-            .content = @bitCast(Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
+            .content = @bitCast(pagepkg.Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
         };
     }
 

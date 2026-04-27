@@ -2912,8 +2912,7 @@ fn setGtkEnv(config: *const CoreConfig) error{NoSpaceLeft}!void {
 
     {
         var buf: [1024]u8 = undefined;
-        var fmt = std.io.fixedBufferStream(&buf);
-        const writer = fmt.writer();
+        var writer: std.Io.Writer = .fixed(&buf);
         var first: bool = true;
         inline for (@typeInfo(@TypeOf(gdk_debug)).@"struct".fields) |field| {
             if (@field(gdk_debug, field.name)) {
@@ -2923,15 +2922,14 @@ fn setGtkEnv(config: *const CoreConfig) error{NoSpaceLeft}!void {
             }
         }
         try writer.writeByte(0);
-        const value = fmt.getWritten();
+        const value = writer.buffered();
         log.warn("setting GDK_DEBUG={s}", .{value[0 .. value.len - 1]});
         _ = internal_os.setenv("GDK_DEBUG", value[0 .. value.len - 1 :0]);
     }
 
     {
         var buf: [1024]u8 = undefined;
-        var fmt = std.io.fixedBufferStream(&buf);
-        const writer = fmt.writer();
+        var writer: std.Io.Writer = .fixed(&buf);
         var first: bool = true;
         inline for (@typeInfo(@TypeOf(gdk_disable)).@"struct".fields) |field| {
             if (@field(gdk_disable, field.name)) {
@@ -2941,7 +2939,7 @@ fn setGtkEnv(config: *const CoreConfig) error{NoSpaceLeft}!void {
             }
         }
         try writer.writeByte(0);
-        const value = fmt.getWritten();
+        const value = writer.buffered();
         log.warn("setting GDK_DISABLE={s}", .{value[0 .. value.len - 1]});
         _ = internal_os.setenv("GDK_DISABLE", value[0 .. value.len - 1 :0]);
     }

@@ -706,12 +706,13 @@ test "image load: rgb, zlib compressed, direct, chunked" {
     defer loading.deinit(alloc);
 
     // Read our remaining chunks
-    var fbs = std.io.fixedBufferStream(data[1024..]);
+    var reader: std.Io.Reader = .fixed(data[1024..]);
     var buf: [1024]u8 = undefined;
-    while (fbs.reader().readAll(&buf)) |size| {
+    while (true) {
+        const size = try reader.readSliceShort(&buf);
         try loading.addData(alloc, buf[0..size]);
         if (size < buf.len) break;
-    } else |err| return err;
+    }
 
     // Complete
     var img = try loading.complete(alloc);
@@ -742,12 +743,13 @@ test "image load: rgb, zlib compressed, direct, chunked with zero initial chunk"
     defer loading.deinit(alloc);
 
     // Read our remaining chunks
-    var fbs = std.io.fixedBufferStream(data);
+    var reader: std.Io.Reader = .fixed(data);
     var buf: [1024]u8 = undefined;
-    while (fbs.reader().readAll(&buf)) |size| {
+    while (true) {
+        const size = try reader.readSliceShort(&buf);
         try loading.addData(alloc, buf[0..size]);
         if (size < buf.len) break;
-    } else |err| return err;
+    }
 
     // Complete
     var img = try loading.complete(alloc);
