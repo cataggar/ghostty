@@ -42,6 +42,10 @@ pub fn build(b: *std.Build) !void {
         if (target.result.os.tag != .windows) {
             try flags.append(b.allocator, "-DZ_HAVE_UNISTD_H");
         }
+        if (target.result.abi.isAndroid()) {
+            try flags.append(b.allocator, "-fPIC");
+            lib.root_module.pic = true;
+        }
         if (target.result.abi == .msvc) {
             try flags.appendSlice(b.allocator, &.{
                 "-D_CRT_SECURE_NO_DEPRECATE",
