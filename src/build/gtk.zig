@@ -14,11 +14,11 @@ pub fn targets(b: *std.Build) Targets {
     const output = b.runAllowFail(
         &.{ "pkg-config", "--variable=targets", "gtk4" },
         &code,
-        .Ignore,
+        .ignore,
     ) catch return .{};
 
-    const x11 = std.mem.indexOf(u8, output, "x11") != null;
-    const wayland = std.mem.indexOf(u8, output, "wayland") != null;
+    const x11 = std.mem.find(u8, output, "x11") != null;
+    const wayland = std.mem.find(u8, output, "wayland") != null;
 
     return .{
         .x11 = x11,

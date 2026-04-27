@@ -25,7 +25,7 @@ pub fn init(
                 .optimize = .ReleaseFast,
             }),
         });
-        exe.linkLibC();
+        exe.root_module.link_libc = true;
         _ = try deps.add(exe);
         try steps.append(b.allocator, exe);
     }
@@ -41,7 +41,7 @@ pub fn init(
                 .optimize = .ReleaseFast,
             }),
         });
-        exe.linkLibC();
+        exe.root_module.link_libc = true;
         _ = try deps.add(exe);
         try steps.append(b.allocator, exe);
     }

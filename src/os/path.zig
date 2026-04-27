@@ -1,27 +1,20 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
+const Io = std.Io;
 const testing = std.testing;
 
 /// Search for "cmd" in the PATH and return the absolute path. This will
 /// always allocate if there is a non-null result. The caller must free the
 /// resulting value.
-pub fn expand(alloc: Allocator, cmd: []const u8) !?[]u8 {
+pub fn expand(alloc: Allocator, io: Io, cmd: []const u8, path_env: ?[]const u8) !?[]u8 {
     // If the command already contains a slash, then we return it as-is
     // because it is assumed to be absolute or relative.
-    if (std.mem.indexOfScalar(u8, cmd, '/') != null) {
+    if (std.mem.findScalar(u8, cmd, '/') != null) {
         return try alloc.dupe(u8, cmd);
     }
 
-    const PATH = switch (builtin.os.tag) {
-        .windows => blk: {
-            const win_path = std.process.getenvW(std.unicode.utf8ToUtf16LeStringLiteral("PATH")) orelse return null;
-            const path = try std.unicode.utf16LeToUtf8Alloc(alloc, win_path);
-            break :blk path;
-        },
-        else => std.posix.getenvZ("PATH") orelse return null,
-    };
-    defer if (builtin.os.tag == .windows) alloc.free(PATH);
+    const PATH = path_env orelse return null;
 
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     var it = std.mem.tokenizeScalar(u8, PATH, std.fs.path.delimiter);
@@ -39,7 +32,8 @@ pub fn expand(alloc: Allocator, cmd: []const u8) !?[]u8 {
         const full_path = path_buf[0..path_len :0];
 
         // Stat it
-        const f = std.fs.cwd().openFile(
+        const f = Io.Dir.cwd().openFile(
+            io,
             full_path,
             .{},
         ) catch |err| switch (err) {
@@ -52,9 +46,9 @@ pub fn expand(alloc: Allocator, cmd: []const u8) !?[]u8 {
             },
             else => return err,
         };
-        defer f.close();
-        const stat = try f.stat();
-        if (stat.kind != .directory and isExecutable(stat.mode)) {
+        defer f.close(io);
+        const stat = try f.stat(io);
+        if (stat.kind != .directory and isExecutable(stat.permissions)) {
             return try alloc.dupe(u8, full_path);
         }
     }
@@ -64,9 +58,9 @@ pub fn expand(alloc: Allocator, cmd: []const u8) !?[]u8 {
     return null;
 }
 
-fn isExecutable(mode: std.fs.File.Mode) bool {
+fn isExecutable(permissions: Io.File.Permissions) bool {
     if (builtin.os.tag == .windows) return true;
-    return mode & 0o0111 != 0;
+    return permissions.toMode() & 0o0111 != 0;
 }
 
 // `uname -n` is the *nix equivalent of `hostname.exe` on Windows
