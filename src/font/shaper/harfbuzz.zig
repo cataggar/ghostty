@@ -541,7 +541,7 @@ test "run iterator: empty cells with background set" {
             const cell = list_cell.cell;
             cell.* = .{
                 .content_tag = .bg_color_rgb,
-                .content = .{ .color_rgb = .{ .r = 0xFF, .g = 0, .b = 0 } },
+                .content = @bitCast(terminal.page.Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
             };
         }
         {
@@ -549,7 +549,7 @@ test "run iterator: empty cells with background set" {
             const cell = list_cell.cell;
             cell.* = .{
                 .content_tag = .bg_color_rgb,
-                .content = .{ .color_rgb = .{ .r = 0xFF, .g = 0, .b = 0 } },
+                .content = @bitCast(terminal.page.Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
             };
         }
 
@@ -816,7 +816,7 @@ test "shape emoji width long" {
     const cell = &row.cells.ptr(page.memory)[0];
     cell.* = .{
         .content_tag = .codepoint,
-        .content = .{ .codepoint = 0x1F9D4 }, // Person with beard
+        .content = 0x1F9D4, // Person with beard
     };
     var graphemes = [_]u21{
         0x1F3FB, // Light skin tone (Fitz 1-2)

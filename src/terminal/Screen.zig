@@ -2655,7 +2655,7 @@ pub fn selectLine(self: *const Screen, opts: SelectLine) ?Selection {
             const this_whitespace = std.mem.indexOfAny(
                 u21,
                 whitespace,
-                &[_]u21{cell.content.codepoint},
+                &[_]u21{cell.codepoint()},
             ) != null;
             if (this_whitespace) continue;
 
@@ -2677,7 +2677,7 @@ pub fn selectLine(self: *const Screen, opts: SelectLine) ?Selection {
             const this_whitespace = std.mem.indexOfAny(
                 u21,
                 whitespace,
-                &[_]u21{cell.content.codepoint},
+                &[_]u21{cell.codepoint()},
             ) != null;
             if (this_whitespace) continue;
 
@@ -2709,7 +2709,7 @@ pub fn selectAll(self: *Screen) ?Selection {
             const this_whitespace = std.mem.indexOfAny(
                 u32,
                 whitespace,
-                &[_]u32{cell.content.codepoint},
+                &[_]u32{cell.codepoint()},
             ) != null;
             if (this_whitespace) continue;
 
@@ -2733,7 +2733,7 @@ pub fn selectAll(self: *Screen) ?Selection {
             const this_whitespace = std.mem.indexOfAny(
                 u32,
                 whitespace,
-                &[_]u32{cell.content.codepoint},
+                &[_]u32{cell.codepoint()},
             ) != null;
             if (this_whitespace) continue;
 
@@ -2801,7 +2801,7 @@ pub fn selectWord(
     const expect_boundary = std.mem.indexOfAny(
         u21,
         boundary_codepoints,
-        &[_]u21{start_cell.content.codepoint},
+        &[_]u21{start_cell.codepoint()},
     ) != null;
 
     // Go forwards to find our end boundary
@@ -2819,7 +2819,7 @@ pub fn selectWord(
             const this_boundary = std.mem.indexOfAny(
                 u21,
                 boundary_codepoints,
-                &[_]u21{cell.content.codepoint},
+                &[_]u21{cell.codepoint()},
             ) != null;
             if (this_boundary != expect_boundary) break :end prev;
 
@@ -2856,7 +2856,7 @@ pub fn selectWord(
             const this_boundary = std.mem.indexOfAny(
                 u21,
                 boundary_codepoints,
-                &[_]u21{cell.content.codepoint},
+                &[_]u21{cell.codepoint()},
             ) != null;
             if (this_boundary != expect_boundary) break :start prev;
 
@@ -3278,7 +3278,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
             1 => {
                 self.cursor.page_cell.* = .{
                     .content_tag = .codepoint,
-                    .content = .{ .codepoint = c },
+                    .content = c,
                     .style_id = self.cursor.style_id,
                     .protected = self.cursor.protected,
                     .semantic_content = self.cursor.semantic_content,
@@ -3300,7 +3300,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
                 if (self.cursor.x == self.pages.cols - 1) {
                     self.cursor.page_cell.* = .{
                         .content_tag = .codepoint,
-                        .content = .{ .codepoint = 0 },
+                        .content = 0,
                         .wide = .spacer_head,
                         .protected = self.cursor.protected,
                         .semantic_content = self.cursor.semantic_content,
@@ -3318,7 +3318,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
                 // Write our wide char
                 self.cursor.page_cell.* = .{
                     .content_tag = .codepoint,
-                    .content = .{ .codepoint = c },
+                    .content = c,
                     .style_id = self.cursor.style_id,
                     .wide = .wide,
                     .protected = self.cursor.protected,
@@ -3332,7 +3332,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
                 self.cursorRight(1);
                 self.cursor.page_cell.* = .{
                     .content_tag = .codepoint,
-                    .content = .{ .codepoint = 0 },
+                    .content = 0,
                     .wide = .spacer_tail,
                     .protected = self.cursor.protected,
                     .semantic_content = self.cursor.semantic_content,
@@ -4218,7 +4218,7 @@ test "Screen: scrolling" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.content.color_rgb);
+        }, cell.colorRgb());
     }
 
     // Everything is dirty because we have no scrollback
@@ -4785,7 +4785,7 @@ test "Screen: scroll above same page" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.content.color_rgb);
+        }, cell.colorRgb());
     }
 
     // Page 0 row 1 (active row 0) is dirty because the cursor moved off of it.
@@ -4865,7 +4865,7 @@ test "Screen: scroll above same page but cursor on previous page" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.content.color_rgb);
+        }, cell.colorRgb());
     }
 
     // Page 0's penultimate row is dirty because the cursor moved off of it.
@@ -4946,7 +4946,7 @@ test "Screen: scroll above same page but cursor on previous page last row" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.content.color_rgb);
+        }, cell.colorRgb());
     }
 
     // Page 0's final row is dirty because the cursor moved off of it.
@@ -5028,7 +5028,7 @@ test "Screen: scroll above creates new page" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.content.color_rgb);
+        }, cell.colorRgb());
     }
 
     // Page 0's penultimate row is dirty because the cursor moved off of it.
@@ -5105,7 +5105,7 @@ test "Screen: scroll above with cursor on non-final row" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.content.color_rgb);
+        }, cell.colorRgb());
     }
 
     // Page 0's penultimate row is dirty because the cursor moved off of it.
@@ -5170,7 +5170,7 @@ test "Screen: scroll above no scrollback bottom of page" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.content.color_rgb);
+        }, cell.colorRgb());
     }
 
     // Page 0 row 1 (active row 0) is dirty because the cursor moved off of it.
@@ -5834,7 +5834,7 @@ test "Screen: resize (no reflow) less rows trims blank lines" {
         } }).?;
         list_cell.cell.* = .{
             .content_tag = .bg_color_rgb,
-            .content = .{ .color_rgb = .{ .r = 0xFF, .g = 0, .b = 0 } },
+            .content = @bitCast(Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
         };
     }
 
@@ -5869,7 +5869,7 @@ test "Screen: resize (no reflow) more rows trims blank lines" {
         } }).?;
         list_cell.cell.* = .{
             .content_tag = .bg_color_rgb,
-            .content = .{ .color_rgb = .{ .r = 0xFF, .g = 0, .b = 0 } },
+            .content = @bitCast(Cell.RGB{ .r = 0xFF, .g = 0, .b = 0 }),
         };
     }
 
@@ -6099,7 +6099,7 @@ test "Screen: resize more rows with populated scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '4'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '4'), list_cell.cell.codepoint());
     }
 
     // Resize
@@ -6111,7 +6111,7 @@ test "Screen: resize more rows with populated scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '4'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '4'), list_cell.cell.codepoint());
     }
 
     {
@@ -6314,7 +6314,7 @@ test "Screen: resize more cols with reflow that fits full width" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '2'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '2'), list_cell.cell.codepoint());
     }
 
     // Resize and verify we undid the soft wrap because we have space now
@@ -6354,7 +6354,7 @@ test "Screen: resize more cols with reflow that ends in newline" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '3'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '3'), list_cell.cell.codepoint());
     }
 
     // Resize and verify we undid the soft wrap because we have space now
@@ -6371,7 +6371,7 @@ test "Screen: resize more cols with reflow that ends in newline" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '3'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '3'), list_cell.cell.codepoint());
     }
 }
 
@@ -6391,7 +6391,7 @@ test "Screen: resize more cols with reflow that forces more wrapping" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '2'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '2'), list_cell.cell.codepoint());
     }
 
     // Verify we soft wrapped
@@ -6432,7 +6432,7 @@ test "Screen: resize more cols with reflow that unwraps multiple times" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '3'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '3'), list_cell.cell.codepoint());
     }
 
     // Verify we soft wrapped
@@ -6479,7 +6479,7 @@ test "Screen: resize more cols with populated scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '5'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '5'), list_cell.cell.codepoint());
     }
 
     // Resize
@@ -6497,7 +6497,7 @@ test "Screen: resize more cols with populated scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u21, '5'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '5'), list_cell.cell.codepoint());
     }
 }
 
@@ -6544,7 +6544,7 @@ test "Screen: resize more cols bounded scrollback keeps viewport valid" {
             for (0..s.pages.cols) |x| {
                 page.getRowAndCell(x, y).cell.* = .{
                     .content_tag = .codepoint,
-                    .content = .{ .codepoint = 'A' },
+                    .content = 'A',
                 };
             }
         }
@@ -6597,7 +6597,7 @@ test "Screen: resize more cols with reflow" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'E'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'E'), list_cell.cell.codepoint());
     }
 
     // Verify we soft wrapped
@@ -6702,7 +6702,7 @@ test "Screen: resize less rows moving cursor" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'I'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'I'), list_cell.cell.codepoint());
     }
 
     // Resize
@@ -6865,7 +6865,7 @@ test "Screen: resize less cols with reflow but row space" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'D'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'D'), list_cell.cell.codepoint());
     }
 
     try s.resize(.{ .cols = 3, .rows = 3 });
@@ -6984,7 +6984,7 @@ test "Screen: resize less cols with reflow and scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'E'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'E'), list_cell.cell.codepoint());
     }
 
     try s.resize(.{ .cols = 3, .rows = 3 });
@@ -7025,7 +7025,7 @@ test "Screen: resize less cols with reflow previously wrapped and scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'H'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'H'), list_cell.cell.codepoint());
     }
 
     try s.resize(.{ .cols = 3, .rows = 3 });
@@ -7051,7 +7051,7 @@ test "Screen: resize less cols with reflow previously wrapped and scrollback" {
             .x = s.cursor.x,
             .y = s.cursor.y,
         } }).?;
-        try testing.expectEqual(@as(u32, 'H'), list_cell.cell.content.codepoint);
+        try testing.expectEqual(@as(u32, 'H'), list_cell.cell.codepoint());
     }
 }
 
@@ -7191,7 +7191,7 @@ test "Screen: resize less cols to eliminate wide char" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.codepoint());
     }
 
     // Resize to 1 column can't fit a wide char. So it should be deleted.
@@ -7204,7 +7204,7 @@ test "Screen: resize less cols to eliminate wide char" {
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
         const cell = list_cell.cell;
-        try testing.expectEqual(@as(u21, 0), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, 0), cell.codepoint());
         try testing.expectEqual(Cell.Wide.narrow, cell.wide);
     }
 }
@@ -7226,7 +7226,7 @@ test "Screen: resize less cols to wrap wide char" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 1, .y = 0 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.codepoint());
     }
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 2, .y = 0 } }).?;
@@ -7265,7 +7265,7 @@ test "Screen: resize less cols to eliminate wide char with row space" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 0, .y = 0 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.codepoint());
     }
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 1, .y = 0 } }).?;
@@ -7360,7 +7360,7 @@ test "Screen: resize more cols with wide spacer head" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 2, .y = 0 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.codepoint());
     }
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 3, .y = 0 } }).?;
@@ -7411,7 +7411,7 @@ test "Screen: resize more cols with wide spacer head multiple lines" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 5, .y = 0 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.codepoint());
     }
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 6, .y = 0 } }).?;
@@ -7462,7 +7462,7 @@ test "Screen: resize more cols requiring a wide spacer head" {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 0, .y = 1 } }).?;
         const cell = list_cell.cell;
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
-        try testing.expectEqual(@as(u21, '😀'), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, '😀'), cell.codepoint());
     }
     {
         const list_cell = s.pages.getCell(.{ .screen = .{ .x = 1, .y = 1 } }).?;
@@ -9138,7 +9138,7 @@ test "Screen: selectionString with zero width joiner" {
     {
         const pin = s.pages.pin(.{ .screen = .{ .y = 0, .x = 0 } }).?;
         const cell = pin.rowAndCell().cell;
-        try testing.expectEqual(@as(u21, 0x1F468), cell.content.codepoint);
+        try testing.expectEqual(@as(u21, 0x1F468), cell.codepoint());
         try testing.expectEqual(Cell.Wide.wide, cell.wide);
         const cps = pin.node.data.lookupGrapheme(cell).?;
         try testing.expectEqual(@as(usize, 1), cps.len);
