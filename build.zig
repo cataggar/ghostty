@@ -79,40 +79,45 @@ pub fn build(b: *std.Build) !void {
     );
 
     // Ghostty resources like terminfo, shell integration, themes, etc.
-    const resources = try buildpkg.GhosttyResources.init(b, &config, &deps);
-    const i18n = if (config.i18n) try buildpkg.GhosttyI18n.init(b, &config) else null;
+    const resources = if (!config.is_dep) try buildpkg.GhosttyResources.init(b, &config, &deps) else null;
+    const i18n = if (config.i18n and !config.is_dep) try buildpkg.GhosttyI18n.init(b, &config) else null;
 
     // Ghostty executable, the actual runnable Ghostty program.
     // Skip when used as a dependency — only the ghostty-vt module is needed.
     const exe = if (!config.is_dep) try buildpkg.GhosttyExe.init(b, &config, &deps) else null;
 
     // Ghostty docs
-    const docs = try buildpkg.GhosttyDocs.init(b, &deps);
-    if (config.emit_docs) {
-        docs.install();
-    } else if (config.target.result.os.tag.isDarwin()) {
-        // If we aren't emitting docs we need to emit a placeholder so
-        // our macOS xcodeproject builds since it expects the `share/man`
-        // directory to exist to copy into the app bundle.
-        docs.installDummy(b.getInstallStep());
+    const docs = if (!config.is_dep) try buildpkg.GhosttyDocs.init(b, &deps) else null;
+    if (docs) |d| {
+        if (config.emit_docs) {
+            d.install();
+        } else if (config.target.result.os.tag.isDarwin()) {
+            d.installDummy(b.getInstallStep());
+        }
     }
 
     // Ghostty webdata
-    const webdata = try buildpkg.GhosttyWebdata.init(b, &deps);
-    if (config.emit_webdata) webdata.install();
+    if (!config.is_dep) {
+        const webdata = try buildpkg.GhosttyWebdata.init(b, &deps);
+        if (config.emit_webdata) webdata.install();
+    }
 
     // Ghostty bench tools
-    const bench = try buildpkg.GhosttyBench.init(b, &deps);
-    if (config.emit_bench) bench.install();
+    if (!config.is_dep) {
+        const bench = try buildpkg.GhosttyBench.init(b, &deps);
+        if (config.emit_bench) bench.install();
+    }
 
     // Ghostty dist tarball
-    const dist = try buildpkg.GhosttyDist.init(b, &config);
-    {
-        const step = b.step("dist", "Build the dist tarball");
-        step.dependOn(dist.install_step);
-        const check_step = b.step("distcheck", "Install and validate the dist tarball");
-        check_step.dependOn(dist.check_step);
-        check_step.dependOn(dist.install_step);
+    if (!config.is_dep) {
+        const dist = try buildpkg.GhosttyDist.init(b, &config);
+        {
+            const step = b.step("dist", "Build the dist tarball");
+            step.dependOn(dist.install_step);
+            const check_step = b.step("distcheck", "Install and validate the dist tarball");
+            check_step.dependOn(dist.check_step);
+            check_step.dependOn(dist.install_step);
+        }
     }
 
     // libghostty-vt
@@ -180,7 +185,7 @@ pub fn build(b: *std.Build) !void {
         if (config.emit_exe) {
             if (exe) |e| {
                 e.install();
-                resources.install();
+                if (resources) |r| r.install();
                 if (i18n) |v| v.install();
             }
         }
@@ -297,7 +302,7 @@ pub fn build(b: *std.Build) !void {
     }
 
     // Valgrind
-    if (config.app_runtime != .none) {
+    if (config.app_runtime != .none and !config.is_dep) {
         // We need to rebuild Ghostty with a baseline CPU target.
         const valgrind_exe = exe: {
             var valgrind_config = config;
@@ -338,8 +343,8 @@ pub fn build(b: *std.Build) !void {
         test_lib_vt_step.dependOn(&mod_vt_c_test_run.step);
     }
 
-    // Tests (skip when building libghostty-vt)
-    if (!config.emit_lib_vt) {
+    // Tests (skip when building libghostty-vt or when used as a dependency)
+    if (!config.emit_lib_vt and !config.is_dep) {
         // Full unit tests
         const test_exe = b.addTest(.{
             .name = "ghostty-test",
