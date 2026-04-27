@@ -404,8 +404,8 @@ pub fn add(
     if (step.rootModuleTarget().os.tag == .linux) {
         const triple = try step.rootModuleTarget().linuxTriple(b.allocator);
         const path = b.fmt("/usr/lib/{s}", .{triple});
-        if (std.fs.accessAbsolute(path, .{})) {
-            step.addLibraryPath(.{ .cwd_relative = path });
+        if (std.Io.Dir.accessAbsolute(b.graph.io, path, .{})) {
+            step.root_module.addLibraryPath(.{ .cwd_relative = path });
         } else |_| {}
     }
 
