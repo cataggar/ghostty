@@ -600,8 +600,11 @@ pub fn baselineTarget(self: *const Config) std.Build.ResolvedTarget {
     // handle the native case.
     return .{
         .query = q,
-        .result = std.zig.system.resolveTargetQuery(q) catch
-            @panic("unable to resolve baseline query"),
+        .result = result: {
+            var threaded: std.Io.Threaded = .init_single_threaded;
+            break :result std.zig.system.resolveTargetQuery(threaded.io(), q) catch
+                @panic("unable to resolve baseline query");
+        },
     };
 }
 
