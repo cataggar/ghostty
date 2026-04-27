@@ -158,9 +158,9 @@ fn getTyped(
         .has_hyperlink => out.* = cell.hyperlink,
         .protected => out.* = cell.protected,
         .semantic_content => out.* = @enumFromInt(@intFromEnum(cell.semantic_content)),
-        .color_palette => out.* = cell.content.color_palette,
+        .color_palette => out.* = cell.colorPalette(),
         .color_rgb => {
-            const rgb = cell.content.color_rgb;
+            const rgb = cell.colorRgb();
             out.* = .{ .r = rgb.r, .g = rgb.g, .b = rgb.b };
         },
     }

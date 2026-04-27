@@ -102,7 +102,7 @@ pub const ModeState = struct {
 pub const ModePacked = packed_struct: {
     var names: [entries.len][:0]const u8 = undefined;
     var types: [entries.len]type = undefined;
-    const Attr = struct { default_value_ptr: ?*const anyopaque = null };
+    const Attr = std.builtin.Type.StructField.Attributes;
     var attrs: [entries.len]Attr = undefined;
     for (entries, 0..) |entry, i| {
         names[i] = entry.name;
@@ -124,13 +124,13 @@ pub const ModePacked = packed_struct: {
 /// An enum(u16) of the available modes. See entries for available values.
 pub const Mode = mode_enum: {
     var names: [entries.len][:0]const u8 = undefined;
-    var values: [entries.len]comptime_int = undefined;
+    var values: [entries.len]ModeTag.Backing = undefined;
     for (entries, 0..) |entry, i| {
         names[i] = entry.name;
-        values[i] = @as(ModeTag.Backing, @bitCast(ModeTag{
+        values[i] = @bitCast(ModeTag{
             .value = entry.value,
             .ansi = entry.ansi,
-        }));
+        });
     }
 
     break :mode_enum @Enum(
