@@ -475,10 +475,10 @@ pub fn set(
     value: ?*const anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        _ = std.enums.fromInt(Option, @intFromEnum(option)) catch {
+        if (std.enums.fromInt(Option, @intFromEnum(option)) == null) {
             log.warn("terminal_set invalid option value={d}", .{@intFromEnum(option)});
             return .invalid_value;
-        };
+        }
     }
 
     const wrapper = terminal_ orelse return .invalid_value;
@@ -778,10 +778,10 @@ pub fn get(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        _ = std.enums.fromInt(TerminalData, @intFromEnum(data)) catch {
+        if (std.enums.fromInt(TerminalData, @intFromEnum(data)) == null) {
             log.warn("terminal_get invalid data value={d}", .{@intFromEnum(data)});
             return .invalid_value;
-        };
+        }
     }
 
     return switch (data) {

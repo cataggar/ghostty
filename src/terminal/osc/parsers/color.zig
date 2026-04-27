@@ -164,7 +164,7 @@ fn parseGetSetAnsiColor(
     // Note: in ANY error scenario below we return the accumulated results.
     // This matches the xterm behavior (see misc.c ChangeAnsiColorRequest)
 
-    var result: List = .{};
+    var result: List = .empty;
     errdefer result.deinit(alloc);
     while (true) {
         // We expect a `c; spec` pair. If either doesn't exist then
@@ -226,7 +226,7 @@ fn parseResetAnsiColor(
     // Kitty and I don't see a downside to being more flexible here. Hopefully
     // no one depends on the exact behavior of xterm.
 
-    var result: List = .{};
+    var result: List = .empty;
     errdefer result.deinit(alloc);
     while (true) {
         const color_str = it.next() orelse {
@@ -286,7 +286,7 @@ fn parseGetSetDynamicColor(
     // Note: in ANY error scenario below we return the accumulated results.
     // This matches the xterm behavior (see misc.c ChangeColorsRequest)
 
-    var result: List = .{};
+    var result: List = .empty;
     var color: DynamicColor = start;
     while (true) {
         const spec_str = it.next() orelse return result;
@@ -314,7 +314,7 @@ fn parseResetDynamicColor(
     color: DynamicColor,
     it: *std.mem.TokenIterator(u8, .scalar),
 ) Allocator.Error!List {
-    var result: List = .{};
+    var result: List = .empty;
     errdefer result.deinit(alloc);
     if (it.next() != null) return result;
     const req = try result.addOne(alloc);
@@ -329,10 +329,7 @@ fn parseResetDynamicColor(
 /// The exact prealloc value is chosen arbitrarily assuming most
 /// color ops have very few. If we can get empirical data on more
 /// typical values we can switch to that.
-pub const List = std.SegmentedList(
-    Request,
-    2,
-);
+pub const List = std.ArrayListUnmanaged(Request);
 
 /// A single operation related to the terminal color palette.
 pub const Request = union(enum) {
