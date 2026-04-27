@@ -125,7 +125,7 @@ pub fn parse(
         var key: []const u8 = arg[2..];
         const value: ?[]const u8 = value: {
             // If the arg has "=" then the value is after the "=".
-            if (mem.indexOf(u8, key, "=")) |idx| {
+            if (mem.find(u8, key, "=")) |idx| {
                 defer key = key[0..idx];
                 break :value key[idx + 1 ..];
             }
@@ -474,7 +474,7 @@ pub fn parseTaggedUnion(comptime T: type, alloc: Allocator, v: []const u8) !T {
 
     // Get the union tag that is being set. We support values with no colon
     // if the value is void so its not an error to have no colon.
-    const colon_idx = mem.indexOf(u8, v, ":") orelse v.len;
+    const colon_idx = mem.find(u8, v, ":") orelse v.len;
     const tag_str = std.mem.trim(u8, v[0..colon_idx], whitespace);
     const value = if (colon_idx < v.len) v[colon_idx + 1 ..] else "";
 
@@ -489,18 +489,7 @@ pub fn parseTaggedUnion(comptime T: type, alloc: Allocator, v: []const u8) !T {
 
             // We need to create a struct that looks like this union field.
             // This lets us use parseIntoField as if its a dedicated struct.
-            const Target = @Type(.{ .@"struct" = .{
-                .layout = .auto,
-                .fields = &.{.{
-                    .name = field.name,
-                    .type = field.type,
-                    .default_value_ptr = null,
-                    .is_comptime = false,
-                    .alignment = @alignOf(field.type),
-                }},
-                .decls = &.{},
-                .is_tuple = false,
-            } });
+            const Target = @Struct(.auto, null, &.{field.name}, &.{field.type}, &@splat(.{}));
 
             // Parse the value into the struct
             var t: Target = undefined;
@@ -547,7 +536,7 @@ pub fn parseAutoStruct(
     loop: while (try iter.next()) |entry| {
         // Find the key/value, trimming whitespace. The value may be quoted
         // which we strip the quotes from.
-        const idx = mem.indexOf(u8, entry, ":") orelse return error.InvalidValue;
+        const idx = mem.find(u8, entry, ":") orelse return error.InvalidValue;
         const key = std.mem.trim(u8, entry[0..idx], whitespace);
 
         // used if we need to decode a double-quoted string.
@@ -1461,7 +1450,7 @@ pub const LineIterator = struct {
             break entry;
         } else return null;
 
-        if (mem.indexOf(u8, entry, "=")) |idx| {
+        if (mem.find(u8, entry, "=")) |idx| {
             const key = std.mem.trim(u8, entry[0..idx], whitespace);
             const value = value: {
                 var value = std.mem.trim(u8, entry[idx + 1 ..], whitespace);

@@ -236,7 +236,7 @@ pub const Command = union(enum) {
             const items = self.data.written();
             if (self.i >= items.len) return null;
             var rem = items[self.i..];
-            const idx = std.mem.indexOf(u8, rem, ";") orelse rem.len;
+            const idx = std.mem.find(u8, rem, ";") orelse rem.len;
 
             // Note that if we're at the end, idx + 1 is len + 1 so we're over
             // the end but that's okay because our check above is >= so we'll

@@ -152,7 +152,7 @@ pub const Option = enum {
         while (remaining.len > 0) {
             // Length of the next value is up to the `;` or the
             // end of the string.
-            const len = std.mem.indexOfScalar(
+            const len = std.mem.findScalar(
                 u8,
                 remaining,
                 ';',
@@ -174,7 +174,7 @@ pub const Option = enum {
             // Parse our key=value and verify our key matches our
             // expectation.
             const value = value: {
-                if (std.mem.indexOfScalar(
+                if (std.mem.findScalar(
                     u8,
                     full,
                     '=',

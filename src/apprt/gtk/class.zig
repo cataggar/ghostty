@@ -145,16 +145,20 @@ pub fn Common(
                 /// as the virtual method but the self parameter points to the
                 /// target instead of the original class.
                 fn ImplementFunc(comptime T: type) type {
-                    var params: [fn_info.params.len]std.builtin.Type.Fn.Param = undefined;
-                    @memcpy(&params, fn_info.params);
-                    params[0].type = *ClassInstance(T);
-                    return @Type(.{ .@"fn" = .{
-                        .calling_convention = fn_info.calling_convention,
-                        .is_generic = fn_info.is_generic,
-                        .is_var_args = fn_info.is_var_args,
-                        .return_type = fn_info.return_type,
-                        .params = &params,
-                    } });
+                    var param_types: [fn_info.params.len]type = undefined;
+                    const ParamAttr = struct { @"noalias": bool = false };
+                    var param_attrs: [fn_info.params.len]ParamAttr = undefined;
+                    for (fn_info.params, 0..) |p, idx| {
+                        param_types[idx] = p.type.?;
+                        param_attrs[idx] = .{ .@"noalias" = p.is_noalias };
+                    }
+                    param_types[0] = *ClassInstance(T);
+                    return @Fn(
+                        &param_types,
+                        &param_attrs,
+                        fn_info.return_type.?,
+                        .{ .@"callconv" = fn_info.calling_convention },
+                    );
                 }
             };
         }

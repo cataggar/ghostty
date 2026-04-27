@@ -344,7 +344,7 @@ fn setupBash(
             rcfile = iter.next();
         } else if (arg.len > 1 and arg[0] == '-' and arg[1] != '-') {
             // '-c command' is always non-interactive
-            if (std.mem.indexOfScalar(u8, arg, 'c') != null) {
+            if (std.mem.findScalar(u8, arg, 'c') != null) {
                 return null;
             }
             try cmd.appendArg(arg);
@@ -797,7 +797,7 @@ fn setupNushell(
         if (std.mem.eql(u8, arg, "--command") or std.mem.eql(u8, arg, "--lsp")) {
             return null;
         } else if (arg.len > 1 and arg[0] == '-' and arg[1] != '-') {
-            if (std.mem.indexOfScalar(u8, arg, 'c') != null) {
+            if (std.mem.findScalar(u8, arg, 'c') != null) {
                 return null;
             }
             try cmd.appendArg(arg);

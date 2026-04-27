@@ -17,7 +17,7 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
         return null;
     };
     const data = cap.trailing();
-    const k = std.mem.indexOfScalar(u8, data, ';') orelse {
+    const k = std.mem.findScalar(u8, data, ';') orelse {
         parser.state = .invalid;
         return null;
     };
@@ -27,7 +27,7 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
         parser.state = .invalid;
         return null;
     }
-    const t = std.mem.indexOfScalarPos(u8, data, k + 1, ';') orelse {
+    const t = std.mem.findScalarPos(u8, data, k + 1, ';') orelse {
         log.warn("rxvt notify extension is missing the title", .{});
         parser.state = .invalid;
         return null;

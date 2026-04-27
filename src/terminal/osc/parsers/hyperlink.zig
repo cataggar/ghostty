@@ -16,7 +16,7 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
         return null;
     };
     const data = cap.trailing();
-    const s = std.mem.indexOfScalar(u8, data, ';') orelse {
+    const s = std.mem.findScalar(u8, data, ';') orelse {
         parser.state = .invalid;
         return null;
     };
@@ -32,9 +32,9 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
     std.mem.replaceScalar(u8, kvs, ':', 0);
     var kv_start: usize = 0;
     while (kv_start < kvs.len) {
-        const kv_end = std.mem.indexOfScalarPos(u8, kvs, kv_start + 1, 0) orelse break;
+        const kv_end = std.mem.findScalarPos(u8, kvs, kv_start + 1, 0) orelse break;
         const kv = data[kv_start .. kv_end + 1];
-        const v = std.mem.indexOfScalar(u8, kv, '=') orelse break;
+        const v = std.mem.findScalar(u8, kv, '=') orelse break;
         const key = kv[0..v];
         const value = kv[v + 1 .. kv.len - 1 :0];
         if (std.mem.eql(u8, key, "id")) {

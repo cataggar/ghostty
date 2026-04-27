@@ -5286,12 +5286,12 @@ test "TerminalFormatter html with palette" {
     const output = builder.writer.buffered();
 
     // Verify palette CSS variables are emitted
-    try testing.expect(std.mem.indexOf(u8, output, "<style>:root{") != null);
-    try testing.expect(std.mem.indexOf(u8, output, "--vt-palette-0: #123456;") != null);
-    try testing.expect(std.mem.indexOf(u8, output, "--vt-palette-1: #abcdef;") != null);
-    try testing.expect(std.mem.indexOf(u8, output, "--vt-palette-255: #ff00ff;") != null);
-    try testing.expect(std.mem.indexOf(u8, output, "}</style>") != null);
-    try testing.expect(std.mem.indexOf(u8, output, "test") != null);
+    try testing.expect(std.mem.find(u8, output, "<style>:root{") != null);
+    try testing.expect(std.mem.find(u8, output, "--vt-palette-0: #123456;") != null);
+    try testing.expect(std.mem.find(u8, output, "--vt-palette-1: #abcdef;") != null);
+    try testing.expect(std.mem.find(u8, output, "--vt-palette-255: #ff00ff;") != null);
+    try testing.expect(std.mem.find(u8, output, "}</style>") != null);
+    try testing.expect(std.mem.find(u8, output, "test") != null);
 }
 
 test "Page html with background and foreground colors" {
@@ -6045,15 +6045,15 @@ test "Page VT background color on trailing blank cells" {
     // The red background should appear BEFORE the newline, not after.
 
     // Find position of CRLF
-    const crlf_pos = std.mem.indexOf(u8, output, "\r\n") orelse {
+    const crlf_pos = std.mem.find(u8, output, "\r\n") orelse {
         // No CRLF found, fail the test
         return error.TestUnexpectedResult;
     };
 
     // Check that red background (48;5;1) appears BEFORE the newline (on line 1)
     const line1 = output[0..crlf_pos];
-    const has_red_bg_line1 = std.mem.indexOf(u8, line1, "\x1b[41m") != null or
-        std.mem.indexOf(u8, line1, "\x1b[48;5;1m") != null;
+    const has_red_bg_line1 = std.mem.find(u8, line1, "\x1b[41m") != null or
+        std.mem.find(u8, line1, "\x1b[48;5;1m") != null;
 
     // This should be true but currently fails due to the bug
     try testing.expect(has_red_bg_line1);
@@ -6271,7 +6271,7 @@ test "Page HTML hyperlink point map maps closing to previous cell" {
     try testing.expectEqual(expected_output.len, point_map.items.len);
 
     // The </a> closing tag bytes should all map to the last cell of the link
-    const closing_idx = comptime std.mem.indexOf(u8, expected_output, "</a>").?;
+    const closing_idx = comptime std.mem.find(u8, expected_output, "</a>").?;
     const expected_coord = point_map.items[closing_idx - 1];
     for (closing_idx..closing_idx + "</a>".len) |i| {
         try testing.expectEqual(expected_coord, point_map.items[i]);

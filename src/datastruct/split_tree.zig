@@ -1320,7 +1320,7 @@ pub fn SplitTree(comptime V: type) type {
                     // of the view and append that to `GhosttySplitTree`.
                     .name = name: {
                         const type_name = @typeName(View);
-                        const last = if (std.mem.lastIndexOfScalar(
+                        const last = if (std.mem.rfindScalar(
                             u8,
                             type_name,
                             '.',

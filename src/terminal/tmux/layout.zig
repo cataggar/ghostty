@@ -90,7 +90,7 @@ pub const Layout = struct {
         offset: *usize,
     ) ParseError!Layout {
         // Find the first `x` to grab the width.
-        const width: usize = if (std.mem.indexOfScalar(
+        const width: usize = if (std.mem.findScalar(
             u8,
             str[offset.*..],
             'x',
@@ -104,7 +104,7 @@ pub const Layout = struct {
         } else return error.SyntaxError;
 
         // Find the height, up to a comma.
-        const height: usize = if (std.mem.indexOfScalar(
+        const height: usize = if (std.mem.findScalar(
             u8,
             str[offset.*..],
             ',',
@@ -118,7 +118,7 @@ pub const Layout = struct {
         } else return error.SyntaxError;
 
         // Find X
-        const x: usize = if (std.mem.indexOfScalar(
+        const x: usize = if (std.mem.findScalar(
             u8,
             str[offset.*..],
             ',',

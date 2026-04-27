@@ -372,7 +372,7 @@ pub fn isValidCacheKey(key: []const u8) bool {
     if (key.len == 0) return false;
 
     // Check for user@hostname format
-    if (std.mem.indexOfScalar(u8, key, '@')) |at_pos| {
+    if (std.mem.findScalar(u8, key, '@')) |at_pos| {
         const user = key[0..at_pos];
         const hostname = key[at_pos + 1 ..];
         return isValidUser(user) and isValidHost(hostname);

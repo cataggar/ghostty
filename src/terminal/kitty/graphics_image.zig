@@ -123,7 +123,7 @@ pub const LoadingImage = struct {
         // Otherwise, the payload data is guaranteed to be a path.
 
         if (comptime builtin.os.tag != .windows) {
-            if (std.mem.indexOfScalar(u8, cmd.data, 0) != null) {
+            if (std.mem.findScalar(u8, cmd.data, 0) != null) {
                 // posix.realpath *asserts* that the path does not have
                 // internal nulls instead of erroring.
                 log.warn("failed to get absolute path: BadPathName", .{});
@@ -273,7 +273,7 @@ pub const LoadingImage = struct {
         // Temporary file logic
         if (medium == .temporary_file) {
             if (!isPathInTempDir(path)) return error.TemporaryFileNotInTempDir;
-            if (std.mem.indexOf(u8, path, "tty-graphics-protocol") == null) {
+            if (std.mem.find(u8, path, "tty-graphics-protocol") == null) {
                 return error.TemporaryFileNotNamedCorrectly;
             }
         }
