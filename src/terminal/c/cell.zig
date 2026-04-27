@@ -105,7 +105,7 @@ pub fn get(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        _ = std.meta.intToEnum(CellData, @intFromEnum(data)) catch {
+        _ = std.enums.fromInt(CellData, @intFromEnum(data)) catch {
             return .invalid_value;
         };
     }

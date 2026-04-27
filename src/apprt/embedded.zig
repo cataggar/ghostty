@@ -372,7 +372,7 @@ pub const Platform = union(PlatformTag) {
 
     /// Initialize a Platform a tag and configuration from the C ABI.
     pub fn init(tag_int: c_int, c_platform: C) !Platform {
-        const tag = try std.meta.intToEnum(PlatformTag, tag_int);
+        const tag = std.enums.fromInt(PlatformTag, tag_int) orelse return error.InvalidEnumValue;
         return switch (tag) {
             .macos => if (MacOS != void) macos: {
                 const config = c_platform.macos;
@@ -1520,7 +1520,7 @@ pub const CAPI = struct {
 
     /// Update the color scheme of the app.
     export fn ghostty_app_set_color_scheme(v: *App, scheme_raw: c_int) void {
-        const scheme = std.meta.intToEnum(apprt.ColorScheme, scheme_raw) catch {
+        const scheme = std.enums.fromInt(apprt.ColorScheme, scheme_raw) orelse {
             log.warn(
                 "invalid color scheme to ghostty_surface_set_color_scheme value={}",
                 .{scheme_raw},
@@ -1730,7 +1730,7 @@ pub const CAPI = struct {
 
     /// Update the color scheme of the surface.
     export fn ghostty_surface_set_color_scheme(surface: *Surface, scheme_raw: c_int) void {
-        const scheme = std.meta.intToEnum(apprt.ColorScheme, scheme_raw) catch {
+        const scheme = std.enums.fromInt(apprt.ColorScheme, scheme_raw) orelse {
             log.warn(
                 "invalid color scheme to ghostty_surface_set_color_scheme value={}",
                 .{scheme_raw},
