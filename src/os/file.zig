@@ -81,7 +81,11 @@ pub fn allocTmpDir(allocator: std.mem.Allocator) std.mem.Allocator.Error![]const
         }
         return allocator.dupe(u8, "C:\\Windows\\Temp");
     }
-    const tmpdir = posix.getenv("TMPDIR") orelse posix.getenv("TMP") orelse return "/tmp";
+    const tmpdir = blk: {
+        if (std.c.getenv("TMPDIR")) |val| break :blk std.mem.sliceTo(val, 0);
+        if (std.c.getenv("TMP")) |val| break :blk std.mem.sliceTo(val, 0);
+        break :blk "/tmp";
+    };
     return std.mem.trimEnd(u8, tmpdir, &.{std.fs.path.sep});
 }
 
