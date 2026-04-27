@@ -554,10 +554,9 @@ pub const Handler = struct {
         requests: *const osc_color.List,
     ) !void {
         _ = op;
-        if (requests.count() == 0) return;
+        if (requests.items.len == 0) return;
 
-        var it = requests.constIterator(0);
-        while (it.next()) |req| {
+        for (requests.items) |*req| {
             switch (req.*) {
                 .set => |set| {
                     switch (set.target) {
