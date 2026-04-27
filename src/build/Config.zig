@@ -67,7 +67,7 @@ emit_unicode_table_gen: bool = false,
 is_dep: bool = false,
 
 /// Environmental properties
-env: std.process.EnvMap,
+env: std.process.Environ.Map,
 
 pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Config {
     // Setup our standard Zig target and optimize options, i.e.
@@ -125,8 +125,7 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
     const gtk_targets = gtk.targets(b);
 
     // We use env vars throughout the build so we grab them immediately here.
-    var env = try std.process.getEnvMap(b.allocator);
-    errdefer env.deinit();
+    var env = b.graph.environ_map;
 
     var config: Config = .{
         .optimize = optimize,
@@ -401,7 +400,7 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
         if (system_package) break :emit_docs true;
 
         // We only default to true if we can find pandoc.
-        const path = expandPath(b.allocator, "pandoc") catch
+        const path = expandPath(b.allocator, b.graph.io, "pandoc", env.get("PATH")) catch
             break :emit_docs false;
         defer if (path) |p| b.allocator.free(p);
         break :emit_docs path != null;
@@ -450,7 +449,7 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
         if (config.emit_lib_vt) {
             // In lib-vt mode default to whether xcodebuild is available,
             // since xcodebuild is required to produce the XCFramework.
-            const path = expandPath(b.allocator, "xcodebuild") catch
+            const path = expandPath(b.allocator, b.graph.io, "xcodebuild", env.get("PATH")) catch
                 break :emit_xcfw false;
             defer if (path) |p| b.allocator.free(p);
             break :emit_xcfw path != null;
