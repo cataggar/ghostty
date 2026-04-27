@@ -43,7 +43,7 @@ const AllocPosix = struct {
         return try posix.mmap(
             null,
             n,
-            posix.PROT.READ | posix.PROT.WRITE,
+            .{ .READ = true, .WRITE = true },
             .{ .TYPE = .PRIVATE, .ANONYMOUS = true },
             -1,
             0,
