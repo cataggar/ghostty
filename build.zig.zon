@@ -9,32 +9,32 @@
 
         .libxev = .{
             // mitchellh/libxev
-            .url = "https://deps.files.ghostty.org/libxev-34fa50878aec6e5fa8f532867001ab3c36fae23e.tar.gz",
-            .hash = "libxev-0.0.0-86vtc4IcEwCqEYxEYoN_3KXmc6A9VLcm22aVImfvecYs",
+            .url = "https://github.com/mitchellh/libxev/archive/05c89fbbb140254510fa812dce1a35c289bec4ca.tar.gz",
+            .hash = "libxev-0.0.0-86vtcwIRFACVrx54GaHsMFFlyC4dTi0tcVh10V7btRUc",
             .lazy = true,
         },
         .vaxis = .{
             // rockorager/libvaxis
-            .url = "https://deps.files.ghostty.org/vaxis-7dbb9fd3122e4ffad262dd7c151d80d863b68558.tar.gz",
-            .hash = "vaxis-0.5.1-BWNV_LosCQAGmCCNOLljCIw6j6-yt53tji6n6rwJ2BhS",
+            .url = "https://github.com/rockorager/libvaxis/archive/4e5a065940825f147fa5ce0df54d1ef0d50ecee7.tar.gz",
+            .hash = "vaxis-0.6.0-BWNV_N3QCQA7Xn50MsCk3MSgvbM8kbCIstA4FMck1k5v",
             .lazy = true,
         },
         .z2d = .{
             // vancluever/z2d
-            .url = "https://deps.files.ghostty.org/z2d-0.10.0-j5P_Hu-6FgBsZNgwphIqh17jDnj8_yPtD8yzjO6PpHRQ.tar.gz",
-            .hash = "z2d-0.10.0-j5P_Hu-6FgBsZNgwphIqh17jDnj8_yPtD8yzjO6PpHRQ",
+            .url = "https://github.com/vancluever/z2d/archive/2f661fb5120f65e875bf6f37d082674c08858c7b.tar.gz",
+            .hash = "z2d-0.11.1-pre-j5P_HtbzDwADWjqO2TdR36XPyD-GdJRwRywnnhjalqej",
             .lazy = true,
         },
         .zig_objc = .{
             // mitchellh/zig-objc
-            .url = "https://deps.files.ghostty.org/zig_objc-f356ed02833f0f1b8e84d50bed9e807bf7cdc0ae.tar.gz",
-            .hash = "zig_objc-0.0.0-Ir_Sp5gTAQCvxxR7oVIrPXxXwsfKgVP7_wqoOQrZjFeK",
+            .url = "https://github.com/mitchellh/zig-objc/archive/c8de82ff80281215ad92900866dab7103a8efa8b.tar.gz",
+            .hash = "zig_objc-0.0.0-Ir_Sp9gsAQCPAJc0oF5xoWePHWP6Y6tCphDeyNUThJoi",
             .lazy = true,
         },
         .zig_js = .{
             // mitchellh/zig-js
-            .url = "https://deps.files.ghostty.org/zig_js-04db83c617da1956ac5adc1cb9ba1e434c1cb6fd.tar.gz",
-            .hash = "zig_js-0.0.0-rjCAV-6GAADxFug7rDmPH-uM_XcnJ5NmuAMJCAscMjhi",
+            .url = "https://github.com/mitchellh/zig-js/archive/3c23860e47fdcdc5af805efb7fd0bdac5fd3e9bc.tar.gz",
+            .hash = "zig_js-0.0.0-rjCAV7-GAADvMTBL7lPMuvDk7xgS9PCMIZWiOUXLZSlj",
             .lazy = true,
         },
         .uucode = .{
@@ -44,21 +44,21 @@
         },
         .zig_wayland = .{
             // codeberg ifreund/zig-wayland
-            .url = "https://deps.files.ghostty.org/zig_wayland-1b5c038ec10da20ed3a15b0b2a6db1c21383e8ea.tar.gz",
-            .hash = "wayland-0.5.0-dev-lQa1khrMAQDJDwYFKpdH3HizherB7sHo5dKMECfvxQHe",
+            .url = "https://codeberg.org/ifreund/zig-wayland/archive/7616d5f6aa526408ca8cd6acc5a4a8159859354c.tar.gz",
+            .hash = "wayland-0.7.0-dev-lQa1krD8AQBaaBiyXLInUl7k9cWLHhDTn_M_WnvbneJx",
             .lazy = true,
         },
         .zf = .{
             // natecraddock/zf
-            .url = "https://deps.files.ghostty.org/zf-3c52637b7e937c5ae61fd679717da3e276765b23.tar.gz",
-            .hash = "zf-0.10.3-OIRy8RuJAACKA3Lohoumrt85nRbHwbpMcUaLES8vxDnh",
+            .url = "https://github.com/natecraddock/zf/archive/70c8c8d693977638542dd1e2655de9e03f306e72.tar.gz",
+            .hash = "zf-0.10.3-OIRy8XuRAAA2qkTMFYohbQArJddx8GlHldm3nDdSz1lY",
             .lazy = true,
         },
         .gobject = .{
             // https://github.com/ghostty-org/zig-gobject based on zig_gobject
             // Temporary until we generate them at build time automatically.
-            .url = "https://deps.files.ghostty.org/gobject-2025-11-08-23-1.tar.zst",
-            .hash = "gobject-0.3.0-Skun7ANLnwDvEfIpVmohcppXgOvg_I6YOJFmPIsKfXk-",
+            .url = "https://github.com/ghostty-org/zig-gobject/archive/6971b412dc77003c52f5e8d16e7d0a828fc95539.tar.gz",
+            .hash = "ghostty_gobject-0.8.0-nU248b48AACZ3uAiQxs2JpRNjGEN2BUa0XchQOjPBpFP",
             .lazy = true,
         },
 
