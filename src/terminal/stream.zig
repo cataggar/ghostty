@@ -1664,7 +1664,7 @@ pub fn Stream(comptime H: type) type {
                         switch (mode) {
                             .current => self.handler.vt(.tab_clear_current, {}) catch {},
                             .all => self.handler.vt(.tab_clear_all, {}) catch {},
-                            _ => log.warn("unknown tab clear mode: {}", .{mode}}) catch {},
+                            _ => log.warn("unknown tab clear mode: {}", .{mode}),
                         }
                     },
 
@@ -1886,7 +1886,7 @@ pub fn Stream(comptime H: type) type {
                             self.handler.vt(.request_mode_unknown, .{
                                 .mode = mode_raw,
                                 .ansi = ansi_mode,
-                            }}) catch {};
+                            }) catch {};
                         }
                     },
 
@@ -2016,7 +2016,7 @@ pub fn Stream(comptime H: type) type {
                         0 => self.handler.vt(.left_and_right_margin_ambiguous, {}) catch {},
                         1 => self.handler.vt(.left_and_right_margin, .{ .top_left = input.params[0], .bottom_right = 0 }) catch {},
                         2 => self.handler.vt(.left_and_right_margin, .{ .top_left = input.params[0], .bottom_right = input.params[1] }) catch {},
-                        else => log.warn("invalid DECSLRM command: {f}", .{input}}) catch {},
+                        else => log.warn("invalid DECSLRM command: {f}", .{input}),
                     },
 
                     1 => switch (input.intermediates[0]) {
@@ -2113,7 +2113,7 @@ pub fn Stream(comptime H: type) type {
                                     switch (number) {
                                         22 => self.handler.vt(.title_push, index) catch {},
                                         23 => self.handler.vt(.title_pop, index) catch {},
-                                        else => @compileError("unreachable"),
+                                        else => @compileError("unreachable") catch {},
                                     }
                                 } else logUnsupportedOnce(
                                     "ignoring CSI 22/23 t with extra parameters: {f}",
@@ -2309,7 +2309,7 @@ pub fn Stream(comptime H: type) type {
                     self.handler.vt(.clipboard_contents, .{
                         .kind = clip.kind,
                         .data = clip.data,
-                    }}) catch {};
+                    }) catch {};
                 },
 
                 .report_pwd => |v| {
@@ -2333,7 +2333,7 @@ pub fn Stream(comptime H: type) type {
                         .op = v.op,
                         .requests = v.requests,
                         .terminator = v.terminator,
-                    }}) catch {};
+                    }) catch {};
                 },
 
                 .kitty_color_protocol => |v| {
@@ -2344,7 +2344,7 @@ pub fn Stream(comptime H: type) type {
                     self.handler.vt(.show_desktop_notification, .{
                         .title = v.title,
                         .body = v.body,
-                    }}) catch {};
+                    }) catch {};
                 },
 
                 .hyperlink_start => |v| {
@@ -2352,7 +2352,7 @@ pub fn Stream(comptime H: type) type {
                     self.handler.vt(.start_hyperlink, .{
                         .uri = v.uri,
                         .id = v.id,
-                    }}) catch {};
+                    }) catch {};
                 },
 
                 .hyperlink_end => {
@@ -2417,7 +2417,7 @@ pub fn Stream(comptime H: type) type {
             self.handler.vt(.configure_charset, .{
                 .slot = slot,
                 .charset = set,
-            }}) catch {};
+            }) catch {};
         }
 
         inline fn escDispatch(
@@ -2550,7 +2550,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GL,
                         .charset = .G2,
                         .locking = true,
-                    }}) catch {},
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid single shift 2 command: {f}", .{action});
@@ -2564,7 +2564,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GL,
                         .charset = .G3,
                         .locking = true,
-                    }}) catch {},
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid single shift 3 command: {f}", .{action});
@@ -2575,19 +2575,19 @@ pub fn Stream(comptime H: type) type {
                 // SPA - Start of Guarded Area
                 'V' => switch (action.intermediates.len) {
                     0 => self.handler.vt(.protected_mode_iso, {}) catch {},
-                    else => log.warn("unimplemented ESC callback: {f}", .{action}}) catch {},
+                    else => log.warn("unimplemented ESC callback: {f}", .{action}),
                 },
 
                 // EPA - End of Guarded Area
                 'W' => switch (action.intermediates.len) {
                     0 => self.handler.vt(.protected_mode_off, {}) catch {},
-                    else => log.warn("unimplemented ESC callback: {f}", .{action}}) catch {},
+                    else => log.warn("unimplemented ESC callback: {f}", .{action}),
                 },
 
                 // DECID
                 'Z' => if (action.intermediates.len == 0) {
                     self.handler.vt(.device_attributes, .primary) catch {};
-                } else log.warn("unimplemented ESC callback: {f}", .{action}}) catch {},
+                } else log.warn("unimplemented ESC callback: {f}", .{action}),
 
                 // RIS - Full Reset
                 'c' => switch (action.intermediates.len) {
@@ -2604,7 +2604,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GL,
                         .charset = .G2,
                         .locking = false,
-                    }}) catch {},
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid single shift 2 command: {f}", .{action});
@@ -2618,7 +2618,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GL,
                         .charset = .G3,
                         .locking = false,
-                    }}) catch {},
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid single shift 3 command: {f}", .{action});
@@ -2632,7 +2632,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GR,
                         .charset = .G1,
                         .locking = false,
-                    }}) catch {},
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid locking shift 1 right command: {f}", .{action});
@@ -2646,7 +2646,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GR,
                         .charset = .G2,
                         .locking = false,
-                    }}) catch {},
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid locking shift 2 right command: {f}", .{action});
@@ -2660,7 +2660,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GR,
                         .charset = .G3,
                         .locking = false,
-                    }}) catch {},
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid locking shift 3 right command: {f}", .{action});
@@ -2673,7 +2673,7 @@ pub fn Stream(comptime H: type) type {
                     @branchHint(.likely);
                     switch (action.intermediates.len) {
                         0 => self.handler.vt(.set_mode, .{ .mode = .keypad_keys }) catch {},
-                        else => log.warn("unimplemented setMode: {f}", .{action}}) catch {},
+                        else => log.warn("unimplemented setMode: {f}", .{action}),
                     }
                 },
 
@@ -2682,7 +2682,7 @@ pub fn Stream(comptime H: type) type {
                     @branchHint(.likely);
                     switch (action.intermediates.len) {
                         0 => self.handler.vt(.reset_mode, .{ .mode = .keypad_keys }) catch {},
-                        else => log.warn("unimplemented setMode: {f}", .{action}}) catch {},
+                        else => log.warn("unimplemented setMode: {f}", .{action}),
                     }
                 },
 
