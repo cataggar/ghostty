@@ -734,18 +734,18 @@ pub fn Stream(comptime H: type) type {
                     .csi_dispatch => |csi_action| self.csiDispatch(csi_action),
                     .esc_dispatch => |esc| self.escDispatch(esc),
                     .osc_dispatch => |cmd| self.oscDispatch(cmd),
-                    .dcs_hook => |dcs| self.handler.vt(.dcs_hook, dcs),
-                    .dcs_put => |code| self.handler.vt(.dcs_put, code),
-                    .dcs_unhook => self.handler.vt(.dcs_unhook, {}),
-                    .apc_start => self.handler.vt(.apc_start, {}),
-                    .apc_put => |code| self.handler.vt(.apc_put, code),
-                    .apc_end => self.handler.vt(.apc_end, {}),
+                    .dcs_hook => |dcs| self.handler.vt(.dcs_hook, dcs) catch {},
+                    .dcs_put => |code| self.handler.vt(.dcs_put, code) catch {},
+                    .dcs_unhook => self.handler.vt(.dcs_unhook, {}) catch {},
+                    .apc_start => self.handler.vt(.apc_start, {}) catch {},
+                    .apc_put => |code| self.handler.vt(.apc_put, code) catch {},
+                    .apc_end => self.handler.vt(.apc_end, {}) catch {},
                 }
             }
         }
 
         inline fn print(self: *Self, c: u21) void {
-            self.handler.vt(.print, .{ .cp = c });
+            self.handler.vt(.print, .{ .cp = c }) catch {};
         }
 
         inline fn execute(self: *Self, c: u8) void {
@@ -767,14 +767,14 @@ pub fn Stream(comptime H: type) type {
                 // We ignore SOH/STX: https://github.com/microsoft/terminal/issues/10786
                 .NUL, .SOH, .STX => {},
 
-                .ENQ => self.handler.vt(.enquiry, {}),
-                .BEL => self.handler.vt(.bell, {}),
-                .BS => self.handler.vt(.backspace, {}),
-                .HT => self.handler.vt(.horizontal_tab, 1),
-                .LF, .VT, .FF => self.handler.vt(.linefeed, {}),
-                .CR => self.handler.vt(.carriage_return, {}),
-                .SO => self.handler.vt(.invoke_charset, .{ .bank = .GL, .charset = .G1, .locking = false }),
-                .SI => self.handler.vt(.invoke_charset, .{ .bank = .GL, .charset = .G0, .locking = false }),
+                .ENQ => self.handler.vt(.enquiry, {}) catch {},
+                .BEL => self.handler.vt(.bell, {}) catch {},
+                .BS => self.handler.vt(.backspace, {}) catch {},
+                .HT => self.handler.vt(.horizontal_tab, 1) catch {},
+                .LF, .VT, .FF => self.handler.vt(.linefeed, {}) catch {},
+                .CR => self.handler.vt(.carriage_return, {}) catch {},
+                .SO => self.handler.vt(.invoke_charset, .{ .bank = .GL, .charset = .G1, .locking = false }) catch {},
+                .SI => self.handler.vt(.invoke_charset, .{ .bank = .GL, .charset = .G0, .locking = false }) catch {},
 
                 else => log.warn("invalid C0 character, ignoring: 0x{x}", .{c}),
             }
@@ -820,7 +820,7 @@ pub fn Stream(comptime H: type) type {
                                     return;
                                 },
                             },
-                        }),
+                        }) catch {},
 
                         else => log.warn(
                             "ignoring unimplemented CSI A with intermediates: {s}",
@@ -841,7 +841,7 @@ pub fn Stream(comptime H: type) type {
                                 return;
                             },
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI B with intermediates: {s}",
@@ -863,7 +863,7 @@ pub fn Stream(comptime H: type) type {
                                     return;
                                 },
                             },
-                        }),
+                        }) catch {},
 
                         else => log.warn(
                             "ignoring unimplemented CSI C with intermediates: {s}",
@@ -884,7 +884,7 @@ pub fn Stream(comptime H: type) type {
                                 return;
                             },
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI D with intermediates: {s}",
@@ -905,8 +905,8 @@ pub fn Stream(comptime H: type) type {
                                     return;
                                 },
                             },
-                        });
-                        self.handler.vt(.carriage_return, {});
+                        }) catch {};
+                        self.handler.vt(.carriage_return, {}) catch {};
                     },
 
                     else => log.warn(
@@ -928,8 +928,8 @@ pub fn Stream(comptime H: type) type {
                                     return;
                                 },
                             },
-                        });
-                        self.handler.vt(.carriage_return, {});
+                        }) catch {};
+                        self.handler.vt(.carriage_return, {}) catch {};
                     },
 
                     else => log.warn(
@@ -951,7 +951,7 @@ pub fn Stream(comptime H: type) type {
                                 return;
                             },
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI G with intermediates: {s}",
@@ -975,7 +975,7 @@ pub fn Stream(comptime H: type) type {
                                     return;
                                 },
                             };
-                            self.handler.vt(.cursor_pos, pos);
+                            self.handler.vt(.cursor_pos, pos) catch {};
                         },
 
                         else => log.warn(
@@ -994,7 +994,7 @@ pub fn Stream(comptime H: type) type {
                             log.warn("invalid horizontal tab command: {f}", .{input});
                             return;
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI I with intermediates: {s}",
@@ -1027,11 +1027,11 @@ pub fn Stream(comptime H: type) type {
                     };
 
                     switch (mode) {
-                        .below => self.handler.vt(.erase_display_below, protected),
-                        .above => self.handler.vt(.erase_display_above, protected),
-                        .complete => self.handler.vt(.erase_display_complete, protected),
-                        .scrollback => self.handler.vt(.erase_display_scrollback, protected),
-                        .scroll_complete => self.handler.vt(.erase_display_scroll_complete, protected),
+                        .below => self.handler.vt(.erase_display_below, protected) catch {},
+                        .above => self.handler.vt(.erase_display_above, protected) catch {},
+                        .complete => self.handler.vt(.erase_display_complete, protected) catch {},
+                        .scrollback => self.handler.vt(.erase_display_scrollback, protected) catch {},
+                        .scroll_complete => self.handler.vt(.erase_display_scroll_complete, protected) catch {},
                     }
                 },
 
@@ -1063,10 +1063,10 @@ pub fn Stream(comptime H: type) type {
                     };
 
                     switch (mode) {
-                        .right => self.handler.vt(.erase_line_right, protected),
-                        .left => self.handler.vt(.erase_line_left, protected),
-                        .complete => self.handler.vt(.erase_line_complete, protected),
-                        .right_unless_pending_wrap => self.handler.vt(.erase_line_right_unless_pending_wrap, protected),
+                        .right => self.handler.vt(.erase_line_right, protected) catch {},
+                        .left => self.handler.vt(.erase_line_left, protected) catch {},
+                        .complete => self.handler.vt(.erase_line_complete, protected) catch {},
+                        .right_unless_pending_wrap => self.handler.vt(.erase_line_right_unless_pending_wrap, protected) catch {},
                         _ => {
                             @branchHint(.unlikely);
                             log.warn("invalid erase line mode: {}", .{mode});
@@ -1084,7 +1084,7 @@ pub fn Stream(comptime H: type) type {
                             log.warn("invalid IL command: {f}", .{input});
                             return;
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI L with intermediates: {s}",
@@ -1102,7 +1102,7 @@ pub fn Stream(comptime H: type) type {
                             log.warn("invalid DL command: {f}", .{input});
                             return;
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI M with intermediates: {s}",
@@ -1119,7 +1119,7 @@ pub fn Stream(comptime H: type) type {
                             log.warn("invalid delete characters command: {f}", .{input});
                             return;
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI P with intermediates: {s}",
@@ -1137,7 +1137,7 @@ pub fn Stream(comptime H: type) type {
                             log.warn("invalid scroll up command: {f}", .{input});
                             return;
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI S with intermediates: {s}",
@@ -1154,7 +1154,7 @@ pub fn Stream(comptime H: type) type {
                             log.warn("invalid scroll down command: {f}", .{input});
                             return;
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI T with intermediates: {s}",
@@ -1168,7 +1168,7 @@ pub fn Stream(comptime H: type) type {
                         if (input.params.len == 0 or
                             (input.params.len == 1 and input.params[0] == 0))
                         {
-                            self.handler.vt(.tab_set, {});
+                            self.handler.vt(.tab_set, {}) catch {};
                             return;
                         }
 
@@ -1178,9 +1178,9 @@ pub fn Stream(comptime H: type) type {
                             1 => switch (input.params[0]) {
                                 0 => unreachable,
 
-                                2 => self.handler.vt(.tab_clear_current, {}),
+                                2 => self.handler.vt(.tab_clear_current, {}) catch {},
 
-                                5 => self.handler.vt(.tab_clear_all, {}),
+                                5 => self.handler.vt(.tab_clear_all, {}) catch {},
 
                                 else => {},
                             },
@@ -1196,7 +1196,7 @@ pub fn Stream(comptime H: type) type {
                         input.params.len == 1 and
                         input.params[0] == 5)
                     {
-                        self.handler.vt(.tab_reset, {});
+                        self.handler.vt(.tab_reset, {}) catch {};
                     } else log.warn("invalid cursor tabulation control: {f}", .{input}),
 
                     else => log.warn(
@@ -1217,7 +1217,7 @@ pub fn Stream(comptime H: type) type {
                                 log.warn("invalid erase characters command: {f}", .{input});
                                 return;
                             },
-                        }),
+                        }) catch {},
 
                         else => log.warn(
                             "ignoring unimplemented CSI X with intermediates: {s}",
@@ -1235,7 +1235,7 @@ pub fn Stream(comptime H: type) type {
                             log.warn("invalid horizontal tab back command: {f}", .{input});
                             return;
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI Z with intermediates: {s}",
@@ -1254,7 +1254,7 @@ pub fn Stream(comptime H: type) type {
                                 return;
                             },
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI a with intermediates: {s}",
@@ -1271,7 +1271,7 @@ pub fn Stream(comptime H: type) type {
                             log.warn("invalid print repeat command: {f}", .{input});
                             return;
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI b with intermediates: {s}",
@@ -1292,7 +1292,7 @@ pub fn Stream(comptime H: type) type {
                     };
 
                     if (req) |r| {
-                        self.handler.vt(.device_attributes, r);
+                        self.handler.vt(.device_attributes, r) catch {};
                     } else {
                         log.warn("invalid device attributes command: {f}", .{input});
                         return;
@@ -1310,7 +1310,7 @@ pub fn Stream(comptime H: type) type {
                                 return;
                             },
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI d with intermediates: {s}",
@@ -1329,7 +1329,7 @@ pub fn Stream(comptime H: type) type {
                                 return;
                             },
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI e with intermediates: {s}",
@@ -1352,8 +1352,8 @@ pub fn Stream(comptime H: type) type {
                             },
                         };
                         switch (mode) {
-                            .current => self.handler.vt(.tab_clear_current, {}),
-                            .all => self.handler.vt(.tab_clear_all, {}),
+                            .current => self.handler.vt(.tab_clear_current, {}) catch {},
+                            .all => self.handler.vt(.tab_clear_all, {}) catch {},
                             _ => log.warn("unknown tab clear mode: {}", .{mode}),
                         }
                     },
@@ -1378,7 +1378,7 @@ pub fn Stream(comptime H: type) type {
 
                     for (input.params) |mode_int| {
                         if (modes.modeFromInt(mode_int, ansi_mode)) |mode| {
-                            self.handler.vt(.set_mode, .{ .mode = mode });
+                            self.handler.vt(.set_mode, .{ .mode = mode }) catch {};
                         } else {
                             log.warn("unimplemented mode: {}", .{mode_int});
                         }
@@ -1399,7 +1399,7 @@ pub fn Stream(comptime H: type) type {
 
                     for (input.params) |mode_int| {
                         if (modes.modeFromInt(mode_int, ansi_mode)) |mode| {
-                            self.handler.vt(.reset_mode, .{ .mode = mode });
+                            self.handler.vt(.reset_mode, .{ .mode = mode }) catch {};
                         } else {
                             log.warn("unimplemented mode: {}", .{mode_int});
                         }
@@ -1420,7 +1420,7 @@ pub fn Stream(comptime H: type) type {
                             };
                             while (p.next()) |attr| {
                                 // log.info("SGR attribute: {}", .{attr});
-                                self.handler.vt(.set_attribute, attr);
+                                self.handler.vt(.set_attribute, attr) catch {};
                             }
                         },
 
@@ -1428,7 +1428,7 @@ pub fn Stream(comptime H: type) type {
                             '>' => blk: {
                                 if (input.params.len == 0) {
                                     // Reset
-                                    self.handler.vt(.modify_key_format, .legacy);
+                                    self.handler.vt(.modify_key_format, .legacy) catch {};
                                     break :blk;
                                 }
 
@@ -1467,7 +1467,7 @@ pub fn Stream(comptime H: type) type {
                                     }
                                 }
 
-                                self.handler.vt(.modify_key_format, format);
+                                self.handler.vt(.modify_key_format, format) catch {};
                             },
 
                             else => log.warn(
@@ -1514,7 +1514,7 @@ pub fn Stream(comptime H: type) type {
                             return;
                         };
 
-                        self.handler.vt(.device_status, .{ .request = req });
+                        self.handler.vt(.device_status, .{ .request = req }) catch {};
                         return;
                     }
 
@@ -1528,7 +1528,7 @@ pub fn Stream(comptime H: type) type {
                                 // control what exactly is being disabled. However, we
                                 // only support reverting back to modify other keys in
                                 // numeric except format.
-                                self.handler.vt(.modify_key_format, .other_keys_numeric_except);
+                                self.handler.vt(.modify_key_format, .other_keys_numeric_except) catch {};
                             },
 
                             else => log.warn(
@@ -1570,12 +1570,12 @@ pub fn Stream(comptime H: type) type {
                         const mode_raw = input.params[0];
                         const mode = modes.modeFromInt(mode_raw, ansi_mode);
                         if (mode) |m| {
-                            self.handler.vt(.request_mode, .{ .mode = m });
+                            self.handler.vt(.request_mode, .{ .mode = m }) catch {};
                         } else {
                             self.handler.vt(.request_mode_unknown, .{
                                 .mode = mode_raw,
                                 .ansi = ansi_mode,
-                            });
+                            }) catch {};
                         }
                     },
 
@@ -1610,7 +1610,7 @@ pub fn Stream(comptime H: type) type {
                                     return;
                                 },
                             };
-                            self.handler.vt(.cursor_style, style);
+                            self.handler.vt(.cursor_style, style) catch {};
                         },
 
                         // DECSCA
@@ -1631,14 +1631,14 @@ pub fn Stream(comptime H: type) type {
                             };
 
                             switch (mode) {
-                                .off => self.handler.vt(.protected_mode_off, {}),
-                                .iso => self.handler.vt(.protected_mode_iso, {}),
-                                .dec => self.handler.vt(.protected_mode_dec, {}),
+                                .off => self.handler.vt(.protected_mode_off, {}) catch {},
+                                .iso => self.handler.vt(.protected_mode_iso, {}) catch {},
+                                .dec => self.handler.vt(.protected_mode_dec, {}) catch {},
                             }
                         },
 
                         // XTVERSION
-                        '>' => self.handler.vt(.xtversion, {}),
+                        '>' => self.handler.vt(.xtversion, {}) catch {},
                         else => {
                             log.warn(
                                 "ignoring unimplemented CSI q with intermediates: {s}",
@@ -1658,9 +1658,9 @@ pub fn Stream(comptime H: type) type {
                     switch (input.intermediates.len) {
                         // DECSTBM - Set Top and Bottom Margins
                         0 => switch (input.params.len) {
-                            0 => self.handler.vt(.top_and_bottom_margin, .{ .top_left = 0, .bottom_right = 0 }),
-                            1 => self.handler.vt(.top_and_bottom_margin, .{ .top_left = input.params[0], .bottom_right = 0 }),
-                            2 => self.handler.vt(.top_and_bottom_margin, .{ .top_left = input.params[0], .bottom_right = input.params[1] }),
+                            0 => self.handler.vt(.top_and_bottom_margin, .{ .top_left = 0, .bottom_right = 0 }) catch {},
+                            1 => self.handler.vt(.top_and_bottom_margin, .{ .top_left = input.params[0], .bottom_right = 0 }) catch {},
+                            2 => self.handler.vt(.top_and_bottom_margin, .{ .top_left = input.params[0], .bottom_right = input.params[1] }) catch {},
                             else => {
                                 @branchHint(.unlikely);
                                 log.warn("invalid DECSTBM command: {f}", .{input});
@@ -1672,7 +1672,7 @@ pub fn Stream(comptime H: type) type {
                             '?' => {
                                 for (input.params) |mode_int| {
                                     if (modes.modeFromInt(mode_int, false)) |mode| {
-                                        self.handler.vt(.restore_mode, .{ .mode = mode });
+                                        self.handler.vt(.restore_mode, .{ .mode = mode }) catch {};
                                     } else {
                                         log.warn(
                                             "unimplemented restore mode: {}",
@@ -1702,9 +1702,9 @@ pub fn Stream(comptime H: type) type {
                         // to our handler to do the proper logic. If mode 69
                         // is set, then we should invoke DECSLRM, otherwise
                         // we should invoke SC.
-                        0 => self.handler.vt(.left_and_right_margin_ambiguous, {}),
-                        1 => self.handler.vt(.left_and_right_margin, .{ .top_left = input.params[0], .bottom_right = 0 }),
-                        2 => self.handler.vt(.left_and_right_margin, .{ .top_left = input.params[0], .bottom_right = input.params[1] }),
+                        0 => self.handler.vt(.left_and_right_margin_ambiguous, {}) catch {},
+                        1 => self.handler.vt(.left_and_right_margin, .{ .top_left = input.params[0], .bottom_right = 0 }) catch {},
+                        2 => self.handler.vt(.left_and_right_margin, .{ .top_left = input.params[0], .bottom_right = input.params[1] }) catch {},
                         else => log.warn("invalid DECSLRM command: {f}", .{input}),
                     },
 
@@ -1712,7 +1712,7 @@ pub fn Stream(comptime H: type) type {
                         '?' => {
                             for (input.params) |mode_int| {
                                 if (modes.modeFromInt(mode_int, false)) |mode| {
-                                    self.handler.vt(.save_mode, .{ .mode = mode });
+                                    self.handler.vt(.save_mode, .{ .mode = mode }) catch {};
                                 } else {
                                     log.warn(
                                         "unimplemented save mode: {}",
@@ -1740,7 +1740,7 @@ pub fn Stream(comptime H: type) type {
                                 },
                             };
 
-                            self.handler.vt(.mouse_shift_capture, capture);
+                            self.handler.vt(.mouse_shift_capture, capture) catch {};
                         },
 
                         else => log.warn(
@@ -1762,28 +1762,28 @@ pub fn Stream(comptime H: type) type {
                             switch (input.params[0]) {
                                 14 => if (input.params.len == 1) {
                                     // report the text area size in pixels
-                                    self.handler.vt(.size_report, .csi_14_t);
+                                    self.handler.vt(.size_report, .csi_14_t) catch {};
                                 } else log.warn(
                                     "ignoring CSI 14 t with extra parameters: {f}",
                                     .{input},
                                 ),
                                 16 => if (input.params.len == 1) {
                                     // report cell size in pixels
-                                    self.handler.vt(.size_report, .csi_16_t);
+                                    self.handler.vt(.size_report, .csi_16_t) catch {};
                                 } else log.warn(
                                     "ignoring CSI 16 t with extra parameters: {f}",
                                     .{input},
                                 ),
                                 18 => if (input.params.len == 1) {
                                     // report screen size in characters
-                                    self.handler.vt(.size_report, .csi_18_t);
+                                    self.handler.vt(.size_report, .csi_18_t) catch {};
                                 } else log.warn(
                                     "ignoring CSI 18 t with extra parameters: {f}",
                                     .{input},
                                 ),
                                 21 => if (input.params.len == 1) {
                                     // report window title
-                                    self.handler.vt(.size_report, .csi_21_t);
+                                    self.handler.vt(.size_report, .csi_21_t) catch {};
                                 } else log.warn(
                                     "ignoring CSI 21 t with extra parameters: {f}",
                                     .{input},
@@ -1800,8 +1800,8 @@ pub fn Stream(comptime H: type) type {
                                     else
                                         0;
                                     switch (number) {
-                                        22 => self.handler.vt(.title_push, index),
-                                        23 => self.handler.vt(.title_pop, index),
+                                        22 => self.handler.vt(.title_push, index) catch {},
+                                        23 => self.handler.vt(.title_pop, index) catch {},
                                         else => @compileError("unreachable"),
                                     }
                                 } else log.warn(
@@ -1825,11 +1825,11 @@ pub fn Stream(comptime H: type) type {
                 },
 
                 'u' => switch (input.intermediates.len) {
-                    0 => self.handler.vt(.restore_cursor, {}),
+                    0 => self.handler.vt(.restore_cursor, {}) catch {},
 
                     // Kitty keyboard protocol
                     1 => switch (input.intermediates[0]) {
-                        '?' => self.handler.vt(.kitty_keyboard_query, {}),
+                        '?' => self.handler.vt(.kitty_keyboard_query, {}) catch {},
 
                         '>' => push: {
                             const flags: u5 = if (input.params.len == 1)
@@ -1840,7 +1840,7 @@ pub fn Stream(comptime H: type) type {
                             else
                                 0;
 
-                            self.handler.vt(.kitty_keyboard_push, .{ .flags = @as(kitty.KeyFlags, @bitCast(flags)) });
+                            self.handler.vt(.kitty_keyboard_push, .{ .flags = @as(kitty.KeyFlags, @bitCast(flags)) }) catch {};
                         },
 
                         '<' => {
@@ -1849,7 +1849,7 @@ pub fn Stream(comptime H: type) type {
                             else
                                 1;
 
-                            self.handler.vt(.kitty_keyboard_pop, number);
+                            self.handler.vt(.kitty_keyboard_pop, number) catch {};
                         },
 
                         '=' => set: {
@@ -1878,9 +1878,9 @@ pub fn Stream(comptime H: type) type {
 
                             const kitty_flags: streampkg.Action.KittyKeyboardFlags = .{ .flags = @as(kitty.KeyFlags, @bitCast(flags)) };
                             switch (action_tag) {
-                                .kitty_keyboard_set => self.handler.vt(.kitty_keyboard_set, kitty_flags),
-                                .kitty_keyboard_set_or => self.handler.vt(.kitty_keyboard_set_or, kitty_flags),
-                                .kitty_keyboard_set_not => self.handler.vt(.kitty_keyboard_set_not, kitty_flags),
+                                .kitty_keyboard_set => self.handler.vt(.kitty_keyboard_set, kitty_flags) catch {},
+                                .kitty_keyboard_set_or => self.handler.vt(.kitty_keyboard_set_or, kitty_flags) catch {},
+                                .kitty_keyboard_set_not => self.handler.vt(.kitty_keyboard_set_not, kitty_flags) catch {},
                                 else => unreachable,
                             }
                         },
@@ -1907,7 +1907,7 @@ pub fn Stream(comptime H: type) type {
                             log.warn("invalid ICH command: {f}", .{input});
                             return;
                         },
-                    }),
+                    }) catch {},
 
                     else => log.warn(
                         "ignoring unimplemented CSI @: {f}",
@@ -1936,7 +1936,7 @@ pub fn Stream(comptime H: type) type {
                         },
                     };
 
-                    self.handler.vt(.active_status_display, display);
+                    self.handler.vt(.active_status_display, display) catch {};
                 },
 
                 else => log.warn("unimplemented CSI action: {f}", .{input}),
@@ -1969,7 +1969,7 @@ pub fn Stream(comptime H: type) type {
             switch (cmd) {
                 .semantic_prompt => |sp| {
                     @branchHint(.likely);
-                    self.handler.vt(.semantic_prompt, sp);
+                    self.handler.vt(.semantic_prompt, sp) catch {};
                 },
 
                 .change_window_title => |title| {
@@ -1980,7 +1980,7 @@ pub fn Stream(comptime H: type) type {
                         return;
                     }
 
-                    self.handler.vt(.window_title, .{ .title = title });
+                    self.handler.vt(.window_title, .{ .title = title }) catch {};
                 },
 
                 .change_window_icon => |icon| {
@@ -1992,12 +1992,12 @@ pub fn Stream(comptime H: type) type {
                     self.handler.vt(.clipboard_contents, .{
                         .kind = clip.kind,
                         .data = clip.data,
-                    });
+                    }) catch {};
                 },
 
                 .report_pwd => |v| {
                     @branchHint(.likely);
-                    self.handler.vt(.report_pwd, .{ .url = v.value });
+                    self.handler.vt(.report_pwd, .{ .url = v.value }) catch {};
                 },
 
                 .mouse_shape => |v| {
@@ -2007,7 +2007,7 @@ pub fn Stream(comptime H: type) type {
                         return;
                     };
 
-                    self.handler.vt(.mouse_shape, shape);
+                    self.handler.vt(.mouse_shape, shape) catch {};
                 },
 
                 .color_operation => |v| {
@@ -2016,18 +2016,18 @@ pub fn Stream(comptime H: type) type {
                         .op = v.op,
                         .requests = v.requests,
                         .terminator = v.terminator,
-                    });
+                    }) catch {};
                 },
 
                 .kitty_color_protocol => |v| {
-                    self.handler.vt(.kitty_color_report, v);
+                    self.handler.vt(.kitty_color_report, v) catch {};
                 },
 
                 .show_desktop_notification => |v| {
                     self.handler.vt(.show_desktop_notification, .{
                         .title = v.title,
                         .body = v.body,
-                    });
+                    }) catch {};
                 },
 
                 .hyperlink_start => |v| {
@@ -2035,16 +2035,16 @@ pub fn Stream(comptime H: type) type {
                     self.handler.vt(.start_hyperlink, .{
                         .uri = v.uri,
                         .id = v.id,
-                    });
+                    }) catch {};
                 },
 
                 .hyperlink_end => {
                     @branchHint(.likely);
-                    self.handler.vt(.end_hyperlink, {});
+                    self.handler.vt(.end_hyperlink, {}) catch {};
                 },
 
                 .conemu_progress_report => |v| {
-                    self.handler.vt(.progress_report, v);
+                    self.handler.vt(.progress_report, v) catch {};
                 },
 
                 .conemu_sleep,
@@ -2099,7 +2099,7 @@ pub fn Stream(comptime H: type) type {
             self.handler.vt(.configure_charset, .{
                 .slot = slot,
                 .charset = set,
-            });
+            }) catch {};
         }
 
         inline fn escDispatch(
@@ -2145,7 +2145,7 @@ pub fn Stream(comptime H: type) type {
                 '7' => {
                     @branchHint(.likely);
                     switch (action.intermediates.len) {
-                        0 => self.handler.vt(.save_cursor, {}),
+                        0 => self.handler.vt(.save_cursor, {}) catch {},
                         else => {
                             @branchHint(.unlikely);
                             log.warn("invalid command: {f}", .{action});
@@ -2159,14 +2159,14 @@ pub fn Stream(comptime H: type) type {
                     switch (action.intermediates.len) {
                         // DECRC - Restore Cursor
                         0 => {
-                            self.handler.vt(.restore_cursor, {});
+                            self.handler.vt(.restore_cursor, {}) catch {};
                             break :blk {};
                         },
 
                         1 => switch (action.intermediates[0]) {
                             // DECALN - Fill Screen with E
                             '#' => {
-                                self.handler.vt(.decaln, {});
+                                self.handler.vt(.decaln, {}) catch {};
                                 break :blk {};
                             },
 
@@ -2181,7 +2181,7 @@ pub fn Stream(comptime H: type) type {
 
                 // IND - Index
                 'D' => switch (action.intermediates.len) {
-                    0 => self.handler.vt(.index, {}),
+                    0 => self.handler.vt(.index, {}) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid index command: {f}", .{action});
@@ -2191,7 +2191,7 @@ pub fn Stream(comptime H: type) type {
 
                 // NEL - Next Line
                 'E' => switch (action.intermediates.len) {
-                    0 => self.handler.vt(.next_line, {}),
+                    0 => self.handler.vt(.next_line, {}) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid next line command: {f}", .{action});
@@ -2201,7 +2201,7 @@ pub fn Stream(comptime H: type) type {
 
                 // HTS - Horizontal Tab Set
                 'H' => switch (action.intermediates.len) {
-                    0 => self.handler.vt(.tab_set, {}),
+                    0 => self.handler.vt(.tab_set, {}) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid tab set command: {f}", .{action});
@@ -2213,7 +2213,7 @@ pub fn Stream(comptime H: type) type {
                 'M' => {
                     @branchHint(.likely);
                     switch (action.intermediates.len) {
-                        0 => self.handler.vt(.reverse_index, {}),
+                        0 => self.handler.vt(.reverse_index, {}) catch {},
                         else => {
                             @branchHint(.unlikely);
                             log.warn("invalid reverse index command: {f}", .{action});
@@ -2228,7 +2228,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GL,
                         .charset = .G2,
                         .locking = true,
-                    }),
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid single shift 2 command: {f}", .{action});
@@ -2242,7 +2242,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GL,
                         .charset = .G3,
                         .locking = true,
-                    }),
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid single shift 3 command: {f}", .{action});
@@ -2252,24 +2252,24 @@ pub fn Stream(comptime H: type) type {
 
                 // SPA - Start of Guarded Area
                 'V' => switch (action.intermediates.len) {
-                    0 => self.handler.vt(.protected_mode_iso, {}),
+                    0 => self.handler.vt(.protected_mode_iso, {}) catch {},
                     else => log.warn("unimplemented ESC callback: {f}", .{action}),
                 },
 
                 // EPA - End of Guarded Area
                 'W' => switch (action.intermediates.len) {
-                    0 => self.handler.vt(.protected_mode_off, {}),
+                    0 => self.handler.vt(.protected_mode_off, {}) catch {},
                     else => log.warn("unimplemented ESC callback: {f}", .{action}),
                 },
 
                 // DECID
                 'Z' => if (action.intermediates.len == 0) {
-                    self.handler.vt(.device_attributes, .primary);
+                    self.handler.vt(.device_attributes, .primary) catch {};
                 } else log.warn("unimplemented ESC callback: {f}", .{action}),
 
                 // RIS - Full Reset
                 'c' => switch (action.intermediates.len) {
-                    0 => self.handler.vt(.full_reset, {}),
+                    0 => self.handler.vt(.full_reset, {}) catch {},
                     else => {
                         log.warn("invalid full reset command: {f}", .{action});
                         return;
@@ -2282,7 +2282,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GL,
                         .charset = .G2,
                         .locking = false,
-                    }),
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid single shift 2 command: {f}", .{action});
@@ -2296,7 +2296,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GL,
                         .charset = .G3,
                         .locking = false,
-                    }),
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid single shift 3 command: {f}", .{action});
@@ -2310,7 +2310,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GR,
                         .charset = .G1,
                         .locking = false,
-                    }),
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid locking shift 1 right command: {f}", .{action});
@@ -2324,7 +2324,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GR,
                         .charset = .G2,
                         .locking = false,
-                    }),
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid locking shift 2 right command: {f}", .{action});
@@ -2338,7 +2338,7 @@ pub fn Stream(comptime H: type) type {
                         .bank = .GR,
                         .charset = .G3,
                         .locking = false,
-                    }),
+                    }) catch {},
                     else => {
                         @branchHint(.unlikely);
                         log.warn("invalid locking shift 3 right command: {f}", .{action});
@@ -2350,7 +2350,7 @@ pub fn Stream(comptime H: type) type {
                 '=' => {
                     @branchHint(.likely);
                     switch (action.intermediates.len) {
-                        0 => self.handler.vt(.set_mode, .{ .mode = .keypad_keys }),
+                        0 => self.handler.vt(.set_mode, .{ .mode = .keypad_keys }) catch {},
                         else => log.warn("unimplemented setMode: {f}", .{action}),
                     }
                 },
@@ -2359,7 +2359,7 @@ pub fn Stream(comptime H: type) type {
                 '>' => {
                     @branchHint(.likely);
                     switch (action.intermediates.len) {
-                        0 => self.handler.vt(.reset_mode, .{ .mode = .keypad_keys }),
+                        0 => self.handler.vt(.reset_mode, .{ .mode = .keypad_keys }) catch {},
                         else => log.warn("unimplemented setMode: {f}", .{action}),
                     }
                 },
