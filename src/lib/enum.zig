@@ -22,7 +22,6 @@ pub fn Enum(
     keys: []const ?[:0]const u8,
 ) type {
     var names: [keys.len][:0]const u8 = undefined;
-    var values: [keys.len]comptime_int = undefined;
     var fields_i: usize = 0;
     var holes: usize = 0;
     for (keys) |key_| {
@@ -41,16 +40,33 @@ pub fn Enum(
         };
 
         names[fields_i] = key;
-        values[fields_i] = fields_i + holes;
         fields_i += 1;
+    }
+
+    const TagType = switch (target) {
+        .c => c_int,
+        .zig => std.math.IntFittingRange(0, fields_i - 1),
+    };
+
+    // Build values with the correct tag type
+    var values: [keys.len]TagType = undefined;
+    var val_i: usize = 0;
+    var val_holes: usize = 0;
+    for (keys) |key_| {
+        if (key_ == null) {
+            switch (target) {
+                .zig => {},
+                .c => val_holes += 1,
+            }
+            continue;
+        }
+        values[val_i] = @intCast(val_i + val_holes);
+        val_i += 1;
     }
 
     // Assigned to var so that the type name is nicer in stack traces.
     const Result = @Enum(
-        switch (target) {
-            .c => c_int,
-            .zig => std.math.IntFittingRange(0, fields_i - 1),
-        },
+        TagType,
         .exhaustive,
         names[0..fields_i],
         values[0..fields_i],

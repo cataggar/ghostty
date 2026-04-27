@@ -450,7 +450,7 @@ test "OSC 4:" {
 
     // Test every special color
     for (0..@typeInfo(SpecialColor).@"enum".fields.len) |i| {
-        const special = try std.meta.intToEnum(SpecialColor, i);
+        const special = std.enums.fromInt(SpecialColor, i) orelse return error.InvalidEnumValue;
 
         // Simple color set
         // printf '\e]4;256;red\\'
@@ -482,7 +482,7 @@ test "OSC 5:" {
 
     // Test every special color
     for (0..@typeInfo(SpecialColor).@"enum".fields.len) |i| {
-        const special = try std.meta.intToEnum(SpecialColor, i);
+        const special = std.enums.fromInt(SpecialColor, i) orelse return error.InvalidEnumValue;
 
         // Simple color set
         // printf '\e]4;256;red\\'
@@ -592,7 +592,7 @@ test "OSC 104:" {
 
     // Test every special color
     for (0..@typeInfo(SpecialColor).@"enum".fields.len) |i| {
-        const special = try std.meta.intToEnum(SpecialColor, i);
+        const special = std.enums.fromInt(SpecialColor, i) orelse return error.InvalidEnumValue;
 
         // Simple color set
         // printf '\e]104;256\\'
