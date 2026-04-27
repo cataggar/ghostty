@@ -183,10 +183,11 @@ pub const Handler = struct {
         self: *Handler,
         comptime action: Action.Tag,
         value: Action.Value(action),
-    ) void {
+    ) !void {
         self.vtFallible(action, value) catch |err| {
             self.semantic_failure = true;
             log.warn("error handling VT action action={} err={}", .{ action, err });
+            return err;
         };
     }
 
