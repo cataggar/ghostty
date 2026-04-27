@@ -2042,9 +2042,6 @@ pub const Cell = packed struct(u64) {
     _padding: u16 = 0,
 
     // Content accessor methods (content is raw u24 to satisfy packed union restrictions in Zig 0.16)
-    pub fn codepoint(self: Cell) u21 {
-        return @truncate(self.content);
-    }
 
     pub fn setCodepoint(self: *Cell, cp: u21) void {
         self.content = cp;
@@ -2161,7 +2158,7 @@ pub const Cell = packed struct(u64) {
         return switch (self.content_tag) {
             .codepoint,
             .codepoint_grapheme,
-            => self.codepoint(),
+            => @truncate(self.content),
 
             .bg_color_palette,
             .bg_color_rgb,
