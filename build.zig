@@ -83,7 +83,8 @@ pub fn build(b: *std.Build) !void {
     const i18n = if (config.i18n) try buildpkg.GhosttyI18n.init(b, &config) else null;
 
     // Ghostty executable, the actual runnable Ghostty program.
-    const exe = try buildpkg.GhosttyExe.init(b, &config, &deps);
+    // Skip when used as a dependency — only the ghostty-vt module is needed.
+    const exe = if (!config.is_dep) try buildpkg.GhosttyExe.init(b, &config, &deps) else null;
 
     // Ghostty docs
     const docs = try buildpkg.GhosttyDocs.init(b, &deps);
@@ -177,9 +178,11 @@ pub fn build(b: *std.Build) !void {
     // Runtime "none" is libghostty, anything else is an executable.
     if (config.app_runtime != .none) {
         if (config.emit_exe) {
-            exe.install();
-            resources.install();
-            if (i18n) |v| v.install();
+            if (exe) |e| {
+                e.install();
+                resources.install();
+                if (i18n) |v| v.install();
+            }
         }
     } else if (!config.emit_lib_vt) {
         // The macOS Ghostty Library
@@ -244,7 +247,7 @@ pub fn build(b: *std.Build) !void {
     // Run step
     run: {
         if (config.app_runtime != .none) {
-            const run_cmd = b.addRunArtifact(exe.exe);
+            const run_cmd = b.addRunArtifact((exe orelse break :run).exe);
             if (b.args) |args| run_cmd.addArgs(args);
 
             // Set the proper resources dir so things like shell integration
