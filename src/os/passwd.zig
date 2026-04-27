@@ -116,7 +116,7 @@ pub fn get(alloc: Allocator) !Entry {
         };
 
         // Shell and home are the last two entries
-        var it = std.mem.splitBackwardsScalar(u8, std.mem.trimRight(u8, output, " \r\n"), ':');
+        var it = std.mem.splitBackwardsScalar(u8, std.mem.trimEnd(u8, output, " \r\n"), ':');
         result.shell = if (it.next()) |v| try alloc.dupeZ(u8, v) else null;
         result.home = if (it.next()) |v| try alloc.dupeZ(u8, v) else null;
         return result;

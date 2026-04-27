@@ -77,7 +77,7 @@ pub fn parse(parser: *Parser, _: ?u8) ?*Command {
     const data = cap.trailing();
 
     const key_str: [:0]u8, const value_: ?[:0]u8 = kv: {
-        const index = std.mem.indexOfScalar(u8, data, '=') orelse {
+        const index = std.mem.findScalar(u8, data, '=') orelse {
             break :kv .{ data[0 .. data.len - 1 :0], null };
         };
         data[index] = 0;

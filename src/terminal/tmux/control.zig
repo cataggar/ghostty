@@ -109,7 +109,7 @@ pub const Parser = struct {
             // and then we check to see if that line ended the block.
             .block => if (byte == '\n') {
                 const written = self.buffer.written();
-                const idx = if (std.mem.lastIndexOfScalar(
+                const idx = if (std.mem.rfindScalar(
                     u8,
                     written,
                     '\n',
@@ -117,7 +117,7 @@ pub const Parser = struct {
                 const line = written[idx..];
 
                 if (parseBlockTerminator(line)) |terminator| {
-                    const output = std.mem.trimRight(
+                    const output = std.mem.trimEnd(
                         u8,
                         written[0..idx],
                         "\r\n",
@@ -192,7 +192,7 @@ pub const Parser = struct {
             break :line line;
         };
         const cmd = cmd: {
-            const idx = std.mem.indexOfScalar(u8, line, ' ') orelse line.len;
+            const idx = std.mem.findScalar(u8, line, ' ') orelse line.len;
             break :cmd line[0..idx];
         };
 

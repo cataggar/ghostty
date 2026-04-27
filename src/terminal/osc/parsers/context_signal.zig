@@ -142,7 +142,7 @@ pub const Field = enum {
         while (it.next()) |full| {
             // Parse key=value
             const value = value: {
-                if (std.mem.indexOfScalar(
+                if (std.mem.findScalar(
                     u8,
                     full,
                     '=',
@@ -237,7 +237,7 @@ pub fn parse(parser: *Parser, _: ?u8) ?*OSCCommand {
     }
 
     // Extract the context ID (up to the first semicolon or end of data)
-    const id_end = std.mem.indexOfScalar(u8, rest, ';') orelse rest.len;
+    const id_end = std.mem.findScalar(u8, rest, ';') orelse rest.len;
     const id = rest[0..id_end];
 
     // Validate context ID length (1-64 chars per spec)

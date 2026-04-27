@@ -107,7 +107,7 @@ pub fn postFork(cmd: *Command) Command.PostForkError!void {
                 @intCast(pid),
             ) orelse break :not_found;
 
-            const index = std.mem.lastIndexOfScalar(u8, current_cgroup_raw, '/') orelse break :not_found;
+            const index = std.mem.rfindScalar(u8, current_cgroup_raw, '/') orelse break :not_found;
             const current_cgroup = current_cgroup_raw[index + 1 ..];
 
             if (std.mem.eql(u8, current_cgroup, expected_cgroup)) {

@@ -1012,10 +1012,10 @@ test "Style HTML formatting combined colors and flags" {
     };
     try builder.writer.print("{f}", .{style.formatterHtml()});
     const result = builder.writer.buffered();
-    try testing.expect(std.mem.indexOf(u8, result, "color: rgb(255, 0, 0);") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "background-color: rgb(0, 0, 255);") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "font-weight: bold;") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "font-style: italic;") != null);
+    try testing.expect(std.mem.find(u8, result, "color: rgb(255, 0, 0);") != null);
+    try testing.expect(std.mem.find(u8, result, "background-color: rgb(0, 0, 255);") != null);
+    try testing.expect(std.mem.find(u8, result, "font-weight: bold;") != null);
+    try testing.expect(std.mem.find(u8, result, "font-style: italic;") != null);
 }
 
 test "Style HTML formatting single decoration line" {
@@ -1027,8 +1027,8 @@ test "Style HTML formatting single decoration line" {
     var style: Style = .{ .flags = .{ .underline = .single } };
     try builder.writer.print("{f}", .{style.formatterHtml()});
     const result = builder.writer.buffered();
-    try testing.expect(std.mem.indexOf(u8, result, "text-decoration-line: underline;") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "text-decoration-style: solid;") != null);
+    try testing.expect(std.mem.find(u8, result, "text-decoration-line: underline;") != null);
+    try testing.expect(std.mem.find(u8, result, "text-decoration-style: solid;") != null);
 }
 
 test "Style HTML formatting multiple decoration lines" {
@@ -1040,8 +1040,8 @@ test "Style HTML formatting multiple decoration lines" {
     var style: Style = .{ .flags = .{ .underline = .curly, .strikethrough = true, .overline = true } };
     try builder.writer.print("{f}", .{style.formatterHtml()});
     const result = builder.writer.buffered();
-    try testing.expect(std.mem.indexOf(u8, result, "text-decoration-line: underline line-through overline;") != null);
-    try testing.expect(std.mem.indexOf(u8, result, "text-decoration-style: wavy;") != null);
+    try testing.expect(std.mem.find(u8, result, "text-decoration-line: underline line-through overline;") != null);
+    try testing.expect(std.mem.find(u8, result, "text-decoration-style: wavy;") != null);
 }
 
 test "Style HTML formatting palette with palette set emits rgb" {

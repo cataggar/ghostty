@@ -5841,7 +5841,7 @@ pub const Palette = struct {
         input: ?[]const u8,
     ) !void {
         const value = input orelse return error.ValueRequired;
-        const eqlIdx = std.mem.indexOf(u8, value, "=") orelse
+        const eqlIdx = std.mem.find(u8, value, "=") orelse
             return error.InvalidValue;
 
         // Parse the key part (trim whitespace)
@@ -6294,7 +6294,7 @@ pub const RepeatableFontVariation = struct {
 
     pub fn parseCLI(self: *Self, alloc: Allocator, input_: ?[]const u8) !void {
         const input = input_ orelse return error.ValueRequired;
-        const eql_idx = std.mem.indexOf(u8, input, "=") orelse return error.InvalidValue;
+        const eql_idx = std.mem.find(u8, input, "=") orelse return error.InvalidValue;
         const whitespace = " \t";
         const key = std.mem.trim(u8, input[0..eql_idx], whitespace);
         const value = std.mem.trim(u8, input[eql_idx + 1 ..], whitespace);
@@ -7210,7 +7210,7 @@ pub const Keybinds = struct {
             const value = input orelse return error.ValueRequired;
 
             // If we don't have a colon, use the value as-is, no copy
-            if (std.mem.indexOf(u8, value, ":") == null)
+            if (std.mem.find(u8, value, ":") == null)
                 break :value value;
 
             // If we have a colon, we copy the whole value for now. We could
@@ -7245,8 +7245,8 @@ pub const Keybinds = struct {
         // Check for table syntax: "name/" or "name/binding"
         // We look for '/' only before the first '=' to avoid matching
         // action arguments like "foo=text:/hello".
-        const eq_idx = std.mem.indexOfScalar(u8, value, '=') orelse value.len;
-        if (std.mem.indexOfScalar(u8, value[0..eq_idx], '/')) |slash_idx| table: {
+        const eq_idx = std.mem.findScalar(u8, value, '=') orelse value.len;
+        if (std.mem.findScalar(u8, value[0..eq_idx], '/')) |slash_idx| table: {
             const table_name = value[0..slash_idx];
 
             // Length zero is valid, so you can set `/=action` for the slash key
@@ -7925,8 +7925,8 @@ pub const Keybinds = struct {
         try keybinds.formatEntry(formatterpkg.entryFormatter("keybind", &buf.writer));
 
         const output = buf.written();
-        try testing.expect(std.mem.indexOf(u8, output, "keybind = shift+b=csi:world\n") != null);
-        try testing.expect(std.mem.indexOf(u8, output, "keybind = foo/shift+a=csi:hello\n") != null);
+        try testing.expect(std.mem.find(u8, output, "keybind = shift+b=csi:world\n") != null);
+        try testing.expect(std.mem.find(u8, output, "keybind = foo/shift+a=csi:hello\n") != null);
     }
 
     test "parseCLI clear clears tables" {
@@ -7984,7 +7984,7 @@ pub const RepeatableCodepointMap = struct {
 
     pub fn parseCLI(self: *Self, alloc: Allocator, input_: ?[]const u8) !void {
         const input = input_ orelse return error.ValueRequired;
-        const eql_idx = std.mem.indexOf(u8, input, "=") orelse return error.InvalidValue;
+        const eql_idx = std.mem.find(u8, input, "=") orelse return error.InvalidValue;
         const whitespace = " \t";
         const key = std.mem.trim(u8, input[0..eql_idx], whitespace);
         const value = std.mem.trim(u8, input[eql_idx + 1 ..], whitespace);
@@ -8254,7 +8254,7 @@ pub const RepeatableClipboardCodepointMap = struct {
 
     pub fn parseCLI(self: *Self, alloc: Allocator, input_: ?[]const u8) !void {
         const input = input_ orelse return error.ValueRequired;
-        const eql_idx = std.mem.indexOf(u8, input, "=") orelse return error.InvalidValue;
+        const eql_idx = std.mem.find(u8, input, "=") orelse return error.InvalidValue;
         const whitespace = " \t";
         const key = std.mem.trim(u8, input[0..eql_idx], whitespace);
         const value = std.mem.trim(u8, input[eql_idx + 1 ..], whitespace);
@@ -9847,11 +9847,11 @@ pub const Theme = struct {
         // On Windows, a colon at index 1 is a drive letter (e.g. C:\...)
         // and should not trigger light/dark pair parsing.
         const has_colon = if (comptime builtin.os.tag == .windows)
-            if (std.mem.indexOf(u8, input, ":")) |idx| idx != 1 else false
+            if (std.mem.find(u8, input, ":")) |idx| idx != 1 else false
         else
-            std.mem.indexOf(u8, input, ":") != null;
-        if (std.mem.indexOf(u8, input, ",") != null or
-            std.mem.indexOf(u8, input, "=") != null or
+            std.mem.find(u8, input, ":") != null;
+        if (std.mem.find(u8, input, ",") != null or
+            std.mem.find(u8, input, "=") != null or
             has_colon)
         {
             self.* = try cli.args.parseAutoStruct(
@@ -10107,7 +10107,7 @@ pub const WindowPadding = struct {
         const input = input_ orelse return error.ValueRequired;
         const whitespace = " \t";
 
-        if (std.mem.indexOf(u8, input, ",")) |idx| {
+        if (std.mem.find(u8, input, ",")) |idx| {
             const input_left = std.mem.trim(u8, input[0..idx], whitespace);
             const input_right = std.mem.trim(u8, input[idx + 1 ..], whitespace);
             const left = std.fmt.parseInt(u32, input_left, 10) catch

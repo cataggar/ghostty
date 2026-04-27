@@ -94,12 +94,12 @@ pub fn xtgettcapMap(comptime self: Source) std.StaticStringMap([]const u8) {
                     // Kitty added support for more capabilities some of which
                     // have parameters. But Kitty returned them in terminfo source
                     // format. So we need to handle both cases.
-                    if (std.mem.indexOfScalar(u8, v, '%') != null) break :string v;
+                    if (std.mem.findScalar(u8, v, '%') != null) break :string v;
                     // No-parameters. Encode and return.
                     // First replace \E with the escape char (0x1B)
                     var result = comptimeReplace(v, "\\E", "\x1b");
                     // Replace '^' with the control char version of that char.
-                    while (std.mem.indexOfScalar(u8, result, '^')) |idx| {
+                    while (std.mem.findScalar(u8, result, '^')) |idx| {
                         if (idx > 0) @compileError("handle control-char in middle of string");
                         const replacement = switch (result[idx + 1]) {
                             '?' => 0x7F, // DEL, special cased from ncurses

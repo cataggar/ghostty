@@ -419,7 +419,8 @@ pub const Action = union(Key) {
     /// Sync with: ghostty_action_u
     pub const CValue = cvalue: {
         const key_fields = @typeInfo(Key).@"enum".fields;
-        var union_fields: [key_fields.len]std.builtin.Type.UnionField = undefined;
+        var union_names: [key_fields.len][:0]const u8 = undefined;
+        var union_types: [key_fields.len]type = undefined;
         for (key_fields, 0..) |field, i| {
             const action = @unionInit(Action, field.name, undefined);
             const Type = t: {
@@ -429,19 +430,11 @@ pub const Action = union(Key) {
                 break :t Type;
             };
 
-            union_fields[i] = .{
-                .name = field.name,
-                .type = Type,
-                .alignment = @alignOf(Type),
-            };
+            union_names[i] = field.name;
+            union_types[i] = Type;
         }
 
-        break :cvalue @Type(.{ .@"union" = .{
-            .layout = .@"extern",
-            .tag_type = null,
-            .fields = &union_fields,
-            .decls = &.{},
-        } });
+        break :cvalue @Union(.@"extern", null, &union_names, &union_types, &@splat(.{}));
     };
 
     /// Sync with: ghostty_action_s
