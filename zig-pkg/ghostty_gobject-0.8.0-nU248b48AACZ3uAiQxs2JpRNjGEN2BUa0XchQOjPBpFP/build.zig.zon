@@ -1,0 +1,24 @@
+.{
+    .name = .ghostty_gobject,
+
+    .version = "0.8.0",
+
+    .fingerprint = 0xfd1e6c3df1b84d9d,
+
+    .minimum_zig_version = "0.16.0-dev.3153+d6f43caad",
+
+    .dependencies = .{
+        .gobject_codegen = .{
+            .url = "git+https://github.com/jcollie/zig-gobject#c59c96a61318a246acb80af60637e48dd96841fb",
+            .hash = "gobject_codegen-0.3.1-B33qzdB-BwCJT3fq5N2TIeoLDjTCymXQfKR_aCZQhOej",
+        },
+    },
+
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "gir-fixes",
+        "LICENSE",
+        "README.md",
+    },
+}
