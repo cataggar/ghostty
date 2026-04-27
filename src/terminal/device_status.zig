@@ -10,13 +10,13 @@ pub const ColorScheme = lib.Enum(lib.target, &.{
 /// An enum(u16) of the available device status requests.
 pub const Request = dsr_enum: {
     var names: [entries.len][:0]const u8 = undefined;
-    var values: [entries.len]comptime_int = undefined;
+    var values: [entries.len]Tag.Backing = undefined;
     for (entries, 0..) |entry, i| {
         names[i] = entry.name;
-        values[i] = @as(Tag.Backing, @bitCast(Tag{
+        values[i] = @bitCast(Tag{
             .value = entry.value,
             .question = entry.question,
-        }));
+        });
     }
 
     break :dsr_enum @Enum(
