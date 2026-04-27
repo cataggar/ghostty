@@ -113,10 +113,10 @@ pub fn setopt(
     value: ?*const anyopaque,
 ) callconv(lib.calling_conv) void {
     if (comptime std.debug.runtime_safety) {
-        _ = std.enums.fromInt(Option, @intFromEnum(option)) catch {
+        if (std.enums.fromInt(Option, @intFromEnum(option)) == null) {
             log.warn("setopt invalid option value={d}", .{@intFromEnum(option)});
             return;
-        };
+        }
     }
 
     return switch (option) {
@@ -137,10 +137,10 @@ fn setoptTyped(
     switch (option) {
         .event => {
             if (comptime std.debug.runtime_safety) {
-                _ = std.enums.fromInt(TrackingMode, @intFromEnum(value.*)) catch {
+                if (std.enums.fromInt(TrackingMode, @intFromEnum(value.*)) == null) {
                     log.warn("setopt invalid TrackingMode value={d}", .{@intFromEnum(value.*)});
                     return;
-                };
+                }
             }
 
             if (wrapper.opts.event != value.*) wrapper.last_cell = null;
@@ -149,10 +149,10 @@ fn setoptTyped(
 
         .format => {
             if (comptime std.debug.runtime_safety) {
-                _ = std.enums.fromInt(Format, @intFromEnum(value.*)) catch {
+                if (std.enums.fromInt(Format, @intFromEnum(value.*)) == null) {
                     log.warn("setopt invalid Format value={d}", .{@intFromEnum(value.*)});
                     return;
-                };
+                }
             }
 
             if (wrapper.opts.format != value.*) wrapper.last_cell = null;
