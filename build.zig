@@ -215,7 +215,7 @@ pub fn build(b: *std.Build) !void {
     // macOS only artifacts. These will error if they're initialized for
     // other targets. In lib-vt mode emit_xcframework controls the lib-vt
     // xcframework above, not this one.
-    if (!config.emit_lib_vt and config.target.result.os.tag.isDarwin() and
+    if (!config.emit_lib_vt and !config.is_dep and config.target.result.os.tag.isDarwin() and
         (config.emit_xcframework or config.emit_macos_app))
     {
         // Ghostty xcframework
@@ -229,7 +229,7 @@ pub fn build(b: *std.Build) !void {
 
             // The xcframework build always installs resources because our
             // macOS xcode project contains references to them.
-            resources.install();
+            (resources orelse unreachable).install();
             if (i18n) |v| v.install();
         }
 
@@ -239,9 +239,9 @@ pub fn build(b: *std.Build) !void {
             &config,
             .{
                 .xcframework = &xcframework,
-                .docs = &docs,
+                .docs = &(docs orelse unreachable),
                 .i18n = if (i18n) |v| &v else null,
-                .resources = &resources,
+                .resources = &(resources orelse unreachable),
             },
         );
         if (config.emit_macos_app) {
@@ -272,7 +272,7 @@ pub fn build(b: *std.Build) !void {
 
         // On macOS we can run the macOS app. For "run" we always force
         // a native-only build so that we can run as quickly as possible.
-        if (!config.emit_lib_vt and
+        if (!config.emit_lib_vt and !config.is_dep and
             config.target.result.os.tag.isDarwin() and
             (config.emit_xcframework or config.emit_macos_app))
         {
@@ -286,9 +286,9 @@ pub fn build(b: *std.Build) !void {
                 &config,
                 .{
                     .xcframework = &xcframework_native,
-                    .docs = &docs,
+                    .docs = &(docs orelse unreachable),
                     .i18n = if (i18n) |v| &v else null,
-                    .resources = &resources,
+                    .resources = &(resources orelse unreachable),
                 },
             );
 
