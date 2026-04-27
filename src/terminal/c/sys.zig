@@ -102,9 +102,9 @@ pub fn set(
     value: ?*const anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        _ = std.enums.fromInt(Option, @intFromEnum(option)) catch {
+        if (std.enums.fromInt(Option, @intFromEnum(option)) == null) {
             return .invalid_value;
-        };
+        }
     }
 
     return switch (option) {
@@ -201,13 +201,9 @@ pub fn logFn(
         .c_level = c_level,
         .scope_text = scope_text,
     };
-    const writer: std.io.GenericWriter(
-        *LogEmitter,
-        error{},
-        LogEmitter.write,
-    ) = .{ .context = &ctx };
-
-    nosuspend writer.print(format, args) catch {};
+    var buf: [4096]u8 = undefined;
+    const formatted = std.fmt.bufPrint(&buf, format, args) catch &buf;
+    _ = ctx.write(formatted) catch {};
     ctx.flush();
 }
 
