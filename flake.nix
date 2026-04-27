@@ -6,7 +6,7 @@
     # glibc versions used by our dependencies from Nix are compatible with the
     # system glibc that the user is building for.
     #
-    # We are currently on nixpkgs-unstable to get Zig 0.15 for our package.nix and
+    # We are currently on nixpkgs-unstable to get Zig 0.16 for our package.nix and
     # Gnome 49/Gtk 4.20.
     #
     nixpkgs.url = "https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.xz";
@@ -77,8 +77,8 @@
       default = pkgs.callPackage ./nix/devShell.nix {
         zig =
           if pkgs.stdenv.hostPlatform.isDarwin
-          then zig.packages.${pkgs.stdenv.hostPlatform.system}.brew."0.15.2"
-          else zig.packages.${pkgs.stdenv.hostPlatform.system}."0.15.2";
+          then zig.packages.${pkgs.stdenv.hostPlatform.system}.brew."0.16.0"
+          else zig.packages.${pkgs.stdenv.hostPlatform.system}."0.16.0";
         wraptest = pkgs.callPackage ./nix/pkgs/wraptest.nix {};
         zon2nix = zon2nix;
 
