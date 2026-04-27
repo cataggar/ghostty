@@ -1802,7 +1802,7 @@ pub fn Stream(comptime H: type) type {
                                     switch (number) {
                                         22 => self.handler.vt(.title_push, index) catch {},
                                         23 => self.handler.vt(.title_pop, index) catch {},
-                                        else => @compileError("unreachable") catch {},
+                                        else => @compileError("unreachable"),
                                     }
                                 } else log.warn(
                                     "ignoring CSI 22/23 t with extra parameters: {f}",
