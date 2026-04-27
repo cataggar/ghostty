@@ -1503,7 +1503,7 @@ pub fn Stream(comptime H: type) type {
                         input.params[0] == 5)
                     {
                         self.handler.vt(.tab_reset, {}) catch {};
-                    } else log.warn("invalid cursor tabulation control: {f}", .{input}}) catch {},
+                    } else log.warn("invalid cursor tabulation control: {f}", .{input}),
 
                     else => log.warn(
                         "ignoring unimplemented CSI W with intermediates: {s}",
