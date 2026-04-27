@@ -1891,10 +1891,10 @@ pub const CAPI = struct {
         stage_raw: u32,
         pressure: f64,
     ) void {
-        const stage = std.meta.intToEnum(
+        const stage = std.enums.fromInt(
             input.MousePressureStage,
             stage_raw,
-        ) catch {
+        ) orelse {
             log.warn(
                 "invalid mouse pressure stage value={}",
                 .{stage_raw},
