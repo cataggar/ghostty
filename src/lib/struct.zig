@@ -22,17 +22,13 @@ pub fn Struct(
             const info = @typeInfo(Zig).@"struct";
             var names: [info.fields.len][:0]const u8 = undefined;
             var types: [info.fields.len]type = undefined;
-            const Attr = struct {
-                @"align": comptime_int = 0,
-                default_value_ptr: ?*const anyopaque = null,
-                @"comptime": bool = false,
-            };
+            const Attr = std.builtin.Type.StructField.Attributes;
             var attrs: [info.fields.len]Attr = undefined;
             for (info.fields, 0..) |field, i| {
                 names[i] = field.name;
                 types[i] = field.type;
                 attrs[i] = .{
-                    .@"align" = if (field.alignment > 0) field.alignment else @alignOf(field.type),
+                    .@"align" = field.alignment,
                     .default_value_ptr = field.default_value_ptr,
                     .@"comptime" = field.is_comptime,
                 };
