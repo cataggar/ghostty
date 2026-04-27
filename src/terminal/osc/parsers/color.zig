@@ -206,7 +206,7 @@ fn parseGetSetAnsiColor(
             continue;
         }
 
-        const rgb = RGB.parse(spec_str) orelse return result;
+        const rgb = RGB.parse(spec_str) catch return result;
         const req = try result.addOne(alloc);
         req.* = .{ .set = .{
             .target = target,
@@ -250,7 +250,7 @@ fn parseResetAnsiColor(
             u9,
             color_str,
             10,
-        ) orelse continue;
+        ) catch continue;
 
         // Parse the color.
         const target: Target = switch (op) {

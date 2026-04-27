@@ -321,6 +321,7 @@ const PinPool = std.heap.MemoryPool(Pin);
 /// multiple pagelists but it is not threadsafe.
 pub const MemoryPool = struct {
     alloc: Allocator,
+    page_alloc: Allocator,
     nodes: NodePool,
     pages: PagePool,
     pins: PinPool,
@@ -332,14 +333,15 @@ pub const MemoryPool = struct {
         page_alloc: Allocator,
         preheat: usize,
     ) Allocator.Error!MemoryPool {
-        var node_pool = try NodePool.initPreheated(gen_alloc, preheat);
-        errdefer node_pool.deinit();
-        var page_pool = try PagePool.initPreheated(page_alloc, preheat);
-        errdefer page_pool.deinit();
-        var pin_pool = try PinPool.initPreheated(gen_alloc, 8);
-        errdefer pin_pool.deinit();
+        var node_pool = try NodePool.initCapacity(gen_alloc, preheat);
+        errdefer node_pool.deinit(gen_alloc);
+        var page_pool = try PagePool.initCapacity(page_alloc, preheat);
+        errdefer page_pool.deinit(page_alloc);
+        var pin_pool = try PinPool.initCapacity(gen_alloc, 8);
+        errdefer pin_pool.deinit(gen_alloc);
         return .{
             .alloc = gen_alloc,
+            .page_alloc = page_alloc,
             .nodes = node_pool,
             .pages = page_pool,
             .pins = pin_pool,
@@ -347,15 +349,15 @@ pub const MemoryPool = struct {
     }
 
     pub fn deinit(self: *MemoryPool) void {
-        self.pages.deinit();
-        self.nodes.deinit();
-        self.pins.deinit();
+        self.pages.deinit(self.page_alloc);
+        self.nodes.deinit(self.alloc);
+        self.pins.deinit(self.alloc);
     }
 
     pub fn reset(self: *MemoryPool, mode: ResetMode) void {
-        _ = self.pages.reset(mode);
-        _ = self.nodes.reset(mode);
-        _ = self.pins.reset(mode);
+        _ = self.pages.reset(self.page_alloc, mode);
+        _ = self.nodes.reset(self.alloc, mode);
+        _ = self.pins.reset(self.alloc, mode);
     }
 };
 
@@ -646,7 +648,7 @@ pub fn init(
 
     // We always track our viewport pin to ensure this is never an allocation
     try tw.check(.viewport_pin);
-    const viewport_pin = try pool.pins.create();
+    const viewport_pin = try pool.pins.create(pool.alloc);
     viewport_pin.* = .{ .node = page_list.first.? };
     var tracked_pins: PinSet = .{};
     errdefer tracked_pins.deinit(pool.alloc);
@@ -696,7 +698,7 @@ fn initPages(
     const cap = initialCapacity(cols);
     const layout = Page.layout(cap);
     const pooled = layout.total_size <= std_size;
-    const page_alloc = pool.pages.arena.child_allocator;
+    const page_alloc = pool.page_alloc;
 
     // Guaranteed by comptime checks in initialCapacity but
     // redundant here for safety.
@@ -717,12 +719,12 @@ fn initPages(
     var rem = rows;
     while (rem > 0) {
         try tw.check(.page_node);
-        const node = try pool.nodes.create();
+        const node = try pool.nodes.create(pool.alloc);
         errdefer pool.nodes.destroy(node);
 
         const page_buf = if (pooled) buf: {
             try tw.check(.page_buf_std);
-            const buf = try pool.pages.create();
+            const buf = try pool.pages.create(pool.page_alloc);
             terminal_mem.recommit(buf);
             break :buf buf;
         } else buf: {
@@ -895,7 +897,7 @@ pub fn deinit(self: *PageList) void {
 
     // Go through our linked list and deallocate all pages that are
     // heap-owned (not in the pool).
-    const page_alloc = self.pool.pages.arena.child_allocator;
+    const page_alloc = self.pool.page_alloc;
     var it = self.pages.first;
     while (it) |node| : (it = node.next) {
         const page = node.restore(.discard);
@@ -945,7 +947,7 @@ pub fn reset(self: *PageList) void {
     // Before resetting our pools we need to free any pages that
     // are heap-owned since those were allocated outside the pool.
     {
-        const page_alloc = self.pool.pages.arena.child_allocator;
+        const page_alloc = self.pool.page_alloc;
         var it = self.pages.first;
         while (it) |node| : (it = node.next) {
             const page = node.restore(.discard);
@@ -960,10 +962,10 @@ pub fn reset(self: *PageList) void {
     // the capacity for at least the minimum number of pages we need.
     // The return value is whether memory was reclaimed or not, but in
     // either case the pool is left in a valid state.
-    _ = self.pool.pages.reset(.{
+    _ = self.pool.pages.reset(self.pool.page_alloc, .{
         .retain_with_limit = page_count * PagePool.item_size,
     });
-    _ = self.pool.nodes.reset(.{
+    _ = self.pool.nodes.reset(self.pool.alloc, .{
         .retain_with_limit = page_count * NodePool.item_size,
     });
 
@@ -973,22 +975,22 @@ pub fn reset(self: *PageList) void {
     {
         // Note: we only have to do this for the page pool because the
         // nodes are always fully overwritten on each allocation.
-        const page_arena = &self.pool.pages.arena;
-        var it = page_arena.state.buffer_list.first;
+        // WARN: Since ArenaAllocator's Node is not public API,
+        // we have to hardcode its layout here. We do a comptime assert
+        // on Zig version to verify we check it on every bump.
+        const ArenaNode = extern struct {
+            size_raw: usize,
+            end_index: usize,
+            next: ?*@This(),
+        };
+        var it: ?*ArenaNode = @ptrCast(self.pool.pages.arena_state.used_list);
         while (it) |node| : (it = node.next) {
-            // WARN: Since HeapAllocator's BufNode is not public API,
-            // we have to hardcode its layout here. We do a comptime assert
-            // on Zig version to verify we check it on every bump.
-            const BufNode = struct {
-                data: usize,
-                node: std.SinglyLinkedList.Node,
-            };
-            const buf_node: *BufNode = @fieldParentPtr("node", node);
-
+            // The total allocation size (clear the resizing flag in LSB)
+            const total_size = node.size_raw & ~@as(usize, 1);
             // The fully allocated buffer
-            const alloc_buf = @as([*]u8, @ptrCast(buf_node))[0..buf_node.data];
+            const alloc_buf = @as([*]u8, @ptrCast(node))[0..total_size];
             // The buffer minus our header
-            const data_buf = alloc_buf[@sizeOf(BufNode)..];
+            const data_buf = alloc_buf[@sizeOf(ArenaNode)..];
             @memset(data_buf, 0);
         }
     }
@@ -1080,7 +1082,7 @@ pub fn clone(
 
     // Create our viewport. In a clone, the viewport always goes
     // to the top.
-    const viewport_pin = try pool.pins.create();
+    const viewport_pin = try pool.pins.create(pool.alloc);
     var tracked_pins: PinSet = .{};
     errdefer tracked_pins.deinit(pool.alloc);
     try tracked_pins.putNoClobber(pool.alloc, viewport_pin, {});
@@ -1088,7 +1090,7 @@ pub fn clone(
     // Our list of pages
     var page_list: List = .{};
     errdefer {
-        const page_alloc = pool.pages.arena.child_allocator;
+        const page_alloc = pool.page_alloc;
         var page_it = page_list.first;
         while (page_it) |node| : (page_it = node.next) {
             switch (node.owned) {
@@ -1138,7 +1140,7 @@ pub fn clone(
                 if (p.node != chunk.node or
                     p.y < chunk.start or
                     p.y >= chunk.end) continue;
-                const new_p = try pool.pins.create();
+                const new_p = try pool.pins.create(pool.alloc);
                 new_p.* = p.*;
                 new_p.node = node;
                 new_p.y -= chunk.start;
@@ -3803,12 +3805,12 @@ inline fn createPageExt(
     serial: *u64,
     total_size: ?*usize,
 ) Allocator.Error!*List.Node {
-    var page = try pool.nodes.create();
+    var page = try pool.nodes.create(pool.alloc);
     errdefer pool.nodes.destroy(page);
 
     const layout = Page.layout(opts.cap);
     const pooled = !opts.exact_size and layout.total_size <= std_size;
-    const page_alloc = pool.pages.arena.child_allocator;
+    const page_alloc = pool.page_alloc;
 
     // It would be better to encode this into the Zig error handling
     // system but that is a big undertaking and we only have a few
@@ -3819,7 +3821,7 @@ inline fn createPageExt(
     // is within our standard size since this is what the pool
     // dispenses. Otherwise, we use the heap allocator to allocate.
     const page_buf = if (pooled) buf: {
-        const buf = try pool.pages.create();
+        const buf = try pool.pages.create(pool.page_alloc);
         terminal_mem.recommit(buf);
         break :buf buf;
     } else try page_alloc.alignedAlloc(
@@ -4307,7 +4309,7 @@ fn destroyNodeExt(
         },
 
         .heap => {
-            const page_alloc = pool.pages.arena.child_allocator;
+            const page_alloc = pool.page_alloc;
             page_alloc.free(page.memory);
         },
     }
@@ -4835,7 +4837,7 @@ pub fn trackPin(self: *PageList, p: Pin) Allocator.Error!*Pin {
     if (build_options.slow_runtime_safety) assert(self.pinIsValid(p));
 
     // Create our tracked pin
-    const tracked = try self.pool.pins.create();
+    const tracked = try self.pool.pins.create(self.pool.alloc);
     errdefer self.pool.pins.destroy(tracked);
     tracked.* = p;
 

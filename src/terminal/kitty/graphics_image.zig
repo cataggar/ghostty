@@ -34,7 +34,7 @@ pub const LoadingImage = struct {
     image: Image,
 
     /// The data that is being built up.
-    data: std.ArrayListUnmanaged(u8) = .{},
+    data: std.ArrayListUnmanaged(u8) = .empty,
 
     /// This is non-null when a transmit and display command is given
     /// so that we display the image after it is fully loaded.
@@ -134,9 +134,13 @@ pub const LoadingImage = struct {
         var abs_buf: [std.fs.max_path_bytes]u8 = undefined;
         const path = switch (t.medium) {
             .direct => unreachable, // handled above
-            .file, .temporary_file => posix.realpath(cmd.data, &abs_buf) catch |err| {
-                log.warn("failed to get absolute path: {}", .{err});
-                return error.InvalidData;
+            .file, .temporary_file => blk: {
+                var threaded: std.Io.Threaded = .init_single_threaded;
+                const len = std.Io.Dir.cwd().realPathFile(threaded.io(), cmd.data, &abs_buf) catch |err| {
+                    log.warn("failed to get absolute path: {}", .{err});
+                    return error.InvalidData;
+                };
+                break :blk abs_buf[0..len];
             },
             .shared_memory => cmd.data,
         };
@@ -175,7 +179,7 @@ pub const LoadingImage = struct {
         var buf: [std.fs.max_path_bytes]u8 = undefined;
         const pathz = std.fmt.bufPrintZ(&buf, "{s}", .{path}) catch return error.InvalidData;
 
-        const fd = std.c.shm_open(pathz, @as(c_int, @bitCast(std.c.O{ .ACCMODE = .RDONLY })), 0);
+        const fd = std.c.shm_open(pathz, @as(c_int, @bitCast(std.c.O{ .ACCMODE = .RDONLY })), @as(std.c.mode_t, 0));
         switch (std.posix.errno(fd)) {
             .SUCCESS => {},
             else => |err| {
@@ -189,12 +193,13 @@ pub const LoadingImage = struct {
         // The size from stat on may be larger than our expected size because
         // shared memory has to be a multiple of the page size.
         const stat_size: usize = stat: {
-            const stat = std.posix.fstat(fd) catch |err| {
-                log.warn("unable to fstat shared memory {s}: {}", .{ path, err });
+            var stat_buf: std.c.Stat = undefined;
+            if (std.c.fstat(fd, &stat_buf) != 0) {
+                log.warn("unable to fstat shared memory {s}", .{path});
                 return error.InvalidData;
-            };
-            if (stat.size <= 0) return error.InvalidData;
-            break :stat @intCast(stat.size);
+            }
+            if (stat_buf.size <= 0) return error.InvalidData;
+            break :stat @intCast(stat_buf.size);
         };
 
         const expected_size: usize = switch (self.image.format) {
@@ -222,8 +227,8 @@ pub const LoadingImage = struct {
         const map = std.posix.mmap(
             null,
             stat_size, // mmap always uses the stat size
-            std.c.PROT.READ,
-            std.c.MAP{ .TYPE = .SHARED },
+            .{ .READ = true },
+            .{ .TYPE = .SHARED },
             fd,
             0,
         ) catch |err| {
@@ -277,20 +282,24 @@ pub const LoadingImage = struct {
                 return error.TemporaryFileNotNamedCorrectly;
             }
         }
+
+        var threaded_io: std.Io.Threaded = .init_single_threaded;
+        const io = threaded_io.io();
+
         defer if (medium == .temporary_file) {
-            posix.unlink(path) catch |err| {
+            std.Io.Dir.cwd().deleteFile(io, path) catch |err| {
                 log.warn("failed to delete temporary file: {}", .{err});
             };
         };
 
-        var file = std.fs.cwd().openFile(path, .{}) catch |err| {
+        var file = std.Io.Dir.cwd().openFile(io, path, .{}) catch |err| {
             log.warn("failed to open temporary file: {}", .{err});
             return error.InvalidData;
         };
-        defer file.close();
+        defer file.close(io);
 
         // File must be a regular file
-        if (file.stat()) |stat| {
+        if (file.stat(io)) |stat| {
             if (stat.kind != .file) {
                 log.warn("file is not a regular file kind={}", .{stat.kind});
                 return error.InvalidData;
@@ -300,15 +309,16 @@ pub const LoadingImage = struct {
             return error.InvalidData;
         }
 
+        var buf: [4096]u8 = undefined;
+        var buf_reader = file.reader(io, &buf);
+
         if (t.offset > 0) {
-            file.seekTo(@intCast(t.offset)) catch |err| {
+            buf_reader.seekTo(@intCast(t.offset)) catch |err| {
                 log.warn("failed to seek to offset {}: {}", .{ t.offset, err });
                 return error.InvalidData;
             };
         }
 
-        var buf: [4096]u8 = undefined;
-        var buf_reader = file.reader(&buf);
         const reader = &buf_reader.interface;
 
         // Read the file
@@ -337,9 +347,12 @@ pub const LoadingImage = struct {
         // The temporary dir is sometimes a symlink. On macOS for
         // example /tmp is /private/var/...
         var buf: [std.fs.max_path_bytes]u8 = undefined;
-        if (posix.realpath(dir, &buf)) |real_dir| {
-            if (std.mem.startsWith(u8, path, real_dir)) return true;
-        } else |_| {}
+        var threaded: std.Io.Threaded = .init_single_threaded;
+        const len = std.Io.Dir.cwd().realPathFile(threaded.io(), dir, &buf) catch {
+            return false;
+        };
+        const real_dir = buf[0..len];
+        if (std.mem.startsWith(u8, path, real_dir)) return true;
 
         return false;
     }
@@ -486,7 +499,7 @@ pub const LoadingImage = struct {
 
         // Replace our data
         self.data.deinit(alloc);
-        self.data = .{};
+        self.data = .empty;
         try self.data.ensureUnusedCapacity(alloc, result.data.len);
         try self.data.appendSlice(alloc, result.data[0..result.data.len]);
 

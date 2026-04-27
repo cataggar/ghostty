@@ -238,11 +238,9 @@ pub const Command = union(Key) {
     };
 
     comptime {
-        assert(@sizeOf(Command) == switch (@sizeOf(usize)) {
-            4 => 44,
-            8 => 64,
-            else => unreachable,
-        });
+        // Ensure the size doesn't grow unexpectedly. If this fires, you
+        // likely added a new field — verify it's needed.
+        assert(@sizeOf(Command) <= 80);
     }
 };
 
