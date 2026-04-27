@@ -85,7 +85,7 @@ fn checkNixShell(exe: *std.Build.Step.Compile, cfg: *const Config) !void {
     if (!cfg.target.query.isNativeOs()) return;
 
     // Verify we're in NixOS
-    std.fs.accessAbsolute("/etc/NIXOS", .{}) catch return;
+    std.Io.Dir.accessAbsolute(exe.step.owner.graph.io, "/etc/NIXOS", .{}) catch return;
 
     // If we're in a nix shell, not a problem
     if (cfg.env.get("IN_NIX_SHELL") != null) return;

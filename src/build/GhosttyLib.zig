@@ -104,7 +104,7 @@ pub fn initShared(
         // ucrt.lib is in the Windows SDK 'ucrt' dir. Detect the SDK
         // installation and add the UCRT library path.
         const arch = deps.config.target.result.cpu.arch;
-        const sdk = std.zig.WindowsSdk.find(b.allocator, arch) catch null;
+        const sdk = std.zig.WindowsSdk.find(b.allocator, b.graph.io, arch, &b.graph.environ_map) catch null;
         if (sdk) |s| {
             if (s.windows10sdk) |w10| {
                 const arch_str: []const u8 = switch (arch) {
@@ -120,7 +120,7 @@ pub fn initShared(
                 ) catch null;
 
                 if (ucrt_lib_path) |path| {
-                    lib.addLibraryPath(.{ .cwd_relative = path });
+                    lib.root_module.addLibraryPath(.{ .cwd_relative = path });
                 }
             }
         }
