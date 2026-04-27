@@ -34,7 +34,7 @@ pub fn initStatic(
         // Fails on self-hosted x86_64 on macOS
         .use_llvm = true,
     });
-    lib.linkLibC();
+    lib.root_module.link_libc = true;
 
     // These must be bundled since we're compiling into a static lib.
     // Otherwise, you get undefined symbol errors.
@@ -99,7 +99,7 @@ pub fn initShared(
     {
         // The CRT initialization code in msvcrt.lib calls __vcrt_initialize
         // and __acrt_initialize, which are in the static CRT libraries.
-        lib.linkSystemLibrary("libvcruntime");
+        lib.root_module.linkSystemLibrary("libvcruntime", .{});
 
         // ucrt.lib is in the Windows SDK 'ucrt' dir. Detect the SDK
         // installation and add the UCRT library path.
@@ -124,7 +124,7 @@ pub fn initShared(
                 }
             }
         }
-        lib.linkSystemLibrary("libucrt");
+        lib.root_module.linkSystemLibrary("libucrt", .{});
     }
 
     // Get our debug symbols

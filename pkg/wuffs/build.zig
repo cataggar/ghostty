@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) !void {
         .name = "test",
         .root_module = module,
     });
-    unit_tests.linkLibC();
+    unit_tests.root_module.link_libc = true;
 
     var flags: std.ArrayList([]const u8) = .empty;
     defer flags.deinit(b.allocator);
