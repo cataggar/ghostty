@@ -111,9 +111,9 @@ pub const Style = struct {
         palette: *const color.Palette,
     ) ?color.RGB {
         return switch (cell.content_tag) {
-            .bg_color_palette => palette[cell.content.color_palette],
+            .bg_color_palette => palette[cell.colorPalette()],
             .bg_color_rgb => rgb: {
-                const rgb = cell.content.color_rgb;
+                const rgb = cell.colorRgb();
                 break :rgb .{ .r = rgb.r, .g = rgb.g, .b = rgb.b };
             },
 
@@ -212,15 +212,15 @@ pub const Style = struct {
             .none => null,
             .palette => |idx| .{
                 .content_tag = .bg_color_palette,
-                .content = .{ .color_palette = idx },
+                .content = idx,
             },
             .rgb => |rgb| .{
                 .content_tag = .bg_color_rgb,
-                .content = .{ .color_rgb = .{
+                .content = @bitCast(page.Cell.RGB{
                     .r = rgb.r,
                     .g = rgb.g,
                     .b = rgb.b,
-                } },
+                }),
             },
         };
     }

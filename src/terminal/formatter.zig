@@ -1375,7 +1375,7 @@ pub const PageFormatter = struct {
             return;
         }
 
-        try self.writeCodepointWithReplacement(writer, cell.content.codepoint);
+        try self.writeCodepointWithReplacement(writer, cell.codepoint());
         if (comptime tag == .codepoint_grapheme) {
             for (self.page.lookupGrapheme(cell).?) |cp| {
                 try self.writeCodepointWithReplacement(writer, cp);
@@ -1475,16 +1475,16 @@ pub const PageFormatter = struct {
 
             .bg_color_palette => .{
                 .bg_color = .{
-                    .palette = cell.content.color_palette,
+                    .palette = cell.colorPalette(),
                 },
             },
 
             .bg_color_rgb => .{
                 .bg_color = .{
                     .rgb = .{
-                        .r = cell.content.color_rgb.r,
-                        .g = cell.content.color_rgb.g,
-                        .b = cell.content.color_rgb.b,
+                        .r = cell.colorRgb().r,
+                        .g = cell.colorRgb().g,
+                        .b = cell.colorRgb().b,
                     },
                 },
             },

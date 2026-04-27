@@ -212,7 +212,7 @@ pub fn logFn(
 /// Formats each message as "[level](scope): message\n". Can be passed
 /// directly to ghostty_sys_set(GHOSTTY_SYS_OPT_LOG, &ghostty_sys_log_stderr).
 ///
-/// Uses std.debug.lockStderrWriter for thread-safe, mutex-protected output.
+/// Writes directly to stderr file descriptor.
 /// On freestanding/wasm targets this is a no-op (no stderr available).
 pub fn logStderr(
     _: ?*anyopaque,
@@ -234,16 +234,14 @@ pub fn logStderr(
         .debug => "debug",
     };
 
-    var buffer: [64]u8 = undefined;
-    const writer = std.debug.lockStderrWriter(&buffer);
-    defer std.debug.unlockStderrWriter();
-    nosuspend {
-        if (scope.len > 0) {
-            writer.print("[{s}]({s}): {s}\n", .{ level_text, scope, message }) catch {};
-        } else {
-            writer.print("[{s}]: {s}\n", .{ level_text, message }) catch {};
-        }
-    }
+    var buf: [4096]u8 = undefined;
+    const formatted = if (scope.len > 0)
+        std.fmt.bufPrint(&buf, "[{s}]({s}): {s}\n", .{ level_text, scope, message }) catch &buf
+    else
+        std.fmt.bufPrint(&buf, "[{s}]: {s}\n", .{ level_text, message }) catch &buf;
+
+    const stderr_fd = std.posix.system.STDERR_FILENO;
+    _ = std.posix.system.write(stderr_fd, formatted.ptr, formatted.len);
 }
 
 test "set decode_png with null clears" {

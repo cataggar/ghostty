@@ -177,7 +177,7 @@ fn parseGetSetAnsiColor(
             u9,
             color_str,
             10,
-        ) catch return result;
+        ) orelse return result;
 
         // Parse the color.
         const target: Target = switch (op) {
@@ -185,7 +185,7 @@ fn parseGetSetAnsiColor(
             .osc_5 => .{ .special = std.enums.fromInt(
                 SpecialColor,
                 std.math.cast(u3, color) orelse return result,
-            ) catch return result },
+            ) orelse return result },
 
             // OSC4 maps 0-255 to palette, 256-259 to special offset
             // by the palette count.
@@ -194,7 +194,7 @@ fn parseGetSetAnsiColor(
             } else .{ .special = std.enums.fromInt(
                 SpecialColor,
                 std.math.cast(u3, color - 256) orelse return result,
-            ) catch return result },
+            ) orelse return result },
 
             else => comptime unreachable,
         };
@@ -206,7 +206,7 @@ fn parseGetSetAnsiColor(
             continue;
         }
 
-        const rgb = RGB.parse(spec_str) catch return result;
+        const rgb = RGB.parse(spec_str) orelse return result;
         const req = try result.addOne(alloc);
         req.* = .{ .set = .{
             .target = target,
@@ -295,7 +295,7 @@ fn parseGetSetDynamicColor(
             const req = try result.addOne(alloc);
             req.* = .{ .query = .{ .dynamic = color } };
         } else {
-            const rgb = RGB.parse(spec_str) catch return result;
+            const rgb = RGB.parse(spec_str) orelse return result;
             const req = try result.addOne(alloc);
             req.* = .{ .set = .{
                 .target = .{ .dynamic = color },
