@@ -43,6 +43,7 @@ pub fn build(b: *std.Build) !void {
     // (See root Ghostty build.zig on why we do this)
     try flags.appendSlice(b.allocator, &.{
         "-DSIMDUTF_IMPLEMENTATION_ICELAKE=0",
+        "-std=c++17",
 
         // Fixes linker issues for release builds missing ubsanitizer symbols
         "-fno-sanitize=undefined",
@@ -51,8 +52,10 @@ pub fn build(b: *std.Build) !void {
 
     if (no_libcxx) {
         try flags.append(b.allocator, "-DSIMDUTF_NO_LIBCXX");
-        try flags.append(b.allocator, "-fno-exceptions");
-        try flags.append(b.allocator, "-fno-rtti");
+        if (target.result.abi != .msvc) {
+            try flags.append(b.allocator, "-fno-exceptions");
+            try flags.append(b.allocator, "-fno-rtti");
+        }
         lib.root_module.addCMacro("SIMDUTF_NO_LIBCXX", "1");
     }
 

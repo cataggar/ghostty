@@ -50,7 +50,7 @@ pub fn Enum(
         .zig => std.math.IntFittingRange(0, fields_i - 1),
     };
     var values: [fields_i]TagInt = undefined;
-    for (raw_values, &values) |raw, *val| {
+    for (raw_values[0..fields_i], &values) |raw, *val| {
         val.* = raw;
     }
 

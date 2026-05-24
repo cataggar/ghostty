@@ -72,7 +72,7 @@ pub fn SegmentedPool(comptime T: type, comptime prealloc: usize) type {
             const new_segs_needed = (new_len - 1) / prealloc - self.segments.items.len;
 
             const new = try self.segments.addManyAsSlice(alloc, new_segs_needed);
-            for (new) |s| s.* = try alloc.create([prealloc]T);
+            for (new) |*s| s.* = try alloc.create([prealloc]T);
 
             self.i = self.len;
             self.available = self.len;

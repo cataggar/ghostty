@@ -28,7 +28,7 @@ pub fn Struct(
                 name.* = field.name;
                 ty.* = field.type;
                 attr.* = .{
-                    .@"align" = if (field.alignment > 0) field.alignment else @alignOf(field.type),
+                    .@"align" = if (field.alignment) |a| if (a > 0) a else @alignOf(field.type) else @alignOf(field.type),
                     .@"comptime" = field.is_comptime,
                     .default_value_ptr = field.default_value_ptr,
                 };

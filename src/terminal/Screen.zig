@@ -1769,7 +1769,6 @@ pub inline fn resize(
         .cursor = .{
             .x = self.cursor.x,
             .y = self.cursor.y,
-            .pin = self.cursor.page_pin,
         },
     });
 

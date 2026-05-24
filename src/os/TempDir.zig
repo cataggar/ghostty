@@ -81,7 +81,7 @@ test {
     const env = try std.testing.environ.createMap(std.testing.allocator);
     errdefer env.deinit();
 
-    var td = try init(io, env);
+    var td = try init(io, &env);
     errdefer td.deinit(io);
 
     const nameval = td.name();

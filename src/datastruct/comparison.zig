@@ -129,8 +129,7 @@ fn expectApproxEqualInner(comptime T: type, expected: T, actual: T) !void {
             return error.TestExpectedApproxEqual;
         },
         .vector => |info| {
-            var i: usize = 0;
-            while (i < info.len) : (i += 1) {
+            inline for (0..info.len) |i| {
                 expectApproxEqual(expected[i], actual[i]) catch {
                     print("index {d} incorrect. expected approximately {any}, found {any}\n", .{
                         i, expected[i], actual[i],
