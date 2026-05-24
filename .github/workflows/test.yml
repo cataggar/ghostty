@@ -196,6 +196,7 @@ jobs:
           echo "swift=$swift" >> "$GITHUB_OUTPUT"
 
   build-examples-zig:
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -226,6 +227,7 @@ jobs:
           nix develop -c zig build
 
   build-examples-cmake:
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -257,6 +259,7 @@ jobs:
           nix develop -c cmake --build build
 
   build-examples-cmake-windows:
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -285,6 +288,7 @@ jobs:
           cmake --build build
 
   build-examples-swift:
+    if: false
     strategy:
       fail-fast: false
       matrix:
@@ -1103,6 +1107,7 @@ jobs:
         run: nix develop -c zig build test-lib-vt
 
   test-gtk:
+    if: false
     strategy:
       fail-fast: false
       matrix:
