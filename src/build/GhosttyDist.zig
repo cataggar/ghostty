@@ -72,7 +72,7 @@ pub fn init(b: *std.Build, cfg: *const Config) !GhosttyDist {
         // --add-file uses the most recent --prefix to determine the path
         // in the archive to copy the file (the directory only).
         git_archive.addArg(b.fmt("--prefix={s}-{f}/{s}/", .{
-            name,                                 cfg.version,
+            name,                                     cfg.version,
             std.Io.Dir.path.dirname(resource.dist).?,
         }));
         git_archive.addPrefixedFileArg("--add-file=", copied);

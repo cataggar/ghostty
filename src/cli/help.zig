@@ -3,7 +3,6 @@ const Allocator = std.mem.Allocator;
 const args = @import("args.zig");
 const Action = @import("ghostty.zig").Action;
 
-
 // Note that this options struct doesn't implement the `help` decl like other
 // actions. That is because the help command is special and wants to handle its
 // own logic around help detection.
