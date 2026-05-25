@@ -163,19 +163,34 @@ const LogEmitter = struct {
 
     fn drain(w: *std.Io.Writer, data: []const []const u8, splat: usize) error{}!usize {
         const self: *LogEmitter = @fieldParentPtr("writer", w);
+        const chunk_size = w.buffer.len;
 
-        emitLog(self.c_level, self.scope_text, w.buffer[0..w.end]);
-        w.end = 0;
+        if (w.end > 0) {
+            emitChunked(self.c_level, self.scope_text, w.buffer[0..w.end], chunk_size);
+            w.end = 0;
+        }
 
-        var written: usize = data[data.len].len * splat;
+        const last = data[data.len - 1];
+        var written: usize = last.len * splat;
         for (data[0 .. data.len - 1]) |s| {
-            emitLog(self.c_level, self.scope_text, s);
+            if (s.len > 0) emitChunked(self.c_level, self.scope_text, s, chunk_size);
             written += s.len;
         }
-        for (0..splat) |_| {
-            emitLog(self.c_level, self.scope_text, data[data.len]);
+        if (last.len > 0) {
+            for (0..splat) |_| {
+                emitChunked(self.c_level, self.scope_text, last, chunk_size);
+            }
         }
         return written;
+    }
+
+    fn emitChunked(c_level: LogLevel, scope: []const u8, message: []const u8, chunk_size: usize) void {
+        var remaining = message;
+        while (remaining.len > chunk_size) {
+            emitLog(c_level, scope, remaining[0..chunk_size]);
+            remaining = remaining[chunk_size..];
+        }
+        if (remaining.len > 0) emitLog(c_level, scope, remaining);
     }
 };
 

@@ -69,7 +69,7 @@ fn isExecutable(mode: std.Io.File.Permissions) bool {
 // `uname -n` is the *nix equivalent of `hostname.exe` on Windows
 test "expand: hostname" {
     const executable = if (builtin.os.tag == .windows) "hostname.exe" else "uname";
-    var env: std.process.Environ.Map = .init(testing.allocator);
+    var env = try std.testing.environ.createMap(testing.allocator);
     defer env.deinit();
     const path = (try expand(std.testing.io, testing.allocator, &env, executable)).?;
     defer testing.allocator.free(path);
@@ -77,14 +77,14 @@ test "expand: hostname" {
 }
 
 test "expand: does not exist" {
-    var env: std.process.Environ.Map = .init(testing.allocator);
+    var env = try std.testing.environ.createMap(testing.allocator);
     defer env.deinit();
     const path = try expand(std.testing.io, testing.allocator, &env, "thisreallyprobablydoesntexist123");
     try testing.expect(path == null);
 }
 
 test "expand: slash" {
-    var env: std.process.Environ.Map = .init(testing.allocator);
+    var env = try std.testing.environ.createMap(testing.allocator);
     defer env.deinit();
     const path = (try expand(std.testing.io, testing.allocator, &env, "foo/env")).?;
     defer testing.allocator.free(path);

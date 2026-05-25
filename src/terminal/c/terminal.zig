@@ -255,15 +255,18 @@ fn new_(
         return error.OutOfMemory;
     errdefer alloc.destroy(wrapper);
 
-    var io: std.Io.Threaded = .init_single_threaded;
-    var env = internal_os.getEnvMapC(alloc);
-    errdefer env.deinit();
+    // Initialize the env and io directly in the wrapper so that the
+    // pointer we pass to Terminal.init remains stable for the lifetime
+    // of the wrapper.
+    wrapper.io = .init_single_threaded;
+    wrapper.env = internal_os.getEnvMapC(alloc);
+    errdefer wrapper.env.deinit();
 
     // Setup our terminal
     t.* = try .init(
         alloc,
-        io.io(),
-        &env,
+        wrapper.io.io(),
+        &wrapper.env,
         .{
             .cols = opts.cols,
             .rows = opts.rows,
@@ -286,12 +289,9 @@ fn new_(
         .size = &Effects.sizeTrampoline,
     };
 
-    wrapper.* = .{
-        .terminal = t,
-        .stream = .initAlloc(alloc, handler),
-        .io = io,
-        .env = env,
-    };
+    wrapper.terminal = t;
+    wrapper.stream = .initAlloc(alloc, handler);
+    wrapper.effects = .{};
 
     return wrapper;
 }
@@ -802,6 +802,7 @@ pub fn free(terminal_: Terminal) callconv(lib.calling_conv) void {
     wrapper.stream.deinit();
     const alloc = t.gpa();
     t.deinit(alloc);
+    wrapper.env.deinit();
     alloc.destroy(t);
     alloc.destroy(wrapper);
 }

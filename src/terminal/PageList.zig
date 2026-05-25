@@ -709,15 +709,29 @@ pub fn reset(self: *PageList) void {
 
         for ([_]?*ArenaNode{ page_arena.used_list, page_arena.free_list }) |head| {
             var l = head;
-            while (l) |n| : (l = n.next) {
+            while (l) |n| {
                 // SAFETY: We never use this in any context where thread-safety
                 // and atomicity becomes relevant, so this should be fine to do.
                 var s = n.size;
                 s.resizing = false;
 
-                // The fully allocated buffer
-                const buf = @as([*]u8, @ptrCast(n))[0..@as(usize, @bitCast(s))];
-                @memset(buf, 0);
+                // Save the next pointer before we zero the buffer, since
+                // the node header (size, end_index, next) sits at the
+                // start of the buffer and would otherwise be destroyed.
+                const next = n.next;
+
+                // Zero only the user data portion of the buffer, leaving
+                // the node header (size/end_index/next) intact so that
+                // the arena allocator can continue to traverse the list
+                // and allocate from these retained nodes.
+                const total: usize = @bitCast(s);
+                const header_size = @sizeOf(ArenaNode);
+                if (total > header_size) {
+                    const buf = @as([*]u8, @ptrCast(n))[header_size..total];
+                    @memset(buf, 0);
+                }
+
+                l = next;
             }
         }
     }
@@ -934,6 +948,7 @@ pub const Resize = struct {
     pub const Cursor = struct {
         x: size.CellCountInt,
         y: size.CellCountInt,
+        pin: ?*Pin = null,
     };
 };
 
@@ -1012,10 +1027,6 @@ fn resizeCols(
 ) Allocator.Error!void {
     assert(cols != self.cols);
 
-    // Update our cols. We have to do this early because grow() that we
-    // may call below relies on this to calculate the proper page size.
-    self.cols = cols;
-
     // If we have a cursor position (x,y), then we try under any col resizing
     // to keep the same number remaining active rows beneath it. This is a
     // very special case if you can imagine clearing the screen (i.e.
@@ -1024,10 +1035,11 @@ fn resizeCols(
     // pull down scrollback.
     const preserved_cursor: ?struct {
         tracked_pin: *Pin,
+        untrack: bool,
         remaining_rows: usize,
         wrapped_rows: usize,
     } = if (cursor) |c| cursor: {
-        const p = self.pin(.{ .active = .{
+        const p = if (c.pin) |cursor_pin| cursor_pin.* else self.pin(.{ .active = .{
             .x = c.x,
             .y = c.y,
         } }) orelse break :cursor null;
@@ -1050,12 +1062,21 @@ fn resizeCols(
         };
 
         break :cursor .{
-            .tracked_pin = try self.trackPin(p),
+            .tracked_pin = c.pin orelse try self.trackPin(p),
+            .untrack = c.pin == null,
             .remaining_rows = self.rows - c.y - 1,
             .wrapped_rows = wrapped,
         };
     } else null;
-    defer if (preserved_cursor) |c| self.untrackPin(c.tracked_pin);
+    defer if (preserved_cursor) |c| {
+        if (c.untrack) self.untrackPin(c.tracked_pin);
+    };
+
+    // Update our cols. We have to do this early because grow() that we
+    // may call below relies on this to calculate the proper page size, but
+    // after preserved_cursor so that the cursor pin can resolve coordinates in
+    // the old active coordinate space.
+    self.cols = cols;
 
     // Create the first node that contains our reflow.
     const first_rewritten_node = node: {
@@ -1109,7 +1130,11 @@ fn resizeCols(
     {
         var reflow_cursor: ReflowCursor = .init(first_rewritten_node);
         while (it.next()) |row| {
-            try reflow_cursor.reflowRow(self, row);
+            try reflow_cursor.reflowRow(
+                self,
+                row,
+                if (preserved_cursor) |c| c.tracked_pin else null,
+            );
 
             // Once we're done reflowing a page, destroy it immediately.
             // This frees memory and makes it more likely in memory
@@ -1225,6 +1250,7 @@ const ReflowCursor = struct {
         self: *ReflowCursor,
         list: *PageList,
         row: Pin,
+        cursor_pin: ?*Pin,
     ) Allocator.Error!void {
         const src_page: *Page = &row.node.data;
         const src_row = row.rowAndCell().row;
@@ -1252,6 +1278,8 @@ const ReflowCursor = struct {
                 if (&p.node.data != src_page or
                     p.y != src_y) continue;
 
+                if (cursor_pin != null and p == cursor_pin.?) continue;
+
                 // If this pin is in the blanks on the right and past the end
                 // of the dst col width then we move it to the end of the dst
                 // col width instead.
@@ -1263,6 +1291,14 @@ const ReflowCursor = struct {
                 // We increase our col len to at least include this pin.
                 // This ensures that blank rows with pins are processed,
                 // so that the pins can be properly remapped.
+                cols_len = @max(cols_len, p.x + 1);
+            }
+        }
+
+        // If the cursor is after blanks on the right, those cells are still
+        // before the next write and must reflow with it.
+        if (cursor_pin) |p| {
+            if (&p.node.data == src_page and p.y == src_y) {
                 cols_len = @max(cols_len, p.x + 1);
             }
         }

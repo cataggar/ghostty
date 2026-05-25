@@ -79,7 +79,7 @@ const b64_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345
 test {
     const io = std.testing.io;
     var env = try std.testing.environ.createMap(std.testing.allocator);
-    errdefer env.deinit();
+    defer env.deinit();
 
     var td = try init(io, &env);
     errdefer td.deinit(io);
