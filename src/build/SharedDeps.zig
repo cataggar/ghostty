@@ -404,7 +404,7 @@ pub fn add(
     if (step.rootModuleTarget().os.tag == .linux) {
         const triple = try step.rootModuleTarget().linuxTriple(b.allocator);
         const path = b.fmt("/usr/lib/{s}", .{triple});
-        if (std.Io.Dir.accessAbsolute(b.graph.io, path, .{})) {
+        if (std.Io.Dir.cwd().access(b.graph.io, path, .{})) {
             step.root_module.addLibraryPath(.{ .cwd_relative = path });
         } else |_| {}
     }
@@ -412,16 +412,7 @@ pub fn add(
     // C files
     step.root_module.link_libc = true;
     step.root_module.addIncludePath(b.path("src/stb"));
-    // Disable ubsan for MSVC: Zig's ubsan runtime cannot be bundled
-    // on Windows (LNK4229), leaving __ubsan_handle_* unresolved when
-    // the static archive is consumed by an external linker.
-    step.root_module.addCSourceFiles(.{
-        .files = &.{"src/stb/stb.c"},
-        .flags = if (step.rootModuleTarget().abi == .msvc)
-            &.{ "-fno-sanitize=undefined", "-fno-sanitize-trap=undefined" }
-        else
-            &.{},
-    });
+    step.root_module.addCSourceFiles(.{ .files = &.{"src/stb/stb.c"} });
     if (step.rootModuleTarget().os.tag == .linux) {
         step.root_module.addIncludePath(b.path("src/apprt/gtk"));
     }
@@ -807,7 +798,7 @@ pub fn addSimd(
         const HWY_AVX3_DL: c_int = 1 << 7;
         const HWY_AVX3: c_int = 1 << 8;
 
-        var flags: std.ArrayListUnmanaged([]const u8) = .empty;
+        var flags: std.ArrayList([]const u8) = .empty;
 
         // Zig 0.13 bug: https://github.com/ziglang/zig/issues/20414
         // To workaround this we just disable AVX512 support completely.
@@ -890,9 +881,11 @@ pub fn gtkNgDistResources(
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/apprt/gtk/build/blueprint.zig"),
                 .target = b.graph.host,
+                .link_libc = true,
             }),
         });
-        blueprint_exe.root_module.link_libc = true;
+        if (b.lazyDependency("gobject", .{})) |gobject|
+            blueprint_exe.root_module.addImport("adw", gobject.module("adw1"));
         blueprint_exe.root_module.linkSystemLibrary("gtk4", dynamic_link_opts);
         blueprint_exe.root_module.linkSystemLibrary("libadwaita-1", dynamic_link_opts);
 

@@ -536,16 +536,16 @@ pub const RenderState = struct {
                     .bg_color_rgb => {
                         @branchHint(.unlikely);
                         cells_style[x] = .{ .bg_color = .{ .rgb = .{
-                            .r = page_cell.colorRgb().r,
-                            .g = page_cell.colorRgb().g,
-                            .b = page_cell.colorRgb().b,
+                            .r = page_cell.content.color_rgb.r,
+                            .g = page_cell.content.color_rgb.g,
+                            .b = page_cell.content.color_rgb.b,
                         } } };
                     },
 
                     .bg_color_palette => {
                         @branchHint(.unlikely);
                         cells_style[x] = .{ .bg_color = .{
-                            .palette = page_cell.colorPalette(),
+                            .palette = page_cell.content.color_palette.data,
                         } };
                     },
                 }
@@ -730,7 +730,7 @@ pub const RenderState = struct {
         if (any_dirty and self.dirty == .false) self.dirty = .partial;
     }
 
-    pub const StringMap = std.ArrayListUnmanaged(point.Coordinate);
+    pub const StringMap = std.ArrayList(point.Coordinate);
 
     /// Convert the current render state contents to a UTF-8 encoded
     /// string written to the given writer. This will unwrap all the wrapped
@@ -883,7 +883,7 @@ test "styled" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 80,
         .rows = 24,
     });
@@ -901,7 +901,7 @@ test "basic text" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 3,
     });
@@ -937,7 +937,7 @@ test "styled text" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 3,
     });
@@ -983,7 +983,7 @@ test "grapheme" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 3,
     });
@@ -1030,7 +1030,7 @@ test "cursor state in viewport" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 5,
     });
@@ -1072,7 +1072,7 @@ test "cursor state out of viewport" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 2,
     });
@@ -1106,7 +1106,7 @@ test "dirty state" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 5,
     });
@@ -1155,7 +1155,7 @@ test "colors" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 5,
     });
@@ -1192,7 +1192,7 @@ test "selection single line" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t: Terminal = try .init(alloc, .{
+    var t: Terminal = try .testInit(alloc, .{
         .cols = 10,
         .rows = 3,
     });
@@ -1227,7 +1227,7 @@ test "selection multiple lines" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t: Terminal = try .init(alloc, .{
+    var t: Terminal = try .testInit(alloc, .{
         .cols = 10,
         .rows = 3,
     });
@@ -1263,7 +1263,7 @@ test "linkCells" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 5,
     });
@@ -1299,7 +1299,7 @@ test "string" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 5,
         .rows = 2,
     });
@@ -1332,7 +1332,7 @@ test "linkCells with scrollback spanning pages" {
     const viewport_rows: size.CellCountInt = 10;
     const tail_rows: size.CellCountInt = 5;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = page.std_capacity.cols,
         .rows = viewport_rows,
         .max_scrollback = 10_000,
@@ -1371,7 +1371,7 @@ test "linkCells with invalid viewport point" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 5,
     });
@@ -1409,7 +1409,7 @@ test "dirty row resets highlights" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 3,
     });

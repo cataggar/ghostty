@@ -18,13 +18,12 @@ pub fn build(b: *std.Build) !void {
             .root_source_file = b.path("src/detect.zig"),
             .target = target,
             .optimize = optimize,
+            // Our highway package is free of libc at runtime (uses no symbols)
+            // but does require libc headers at compile time.
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-
-    // Our highway package is free of libc at runtime (uses no symbols)
-    // but does require libc headers at compile time.
-    lib.root_module.link_libc = true;
 
     lib.root_module.addIncludePath(b.path("src/cpp"));
     if (upstream_) |upstream| {
@@ -90,7 +89,7 @@ pub fn build(b: *std.Build) !void {
         "-fno-sanitize-trap=undefined",
     });
 
-    if (target.result.os.tag == .freebsd or target.result.os.tag == .linux or target.result.abi.isAndroid()) {
+    if (target.result.os.tag == .freebsd or target.result.os.tag == .linux) {
         try flags.append(b.allocator, "-fPIC");
         lib.root_module.pic = true;
     }

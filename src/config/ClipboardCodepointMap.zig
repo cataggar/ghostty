@@ -15,7 +15,7 @@ pub const Replacement = Entry.Replacement;
 ///
 /// Note: we do a linear search because we expect to always have very
 /// few entries, so the overhead of a binary search is not worth it.
-list: std.MultiArrayList(Entry) = .{},
+list: std.MultiArrayList(Entry) = .empty,
 
 pub fn deinit(self: *ClipboardCodepointMap, alloc: Allocator) void {
     self.list.deinit(alloc);

@@ -65,16 +65,18 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
     const libxml2_enabled = options.libxml2_enabled;
     const libxml2_iconv_enabled = options.libxml2_iconv_enabled;
     const freetype_enabled = options.freetype_enabled;
+    const dynamic_link_opts = options.dynamic_link_opts;
 
     const lib = b.addLibrary(.{
         .name = "fontconfig",
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-    lib.root_module.link_libc = true;
+    lib.root_module.linkSystemLibrary("pthread", .{});
     if (target.result.os.tag != .windows) {
         lib.root_module.linkSystemLibrary("pthread", .{});
     }
@@ -194,8 +196,6 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         }
     }
 
-    const dynamic_link_opts = options.dynamic_link_opts;
-
     // Freetype2
     _ = b.systemIntegrationOption("freetype", .{}); // So it shows up in help
     if (freetype_enabled) {
@@ -227,7 +227,7 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         }
 
         if (b.systemIntegrationOption("libxml2", .{})) {
-            lib.root_module.linkSystemLibrary("libxml-2.0", dynamic_link_opts);
+            lib.root_module.linkSystemLibrary("libxml-2.0", .{});
         } else {
             if (b.lazyDependency("libxml2", .{
                 .target = target,

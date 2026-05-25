@@ -24,7 +24,7 @@ pub const Entry = struct {
 /// few entries, so the overhead of a binary search is not worth it. This is
 /// possible to defeat with some pathological inputs, but there is no realistic
 /// scenario where this will be a problem except people trying to fuck around.
-list: std.MultiArrayList(Entry) = .{},
+list: std.MultiArrayList(Entry) = .empty,
 
 pub fn deinit(self: *CodepointMap, alloc: Allocator) void {
     self.list.deinit(alloc);

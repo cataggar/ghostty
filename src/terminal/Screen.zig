@@ -3278,7 +3278,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
             1 => {
                 self.cursor.page_cell.* = .{
                     .content_tag = .codepoint,
-                    .content = c,
+                    .content = .{ .codepoint = .{ .data = c } },
                     .style_id = self.cursor.style_id,
                     .protected = self.cursor.protected,
                     .semantic_content = self.cursor.semantic_content,
@@ -3300,7 +3300,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
                 if (self.cursor.x == self.pages.cols - 1) {
                     self.cursor.page_cell.* = .{
                         .content_tag = .codepoint,
-                        .content = 0,
+                        .content = .{ .codepoint = .{ .data = 0 } },
                         .wide = .spacer_head,
                         .protected = self.cursor.protected,
                         .semantic_content = self.cursor.semantic_content,
@@ -3318,7 +3318,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
                 // Write our wide char
                 self.cursor.page_cell.* = .{
                     .content_tag = .codepoint,
-                    .content = c,
+                    .content = .{ .codepoint = .{ .data = c } },
                     .style_id = self.cursor.style_id,
                     .wide = .wide,
                     .protected = self.cursor.protected,
@@ -3332,7 +3332,7 @@ pub fn testWriteString(self: *Screen, text: []const u8) !void {
                 self.cursorRight(1);
                 self.cursor.page_cell.* = .{
                     .content_tag = .codepoint,
-                    .content = 0,
+                    .content = .{ .codepoint = .{ .data = 0 } },
                     .wide = .spacer_tail,
                     .protected = self.cursor.protected,
                     .semantic_content = self.cursor.semantic_content,
@@ -4218,7 +4218,7 @@ test "Screen: scrolling" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.colorRgb());
+        }, cell.content.color_rgb);
     }
 
     // Everything is dirty because we have no scrollback
@@ -4770,7 +4770,7 @@ test "Screen: scroll above same page" {
     //   +----------+ :
     //  +-------------+
 
-    // try s.pages.diagram(std.io.getStdErr().writer());
+    // try s.pages.diagram(std.Io.File.stderr().writer(&buffer));
 
     {
         const contents = try s.dumpStringAlloc(alloc, .{ .viewport = .{} });
@@ -4785,7 +4785,7 @@ test "Screen: scroll above same page" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.colorRgb());
+        }, cell.content.color_rgb);
     }
 
     // Page 0 row 1 (active row 0) is dirty because the cursor moved off of it.
@@ -4850,7 +4850,7 @@ test "Screen: scroll above same page but cursor on previous page" {
     //      +----------+ :
     //     +-------------+
 
-    // try s.pages.diagram(std.io.getStdErr().writer());
+    // try s.pages.diagram(std.Io.File.stderr().writer(&buffer));
 
     {
         const contents = try s.dumpStringAlloc(alloc, .{ .viewport = .{} });
@@ -4865,7 +4865,7 @@ test "Screen: scroll above same page but cursor on previous page" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.colorRgb());
+        }, cell.content.color_rgb);
     }
 
     // Page 0's penultimate row is dirty because the cursor moved off of it.
@@ -4931,7 +4931,7 @@ test "Screen: scroll above same page but cursor on previous page last row" {
     //      +----------+ :
     //     +-------------+
 
-    // try s.pages.diagram(std.io.getStdErr().writer());
+    // try s.pages.diagram(std.Io.File.stderr().writer(&buffer));
 
     {
         const contents = try s.dumpStringAlloc(alloc, .{ .viewport = .{} });
@@ -4946,7 +4946,7 @@ test "Screen: scroll above same page but cursor on previous page last row" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.colorRgb());
+        }, cell.content.color_rgb);
     }
 
     // Page 0's final row is dirty because the cursor moved off of it.
@@ -5013,7 +5013,7 @@ test "Screen: scroll above creates new page" {
     //      +----------+ :
     //     +-------------+
 
-    // try s.pages.diagram(std.io.getStdErr().writer());
+    // try s.pages.diagram(std.Io.File.stderr().writer(&buffer));
 
     {
         const contents = try s.dumpStringAlloc(alloc, .{ .viewport = .{} });
@@ -5028,7 +5028,7 @@ test "Screen: scroll above creates new page" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.colorRgb());
+        }, cell.content.color_rgb);
     }
 
     // Page 0's penultimate row is dirty because the cursor moved off of it.
@@ -5090,7 +5090,7 @@ test "Screen: scroll above with cursor on non-final row" {
     //    1 |4FG0000000| | 3
     //      +----------+ :
     //     +-------------+
-    // try s.pages.diagram(std.io.getStdErr().writer());
+    // try s.pages.diagram(std.Io.File.stderr().writer(&buffer));
 
     {
         const contents = try s.dumpStringAlloc(alloc, .{ .viewport = .{} });
@@ -5105,7 +5105,7 @@ test "Screen: scroll above with cursor on non-final row" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.colorRgb());
+        }, cell.content.color_rgb);
     }
 
     // Page 0's penultimate row is dirty because the cursor moved off of it.
@@ -5170,7 +5170,7 @@ test "Screen: scroll above no scrollback bottom of page" {
             .r = 155,
             .g = 0,
             .b = 0,
-        }, cell.colorRgb());
+        }, cell.content.color_rgb);
     }
 
     // Page 0 row 1 (active row 0) is dirty because the cursor moved off of it.
@@ -6544,7 +6544,7 @@ test "Screen: resize more cols bounded scrollback keeps viewport valid" {
             for (0..s.pages.cols) |x| {
                 page.getRowAndCell(x, y).cell.* = .{
                     .content_tag = .codepoint,
-                    .content = 'A',
+                    .content = .{ .codepoint = .{ .data = 'A' } },
                 };
             }
         }
@@ -8385,8 +8385,11 @@ test "Screen: selectWord" {
 
     // Default boundary codepoints for word selection
     const boundary_codepoints = &[_]u21{
-        0,   ' ', '\t', '\'', '"', '│', '`', '|', ':', ';',
-        ',', '(', ')',  '[',  ']', '{',   '}', '<', '>', '$',
+        0,   ' ', '\t', '\'', '"',
+        '│',
+        '`', '|', ':',  ';',  ',',
+        '(', ')', '[',  ']',  '{',
+        '}', '<', '>',  '$',
     };
 
     // Outside of active area
@@ -8506,8 +8509,11 @@ test "Screen: selectWord across soft-wrap" {
 
     // Default boundary codepoints for word selection
     const boundary_codepoints = &[_]u21{
-        0,   ' ', '\t', '\'', '"', '│', '`', '|', ':', ';',
-        ',', '(', ')',  '[',  ']', '{',   '}', '<', '>', '$',
+        0,   ' ', '\t', '\'', '"',
+        '│',
+        '`', '|', ':',  ';',  ',',
+        '(', ')', '[',  ']',  '{',
+        '}', '<', '>',  '$',
     };
 
     {
@@ -8578,8 +8584,11 @@ test "Screen: selectWord whitespace across soft-wrap" {
 
     // Default boundary codepoints for word selection
     const boundary_codepoints = &[_]u21{
-        0,   ' ', '\t', '\'', '"', '│', '`', '|', ':', ';',
-        ',', '(', ')',  '[',  ']', '{',   '}', '<', '>', '$',
+        0,   ' ', '\t', '\'', '"',
+        '│',
+        '`', '|', ':',  ';',  ',',
+        '(', ')', '[',  ']',  '{',
+        '}', '<', '>',  '$',
     };
 
     // Going forward
@@ -8640,8 +8649,11 @@ test "Screen: selectWord with character boundary" {
 
     // Default boundary codepoints for word selection
     const boundary_codepoints = &[_]u21{
-        0,   ' ', '\t', '\'', '"', '│', '`', '|', ':', ';',
-        ',', '(', ')',  '[',  ']', '{',   '}', '<', '>', '$',
+        0,   ' ', '\t', '\'', '"',
+        '│',
+        '`', '|', ':',  ';',  ',',
+        '(', ')', '[',  ']',  '{',
+        '}', '<', '>',  '$',
     };
 
     const cases = [_][]const u8{

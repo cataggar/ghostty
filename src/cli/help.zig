@@ -20,18 +20,25 @@ pub const Options = struct {
 ///
 /// You can also specify `--help` or `-h` along with any action such as
 /// `+list-themes` to see help for a specific action.
-pub fn run(alloc: Allocator) !u8 {
+pub fn run(
+    alloc: Allocator,
+    io: std.Io,
+    proc_args: std.process.Args,
+) !u8 {
     var opts: Options = .{};
     defer opts.deinit();
 
     {
-        var iter = try args.argsIterator(alloc);
+        var iter = try args.argsIterator(proc_args, alloc);
         defer iter.deinit();
         try args.parse(Options, alloc, &opts, &iter);
     }
 
     var buffer: [2048]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&buffer);
+    var stdout_writer = std.Io.File.stdout().writer(
+        io,
+        &buffer,
+    );
     const stdout = &stdout_writer.interface;
     try stdout.writeAll(
         \\Usage: ghostty [+action] [options]

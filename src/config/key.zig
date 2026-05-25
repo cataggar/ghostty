@@ -6,25 +6,26 @@ const Config = @import("Config.zig");
 /// amongst other things.
 pub const Key = key: {
     const field_infos = std.meta.fields(Config);
-    var names: [field_infos.len][:0]const u8 = undefined;
-    var values: [field_infos.len]comptime_int = undefined;
+    var names: [field_infos.len][]const u8 = undefined;
+    var raw_values: [field_infos.len]comptime_int = undefined;
     var i: usize = 0;
-    for (field_infos) |field| {
+    for (field_infos, &names, &raw_values) |field, *name, *raw| {
         // Ignore fields starting with "_" since they're internal and
         // not copied ever.
         if (field.name[0] == '_') continue;
 
-        names[i] = field.name;
-        values[i] = i;
+        name.* = field.name;
+        raw.* = i;
         i += 1;
     }
 
-    break :key @Enum(
-        std.math.IntFittingRange(0, field_infos.len - 1),
-        .exhaustive,
-        names[0..i],
-        values[0..i],
-    );
+    const TagInt = std.math.IntFittingRange(0, field_infos.len - 1);
+    var values: [i]TagInt = undefined;
+    for (raw_values[0..i], &values) |raw, *val| {
+        val.* = raw;
+    }
+
+    break :key @Enum(TagInt, .exhaustive, names[0..i], &values);
 };
 
 /// Returns the value type for a key

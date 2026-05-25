@@ -40,19 +40,15 @@ pub const State = struct {
 pub const Key = key: {
     const stateInfo = @typeInfo(State).@"struct";
     const TagInt = std.math.IntFittingRange(0, stateInfo.fields.len - 1);
-    var names: [stateInfo.fields.len][:0]const u8 = undefined;
+    var names: [stateInfo.fields.len][]const u8 = undefined;
     var values: [stateInfo.fields.len]TagInt = undefined;
-    for (stateInfo.fields, 0..) |field, i| {
-        names[i] = field.name;
-        values[i] = i;
+
+    for (stateInfo.fields, &names, &values, 0..) |field, *name, *v, i| {
+        name.* = field.name;
+        v.* = @intCast(i);
     }
 
-    break :key @Enum(
-        TagInt,
-        .exhaustive,
-        &names,
-        &values,
-    );
+    break :key @Enum(TagInt, .exhaustive, &names, &values);
 };
 
 /// A single conditional that can be true or false.

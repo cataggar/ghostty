@@ -185,10 +185,10 @@ pub fn get(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(Data, @intFromEnum(data)) == null) {
+        _ = std.enums.fromInt(Data, @intFromEnum(data)) orelse {
             log.warn("render_state_get invalid data value={d}", .{@intFromEnum(data)});
             return .invalid_value;
-        }
+        };
     }
 
     return switch (data) {
@@ -281,10 +281,10 @@ pub fn set(
     value: ?*const anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(SetOption, @intFromEnum(option)) == null) {
+        _ = std.enums.fromInt(SetOption, @intFromEnum(option)) orelse {
             log.warn("render_state_set invalid option value={d}", .{@intFromEnum(option)});
             return .invalid_value;
-        }
+        };
     }
 
     return switch (option) {
@@ -473,10 +473,10 @@ pub fn row_cells_get(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(RowCellsData, @intFromEnum(data)) == null) {
+        _ = std.enums.fromInt(RowCellsData, @intFromEnum(data)) orelse {
             log.warn("render_state_row_cells_get invalid data value={d}", .{@intFromEnum(data)});
             return .invalid_value;
-        }
+        };
     }
 
     return switch (data) {
@@ -594,10 +594,10 @@ pub fn row_get(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(RowData, @intFromEnum(data)) == null) {
+        _ = std.enums.fromInt(RowData, @intFromEnum(data)) orelse {
             log.warn("render_state_row_get invalid data value={d}", .{@intFromEnum(data)});
             return .invalid_value;
-        }
+        };
     }
 
     return switch (data) {
@@ -665,10 +665,10 @@ pub fn row_set(
     value: ?*const anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(RowOption, @intFromEnum(option)) == null) {
+        _ = std.enums.fromInt(RowOption, @intFromEnum(option)) orelse {
             log.warn("render_state_row_set invalid option value={d}", .{@intFromEnum(option)});
             return .invalid_value;
-        }
+        };
     }
 
     return switch (option) {

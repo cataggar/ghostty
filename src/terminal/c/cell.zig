@@ -105,9 +105,9 @@ pub fn get(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(CellData, @intFromEnum(data)) == null) {
+        _ = std.enums.fromInt(CellData, @intFromEnum(data)) orelse {
             return .invalid_value;
-        }
+        };
     }
 
     return switch (data) {
@@ -158,9 +158,9 @@ fn getTyped(
         .has_hyperlink => out.* = cell.hyperlink,
         .protected => out.* = cell.protected,
         .semantic_content => out.* = @enumFromInt(@intFromEnum(cell.semantic_content)),
-        .color_palette => out.* = cell.colorPalette(),
+        .color_palette => out.* = cell.content.color_palette.data,
         .color_rgb => {
-            const rgb = cell.colorRgb();
+            const rgb = cell.content.color_rgb;
             out.* = .{ .r = rgb.r, .g = rgb.g, .b = rgb.b };
         },
     }

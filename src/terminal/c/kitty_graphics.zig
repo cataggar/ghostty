@@ -295,9 +295,9 @@ pub fn placement_iterator_set(
     if (comptime !build_options.kitty_graphics) return .no_value;
 
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(PlacementIteratorOption, @intFromEnum(option)) == null) {
+        _ = std.enums.fromInt(PlacementIteratorOption, @intFromEnum(option)) orelse {
             return .invalid_value;
-        }
+        };
     }
 
     return switch (option) {

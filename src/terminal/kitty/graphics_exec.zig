@@ -117,7 +117,13 @@ fn query(
 
     // Attempt to load the image. If we cannot, then set an appropriate error.
     const storage = &terminal.screens.active.kitty_images;
-    var loading = LoadingImage.init(alloc, cmd, storage.image_limits) catch |err| {
+    var loading = LoadingImage.init(
+        alloc,
+        terminal.io,
+        terminal.env,
+        cmd,
+        storage.image_limits,
+    ) catch |err| {
         encodeError(&result, err);
         return result;
     };
@@ -327,7 +333,13 @@ fn loadAndAddImage(
         }
 
         break :loading loading.*;
-    } else try .init(alloc, cmd, storage.image_limits);
+    } else try .init(
+        alloc,
+        terminal.io,
+        terminal.env,
+        cmd,
+        storage.image_limits,
+    );
 
     // We only want to deinit on error. If we're chunking, then we don't
     // want to deinit at all. If we're not chunking, then we'll deinit
@@ -360,7 +372,7 @@ fn loadAndAddImage(
     // loading.debugDump() catch unreachable;
 
     // Validate and store our image
-    var img = try loading.complete(alloc);
+    var img = try loading.complete(alloc, terminal.io);
     errdefer img.deinit(alloc);
     try storage.addImage(alloc, img);
 
@@ -398,7 +410,7 @@ test "kittygfx more chunks with q=1" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Initial chunk has q=1
@@ -428,7 +440,7 @@ test "kittygfx more chunks with q=0" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Initial chunk has q=0
@@ -458,7 +470,7 @@ test "kittygfx more chunks with chunk increasing q" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Initial chunk has q=0
@@ -488,7 +500,7 @@ test "kittygfx default format is rgba" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     const cmd = try command.Parser.parseString(
@@ -508,7 +520,7 @@ test "kittygfx test valid u32 (expect invalid image ID)" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     const cmd = try command.Parser.parseString(
@@ -525,7 +537,7 @@ test "kittygfx test valid i32 (expect invalid image ID)" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     const cmd = try command.Parser.parseString(
@@ -542,7 +554,7 @@ test "kittygfx no response with no image ID or number" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     {
@@ -560,7 +572,7 @@ test "kittygfx no response with no image ID or number load and display" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     {

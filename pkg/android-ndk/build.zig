@@ -117,19 +117,18 @@ pub fn addPaths(b: *std.Build, step: *std.Build.Step.Compile) !void {
 }
 
 fn findNDKPath(b: *std.Build) ?[]const u8 {
-    const io = b.graph.io;
-    const env = b.graph.environ_map;
+    const map = b.graph.environ_map;
     // Check if user has set the environment variable for the NDK path.
-    if (env.get("ANDROID_NDK_HOME")) |value| {
+    if (map.get("ANDROID_NDK_HOME")) |value| {
         if (value.len == 0) return null;
-        var dir = std.Io.Dir.openDirAbsolute(io, value, .{}) catch return null;
-        defer dir.close(io);
+        var dir = std.Io.Dir.openDirAbsolute(b.graph.io, value, .{}) catch return null;
+        defer dir.close(b.graph.io);
         return value;
     }
 
     // Check the common environment variables for the Android SDK path and look for the NDK inside it.
-    inline for (.{ "ANDROID_HOME", "ANDROID_SDK_ROOT" }) |env_name| {
-        if (env.get(env_name)) |sdk| {
+    inline for (.{ "ANDROID_HOME", "ANDROID_SDK_ROOT" }) |env| {
+        if (map.get(env)) |sdk| {
             if (sdk.len > 0) {
                 if (findLatestNDK(b, sdk)) |ndk| return ndk;
             }
@@ -137,7 +136,7 @@ fn findNDKPath(b: *std.Build) ?[]const u8 {
     }
 
     // As a fallback, we assume the most common/default SDK path based on the OS.
-    const home = env.get(
+    const home = map.get(
         if (builtin.os.tag == .windows) "LOCALAPPDATA" else "HOME",
     ) orelse return null;
 
@@ -157,10 +156,9 @@ fn findNDKPath(b: *std.Build) ?[]const u8 {
 }
 
 fn findLatestNDK(b: *std.Build, sdk_path: []const u8) ?[]const u8 {
-    const io = b.graph.io;
     const ndk_dir = b.pathJoin(&.{ sdk_path, "ndk" });
-    var dir = std.Io.Dir.openDirAbsolute(io, ndk_dir, .{ .iterate = true }) catch return null;
-    defer dir.close(io);
+    var dir = std.Io.Dir.openDirAbsolute(b.graph.io, ndk_dir, .{ .iterate = true }) catch return null;
+    defer dir.close(b.graph.io);
 
     var latest_: ?struct {
         name: []const u8,
@@ -168,7 +166,7 @@ fn findLatestNDK(b: *std.Build, sdk_path: []const u8) ?[]const u8 {
     } = null;
     var iterator = dir.iterate();
 
-    while (iterator.next(io) catch null) |file| {
+    while (iterator.next(b.graph.io) catch null) |file| {
         if (file.kind != .directory) continue;
         const version = std.SemanticVersion.parse(file.name) catch continue;
         if (latest_) |latest| {

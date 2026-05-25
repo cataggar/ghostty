@@ -76,11 +76,16 @@ const PipelineDescription = struct {
 
 /// We create a type for the pipeline collection based on our desc array.
 const PipelineCollection = t: {
-    var names: [pipeline_descs.len][:0]const u8 = undefined;
-    for (pipeline_descs, 0..) |pipeline, i| {
-        names[i] = pipeline[0];
+    const StructField = std.builtin.Type.StructField;
+
+    var names: [pipeline_descs.len][]const u8 = undefined;
+    var types = [_]type{Pipeline} ** pipeline_descs.len;
+    var attrs = [_]StructField.Attributes{.{ .@"align" = @alignOf(Pipeline) }} ** pipeline_descs.len;
+
+    for (pipeline_descs, &names) |pipeline, *name| {
+        name.* = pipeline[0];
     }
-    break :t @Struct(.auto, null, &names, &@splat(Pipeline), &@splat(.{}));
+    break :t @Struct(.auto, null, &names, &types, &attrs);
 };
 
 /// This contains the state for the shaders used by the Metal renderer.
@@ -321,7 +326,7 @@ pub const BgImage = extern struct {
 
 /// Initialize the MTLLibrary. A MTLLibrary is a collection of shaders.
 fn initLibrary(device: objc.Object) !objc.Object {
-    const start = try std.time.Instant.now();
+    const start = try std.Io.Timestamp.now();
 
     const data = try macos.dispatch.Data.create(
         @embedFile("ghostty_metallib"),
@@ -341,7 +346,7 @@ fn initLibrary(device: objc.Object) !objc.Object {
     );
     try checkError(err);
 
-    const end = try std.time.Instant.now();
+    const end = try std.Io.Timestamp.now();
     log.debug("shader library loaded time={}us", .{end.since(start) / std.time.ns_per_us});
 
     return library;
