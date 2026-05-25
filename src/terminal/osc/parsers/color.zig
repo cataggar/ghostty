@@ -369,13 +369,13 @@ test "OSC 4:" {
 
             var list = try parseColor(alloc, .osc_4, body);
             defer list.deinit(alloc);
-            try testing.expectEqual(1, list.count());
+            try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .set = .{
                     .target = .{ .palette = @intCast(idx) },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
 
@@ -391,10 +391,10 @@ test "OSC 4:" {
 
             var list = try parseColor(alloc, .osc_4, body);
             defer list.deinit(alloc);
-            try testing.expectEqual(1, list.count());
+            try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .query = .{ .palette = @intCast(idx) } },
-                list.at(0).*,
+                list.items[0],
             );
         }
 
@@ -410,13 +410,13 @@ test "OSC 4:" {
 
             var list = try parseColor(alloc, .osc_4, body);
             defer list.deinit(alloc);
-            try testing.expectEqual(1, list.count());
+            try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .set = .{
                     .target = .{ .palette = @intCast(idx) },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
 
@@ -434,20 +434,20 @@ test "OSC 4:" {
 
             var list = try parseColor(alloc, .osc_4, body);
             defer list.deinit(alloc);
-            try testing.expectEqual(1, list.count());
+            try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .set = .{
                     .target = .{ .palette = @intCast(idx) },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
 
     // Test every special color
     for (0..@typeInfo(SpecialColor).@"enum".fields.len) |i| {
-        const special = try std.enums.fromInt(SpecialColor, i);
+        const special = std.enums.fromInt(SpecialColor, i) orelse continue;
 
         // Simple color set
         // printf '\e]4;256;red\\'
@@ -461,13 +461,13 @@ test "OSC 4:" {
 
             var list = try parseColor(alloc, .osc_4, body);
             defer list.deinit(alloc);
-            try testing.expectEqual(1, list.count());
+            try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .set = .{
                     .target = .{ .special = special },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
@@ -479,7 +479,7 @@ test "OSC 5:" {
 
     // Test every special color
     for (0..@typeInfo(SpecialColor).@"enum".fields.len) |i| {
-        const special = try std.enums.fromInt(SpecialColor, i);
+        const special = std.enums.fromInt(SpecialColor, i) orelse continue;
 
         // Simple color set
         // printf '\e]4;256;red\\'
@@ -493,13 +493,13 @@ test "OSC 5:" {
 
             var list = try parseColor(alloc, .osc_5, body);
             defer list.deinit(alloc);
-            try testing.expectEqual(1, list.count());
+            try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .set = .{
                     .target = .{ .special = special },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
@@ -517,20 +517,20 @@ test "OSC 4: multiple requests" {
             "0;red;1;blue",
         );
         defer list.deinit(alloc);
-        try testing.expectEqual(2, list.count());
+        try testing.expectEqual(2, list.items.len);
         try testing.expectEqual(
             Request{ .set = .{
                 .target = .{ .palette = 0 },
                 .color = RGB{ .r = 255, .g = 0, .b = 0 },
             } },
-            list.at(0).*,
+            list.items[0],
         );
         try testing.expectEqual(
             Request{ .set = .{
                 .target = .{ .palette = 1 },
                 .color = RGB{ .r = 0, .g = 0, .b = 255 },
             } },
-            list.at(1).*,
+            list.items[1],
         );
     }
 
@@ -543,20 +543,20 @@ test "OSC 4: multiple requests" {
             "0;red;0;blue",
         );
         defer list.deinit(alloc);
-        try testing.expectEqual(2, list.count());
+        try testing.expectEqual(2, list.items.len);
         try testing.expectEqual(
             Request{ .set = .{
                 .target = .{ .palette = 0 },
                 .color = RGB{ .r = 255, .g = 0, .b = 0 },
             } },
-            list.at(0).*,
+            list.items[0],
         );
         try testing.expectEqual(
             Request{ .set = .{
                 .target = .{ .palette = 0 },
                 .color = RGB{ .r = 0, .g = 0, .b = 255 },
             } },
-            list.at(1).*,
+            list.items[1],
         );
     }
 }
@@ -579,17 +579,17 @@ test "OSC 104:" {
 
             var list = try parseColor(alloc, .osc_104, body);
             defer list.deinit(alloc);
-            try testing.expectEqual(1, list.count());
+            try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .reset = .{ .palette = @intCast(idx) } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
 
     // Test every special color
     for (0..@typeInfo(SpecialColor).@"enum".fields.len) |i| {
-        const special = try std.enums.fromInt(SpecialColor, i);
+        const special = std.enums.fromInt(SpecialColor, i) orelse continue;
 
         // Simple color set
         // printf '\e]104;256\\'
@@ -603,10 +603,10 @@ test "OSC 104:" {
 
             var list = try parseColor(alloc, .osc_104, body);
             defer list.deinit(alloc);
-            try testing.expectEqual(1, list.count());
+            try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .reset = .{ .special = special } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
@@ -618,14 +618,14 @@ test "OSC 104: empty index" {
 
     var list = try parseColor(alloc, .osc_104, "0;;1");
     defer list.deinit(alloc);
-    try testing.expectEqual(2, list.count());
+    try testing.expectEqual(2, list.items.len);
     try testing.expectEqual(
         Request{ .reset = .{ .palette = 0 } },
-        list.at(0).*,
+        list.items[0],
     );
     try testing.expectEqual(
         Request{ .reset = .{ .palette = 1 } },
-        list.at(1).*,
+        list.items[1],
     );
 }
 
@@ -635,10 +635,10 @@ test "OSC 104: invalid index" {
 
     var list = try parseColor(alloc, .osc_104, "ffff;1");
     defer list.deinit(alloc);
-    try testing.expectEqual(1, list.count());
+    try testing.expectEqual(1, list.items.len);
     try testing.expectEqual(
         Request{ .reset = .{ .palette = 1 } },
-        list.at(0).*,
+        list.items[0],
     );
 }
 
@@ -648,10 +648,10 @@ test "OSC 104: reset all" {
 
     var list = try parseColor(alloc, .osc_104, "");
     defer list.deinit(alloc);
-    try testing.expectEqual(1, list.count());
+    try testing.expectEqual(1, list.items.len);
     try testing.expectEqual(
         Request{ .reset_palette = {} },
-        list.at(0).*,
+        list.items[0],
     );
 }
 
@@ -661,10 +661,10 @@ test "OSC 105: reset all" {
 
     var list = try parseColor(alloc, .osc_105, "");
     defer list.deinit(alloc);
-    try testing.expectEqual(1, list.count());
+    try testing.expectEqual(1, list.items.len);
     try testing.expectEqual(
         Request{ .reset_special = {} },
-        list.at(0).*,
+        list.items[0],
     );
 }
 
@@ -685,13 +685,13 @@ test "OSC 10: OSC 11: OSC 12: OSC: 13: OSC 14: OSC 15: OSC: 16: OSC 17: OSC 18: 
         {
             var list = try parseColor(alloc, op, "red");
             defer list.deinit(alloc);
-            try testing.expectEqual(1, list.count());
+            try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .set = .{
                     .target = .{ .dynamic = color },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
@@ -710,20 +710,20 @@ test "OSC 10: OSC 11: OSC 12: OSC: 13: OSC 14: OSC 15: OSC: 16: OSC 17: OSC 18: 
             "red;blue",
         );
         defer list.deinit(alloc);
-        try testing.expectEqual(2, list.count());
+        try testing.expectEqual(2, list.items.len);
         try testing.expectEqual(
             Request{ .set = .{
                 .target = .{ .dynamic = .background },
                 .color = RGB{ .r = 255, .g = 0, .b = 0 },
             } },
-            list.at(0).*,
+            list.items[0],
         );
         try testing.expectEqual(
             Request{ .set = .{
                 .target = .{ .dynamic = .cursor },
                 .color = RGB{ .r = 0, .g = 0, .b = 255 },
             } },
-            list.at(1).*,
+            list.items[1],
         );
     }
 }
@@ -745,10 +745,10 @@ test "OSC 110: OSC 111: OSC 112: OSC: 113: OSC 114: OSC 115: OSC: 116: OSC 117: 
         {
             var list = try parseColor(alloc, op, "");
             defer list.deinit(alloc);
-            try testing.expectEqual(1, list.count());
+            try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .reset = .{ .dynamic = color } },
-                list.at(0).*,
+                list.items[0],
             );
         }
 
@@ -758,10 +758,10 @@ test "OSC 110: OSC 111: OSC 112: OSC: 113: OSC 114: OSC 115: OSC: 116: OSC 117: 
         {
             var list = try parseColor(alloc, op, ";");
             defer list.deinit(alloc);
-            try testing.expectEqual(1, list.count());
+            try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .reset = .{ .dynamic = color } },
-                list.at(0).*,
+                list.items[0],
             );
         }
 
@@ -771,7 +771,7 @@ test "OSC 110: OSC 111: OSC 112: OSC: 113: OSC 114: OSC 115: OSC: 116: OSC 117: 
         {
             var list = try parseColor(alloc, op, " ");
             defer list.deinit(alloc);
-            try testing.expectEqual(0, list.count());
+            try testing.expectEqual(0, list.items.len);
         }
     }
 }

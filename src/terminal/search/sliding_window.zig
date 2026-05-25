@@ -1578,7 +1578,7 @@ test "SlidingWindow single append soft wrapped" {
     var w: SlidingWindow = try .init(alloc, .forward, "boo!");
     defer w.deinit();
 
-    var t: Terminal = try .init(alloc, .{ .cols = 4, .rows = 5 });
+    var t: Terminal = try .testInit(alloc, .{ .cols = 4, .rows = 5 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();
@@ -1615,7 +1615,7 @@ test "SlidingWindow single append reversed soft wrapped" {
     var w: SlidingWindow = try .init(alloc, .reverse, "boo!");
     defer w.deinit();
 
-    var t: Terminal = try .init(alloc, .{ .cols = 4, .rows = 5 });
+    var t: Terminal = try .testInit(alloc, .{ .cols = 4, .rows = 5 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();

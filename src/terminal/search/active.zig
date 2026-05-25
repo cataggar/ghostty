@@ -103,7 +103,7 @@ pub const ActiveSearch = struct {
 
 test "simple search" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();
@@ -143,7 +143,7 @@ test "simple search" {
 
 test "clear screen and search" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();

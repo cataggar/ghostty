@@ -10552,7 +10552,7 @@ test "PageList resize (no reflow) more cols with spacer head" {
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_head,
             };
         }
@@ -10568,7 +10568,7 @@ test "PageList resize (no reflow) more cols with spacer head" {
             const rac = page.getRowAndCell(1, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_tail,
             };
         }
@@ -10635,7 +10635,7 @@ test "PageList resize (no reflow) grow cols fast path with spacer head" {
             const rac = page.getRowAndCell(4, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_head,
             };
             rac.row.wrap = true;
@@ -10646,7 +10646,7 @@ test "PageList resize (no reflow) grow cols fast path with spacer head" {
             const rac = page.getRowAndCell(4, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_head,
             };
             rac.row.wrap = true;
@@ -12068,7 +12068,7 @@ test "PageList resize reflow more cols unwrap wide spacer head" {
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_head,
             };
         }
@@ -12085,7 +12085,7 @@ test "PageList resize reflow more cols unwrap wide spacer head" {
             const rac = page.getRowAndCell(1, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_tail,
             };
         }
@@ -12157,7 +12157,7 @@ test "PageList resize reflow more cols unwrap wide spacer head across two rows" 
             const rac = page.getRowAndCell(1, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_head,
             };
         }
@@ -12174,7 +12174,7 @@ test "PageList resize reflow more cols unwrap wide spacer head across two rows" 
             const rac = page.getRowAndCell(1, 2);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_tail,
             };
         }
@@ -12261,7 +12261,7 @@ test "PageList resize reflow more cols unwrap still requires wide spacer head" {
             const rac = page.getRowAndCell(1, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_tail,
             };
         }
@@ -12662,7 +12662,7 @@ test "PageList resize reflow less cols wraps spacer head" {
             const rac = page.getRowAndCell(3, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_head,
             };
         }
@@ -12679,7 +12679,7 @@ test "PageList resize reflow less cols wraps spacer head" {
             const rac = page.getRowAndCell(1, 1);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_tail,
             };
         }
@@ -13161,7 +13161,7 @@ test "PageList resize reflow less cols to eliminate a wide char" {
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_tail,
             };
         }
@@ -13213,7 +13213,7 @@ test "PageList resize reflow less cols to wrap a wide char" {
             const rac = page.getRowAndCell(2, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_tail,
             };
         }
@@ -13271,7 +13271,7 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
             const rac = page.getRowAndCell(0, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0x1F468 }, // First codepoint of the grapheme
+                .content = .{ .codepoint = .{ .data = 0x1F468 } }, // First codepoint of the grapheme
                 .wide = .wide,
             };
             try page.setGraphemes(rac.row, rac.cell, &.{
@@ -13284,7 +13284,7 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
             const rac = page.getRowAndCell(1, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_tail,
             };
         }
@@ -13293,7 +13293,7 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
             const rac = page.getRowAndCell(2, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0x1F468 }, // First codepoint of the grapheme
+                .content = .{ .codepoint = .{ .data = 0x1F468 } }, // First codepoint of the grapheme
                 .wide = .wide,
             };
             try page.setGraphemes(rac.row, rac.cell, &.{
@@ -13306,7 +13306,7 @@ test "PageList resize reflow less cols to wrap a multi-codepoint grapheme with a
             const rac = page.getRowAndCell(3, 0);
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = 0 },
+                .content = .{ .codepoint = .{ .data = 0 } },
                 .wide = .spacer_tail,
             };
         }
@@ -13389,7 +13389,7 @@ test "PageList resize reflow less cols copy kitty placeholder" {
             rac.row.kitty_virtual_placeholder = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = kitty.graphics.unicode.placeholder },
+                .content = .{ .codepoint = .{ .data = kitty.graphics.unicode.placeholder } },
             };
         }
     }
@@ -13430,7 +13430,7 @@ test "PageList resize reflow more cols clears kitty placeholder" {
             rac.row.kitty_virtual_placeholder = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = kitty.graphics.unicode.placeholder },
+                .content = .{ .codepoint = .{ .data = kitty.graphics.unicode.placeholder } },
             };
         }
     }
@@ -13473,7 +13473,7 @@ test "PageList resize reflow wrap moves kitty placeholder" {
             rac.row.kitty_virtual_placeholder = true;
             rac.cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = kitty.graphics.unicode.placeholder },
+                .content = .{ .codepoint = .{ .data = kitty.graphics.unicode.placeholder } },
             };
         }
     }
@@ -13902,7 +13902,7 @@ test "PageList resize (no reflow) more cols remaps pins in backfill path" {
     const marker: u21 = 'X';
     tracked.rowAndCell().cell.* = .{
         .content_tag = .codepoint,
-        .content = .{ .codepoint = marker },
+        .content = .{ .codepoint = .{ .data = marker } },
     };
 
     try s.resize(.{ .cols = new_cols, .reflow = false });
@@ -14570,7 +14570,7 @@ test "PageList split preserves grapheme clusters" {
         const rac = page.getRowAndCell(0, 6);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = 0x1F468 }, // Man emoji
+            .content = .{ .codepoint = .{ .data = 0x1F468 } }, // Man emoji
         };
         try page.setGraphemes(rac.row, rac.cell, &.{
             0x200D, // ZWJ

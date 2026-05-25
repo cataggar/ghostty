@@ -78,7 +78,7 @@ const b64_alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012345
 
 test {
     const io = std.testing.io;
-    const env = try std.testing.environ.createMap(std.testing.allocator);
+    var env = try std.testing.environ.createMap(std.testing.allocator);
     errdefer env.deinit();
 
     var td = try init(io, &env);
@@ -92,6 +92,6 @@ test {
     dir.close(io);
 
     // Should be deleted after we deinit
-    td.deinit();
+    td.deinit(io);
     try testing.expectError(error.FileNotFound, td.parent.openDir(io, nameval, .{}));
 }

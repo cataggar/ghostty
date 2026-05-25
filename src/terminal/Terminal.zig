@@ -2833,8 +2833,6 @@ pub fn printAttributes(self: *Terminal, writer: *std.Io.Writer) !void {
             try writer.print(";4{}", .{idx}),
         .rgb => |rgb| try writer.print(";48:2::{[r]}:{[g]}:{[b]}", rgb),
     }
-
-    return writer.buffered();
 }
 
 /// The modes for DECCOLM.
@@ -3192,9 +3190,15 @@ fn clearDirty(t: *Terminal) void {
     t.screens.active.pages.clearDirty();
 }
 
+/// Test helper that wraps init with testing io/environ for the 2-arg call pattern.
+pub fn testInit(alloc: Allocator, opts: Options) !Terminal {
+    return init(alloc, std.testing.io, &test_env, opts);
+}
+var test_env: std.process.Environ.Map = .init(testing.allocator);
+
 test "Terminal: input with no control characters" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 40, .rows = 40 });
+    var t = try testInit(alloc, .{ .cols = 40, .rows = 40 });
     defer t.deinit(alloc);
 
     // Basic grid writing
@@ -3214,7 +3218,7 @@ test "Terminal: input with no control characters" {
 
 test "Terminal: input with basic wraparound" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 40 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 40 });
     defer t.deinit(alloc);
 
     // Basic grid writing
@@ -3231,7 +3235,7 @@ test "Terminal: input with basic wraparound" {
 
 test "Terminal: input with basic wraparound dirty" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 40 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 40 });
     defer t.deinit(alloc);
 
     for ("hello") |c| try t.print(c);
@@ -3246,7 +3250,7 @@ test "Terminal: input with basic wraparound dirty" {
 
 test "Terminal: input that forces scroll" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 1, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 1, .rows = 5 });
     defer t.deinit(alloc);
 
     // Basic grid writing
@@ -3262,7 +3266,7 @@ test "Terminal: input that forces scroll" {
 
 test "Terminal: input unique style per cell" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 30, .rows = 30 });
+    var t = try testInit(alloc, .{ .cols = 30, .rows = 30 });
     defer t.deinit(alloc);
 
     for (0..t.rows) |y| {
@@ -3281,7 +3285,7 @@ test "Terminal: input unique style per cell" {
 test "Terminal: input glitch text" {
     const glitch = @embedFile("res/glitch.txt");
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 30, .rows = 30 });
+    var t = try testInit(alloc, .{ .cols = 30, .rows = 30 });
     defer t.deinit(alloc);
 
     // Get our initial grapheme capacity.
@@ -3303,7 +3307,7 @@ test "Terminal: input glitch text" {
 }
 
 test "Terminal: zero-width character at start" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // This used to crash the terminal. This is not allowed so we should
@@ -3319,7 +3323,7 @@ test "Terminal: zero-width character at start" {
 
 // https://github.com/mitchellh/ghostty/issues/1400
 test "Terminal: print single very long line" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     // This would crash for issue 1400. So the assertion here is
@@ -3328,7 +3332,7 @@ test "Terminal: print single very long line" {
 }
 
 test "Terminal: print wide char" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     try t.print(0x1F600); // Smiley face
@@ -3351,7 +3355,7 @@ test "Terminal: print wide char" {
 }
 
 test "Terminal: print wide char at edge creates spacer head" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     t.setCursorPos(1, 10);
@@ -3386,7 +3390,7 @@ test "Terminal: print wide char at edge creates spacer head" {
 
 test "Terminal: print wide char with 1-column width" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 1, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 1, .rows = 2 });
     defer t.deinit(alloc);
 
     try t.print('😀'); // 0x1F600
@@ -3396,7 +3400,7 @@ test "Terminal: print wide char with 1-column width" {
 }
 
 test "Terminal: print wide char in single-width terminal" {
-    var t = try init(testing.allocator, .{ .cols = 1, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 1, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     try t.print(0x1F600); // Smiley face
@@ -3415,7 +3419,7 @@ test "Terminal: print wide char in single-width terminal" {
 }
 
 test "Terminal: print over wide char at 0,0" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     try t.print(0x1F600); // Smiley face
@@ -3450,7 +3454,7 @@ test "Terminal: print over wide char at col 0 corrupts previous row" {
     // when that cell is a .spacer_tail rather than a .spacer_head. This
     // orphans the .wide cell at cols-2.
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     // Fill rows 0 and 1 with wide chars (5 per row on a 10-col terminal).
@@ -3481,7 +3485,7 @@ test "Terminal: print over wide char at col 0 corrupts previous row" {
 }
 
 test "Terminal: print over wide spacer tail" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     try t.print('橋');
@@ -3511,7 +3515,7 @@ test "Terminal: print over wide spacer tail" {
 }
 
 test "Terminal: print over wide char with bold" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     try t.setAttribute(.{ .bold = {} });
@@ -3537,7 +3541,7 @@ test "Terminal: print over wide char with bold" {
 }
 
 test "Terminal: print over wide char with bg color" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     try t.setAttribute(.{ .direct_color_bg = .{
@@ -3567,7 +3571,7 @@ test "Terminal: print over wide char with bg color" {
 }
 
 test "Terminal: print multicodepoint grapheme, disabled mode 2027" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // https://github.com/mitchellh/ghostty/issues/289
@@ -3639,7 +3643,7 @@ test "Terminal: print multicodepoint grapheme, disabled mode 2027" {
 }
 
 test "Terminal: VS16 doesn't make character with 2027 disabled" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     // Disable grapheme clustering
@@ -3666,7 +3670,7 @@ test "Terminal: VS16 doesn't make character with 2027 disabled" {
 }
 
 test "Terminal: ignored VS16 doesn't mark dirty" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     // Disable grapheme clustering
@@ -3681,7 +3685,7 @@ test "Terminal: ignored VS16 doesn't mark dirty" {
 }
 
 test "Terminal: print invalid VS16 non-grapheme" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // https://github.com/mitchellh/ghostty/issues/1482
@@ -3709,7 +3713,7 @@ test "Terminal: print invalid VS16 non-grapheme" {
 }
 
 test "Terminal: invalid VS16 doesn't mark dirty" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     // Disable grapheme clustering
@@ -3724,7 +3728,7 @@ test "Terminal: invalid VS16 doesn't mark dirty" {
 }
 
 test "Terminal: print multicodepoint grapheme, mode 2027" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -3766,7 +3770,7 @@ test "Terminal: print multicodepoint grapheme, mode 2027" {
 }
 
 test "Terminal: keypad sequence VS15" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -3795,7 +3799,7 @@ test "Terminal: keypad sequence VS15" {
 }
 
 test "Terminal: keypad sequence VS16" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -3824,7 +3828,7 @@ test "Terminal: keypad sequence VS16" {
 }
 
 test "Terminal: Fitzpatrick skin tone next valid base" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -3853,7 +3857,7 @@ test "Terminal: Fitzpatrick skin tone next valid base" {
 }
 
 test "Terminal: Fitzpatrick skin tone next to non-base" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -3898,7 +3902,7 @@ test "Terminal: Fitzpatrick skin tone next to non-base" {
 }
 
 test "Terminal: multicodepoint grapheme marks dirty on every codepoint" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -3927,7 +3931,7 @@ test "Terminal: multicodepoint grapheme marks dirty on every codepoint" {
 }
 
 test "Terminal: VS15 to make narrow character" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -3967,7 +3971,7 @@ test "Terminal: VS15 to make narrow character" {
 }
 
 test "Terminal: VS15 on already narrow emoji" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4002,7 +4006,7 @@ test "Terminal: VS15 on already narrow emoji" {
 }
 
 test "Terminal: print invalid VS15 following emoji is wide" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4033,7 +4037,7 @@ test "Terminal: print invalid VS15 following emoji is wide" {
 }
 
 test "Terminal: print invalid VS15 in emoji ZWJ sequence" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4067,7 +4071,7 @@ test "Terminal: print invalid VS15 in emoji ZWJ sequence" {
 }
 
 test "Terminal: VS15 to make narrow character with pending wrap" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 4 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 4 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4123,7 +4127,7 @@ test "Terminal: VS15 to make narrow character with pending wrap" {
 }
 
 test "Terminal: VS16 to make wide character on next line" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 3 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 3 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4174,7 +4178,7 @@ test "Terminal: VS16 to make wide character on next line" {
 test "Terminal: VS16 to make wide character on next line with hyperlink" {
     // Regression test for the crash fixed in print's grapheme `.wide` path:
     // writing a spacer_head at the screen edge before row.wrap was set.
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 3 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 3 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering and activate a hyperlink so printCell
@@ -4224,7 +4228,7 @@ test "Terminal: VS16 to make wide character on next line with hyperlink" {
 }
 
 test "Terminal: VS16 to make wide character with pending wrap" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 3 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 3 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4261,7 +4265,7 @@ test "Terminal: VS16 to make wide character with pending wrap" {
 }
 
 test "Terminal: VS16 to make wide character with mode 2027" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4292,7 +4296,7 @@ test "Terminal: VS16 to make wide character with mode 2027" {
 }
 
 test "Terminal: VS16 repeated with mode 2027" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4332,7 +4336,7 @@ test "Terminal: VS16 repeated with mode 2027" {
 }
 
 test "Terminal: print invalid VS16 grapheme" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4364,7 +4368,7 @@ test "Terminal: print invalid VS16 grapheme" {
 }
 
 test "Terminal: print invalid VS16 with second char" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4399,7 +4403,7 @@ test "Terminal: print invalid VS16 with second char" {
 }
 
 test "Terminal: print grapheme ò (o with nonspacing mark) should be narrow" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4425,7 +4429,7 @@ test "Terminal: print grapheme ò (o with nonspacing mark) should be narrow" {
 }
 
 test "Terminal: print Devanagari grapheme should be wide" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4459,7 +4463,7 @@ test "Terminal: print Devanagari grapheme should be wide" {
 }
 
 test "Terminal: print Devanagari grapheme should be wide on next line" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 3 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 3 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4509,7 +4513,7 @@ test "Terminal: print Devanagari grapheme should be wide on next line" {
 test "Terminal: print Devanagari grapheme should be wide on next page" {
     const rows = pagepkg.std_capacity.rows;
     const cols = pagepkg.std_capacity.cols;
-    var t = try init(testing.allocator, .{ .rows = rows, .cols = cols });
+    var t = try testInit(testing.allocator, .{ .rows = rows, .cols = cols });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4566,7 +4570,7 @@ test "Terminal: print Devanagari grapheme should be wide on next page" {
 }
 
 test "Terminal: print invalid VS16 with second char (combining)" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4600,7 +4604,7 @@ test "Terminal: print invalid VS16 with second char (combining)" {
 }
 
 test "Terminal: overwrite grapheme should clear grapheme data" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4631,7 +4635,7 @@ test "Terminal: overwrite grapheme should clear grapheme data" {
 }
 
 test "Terminal: overwrite multicodepoint grapheme clears grapheme data" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4671,7 +4675,7 @@ test "Terminal: overwrite multicodepoint grapheme clears grapheme data" {
 }
 
 test "Terminal: overwrite multicodepoint grapheme tail clears grapheme data" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     // Enable grapheme clustering
@@ -4710,7 +4714,7 @@ test "Terminal: overwrite multicodepoint grapheme tail clears grapheme data" {
 
 test "Terminal: print breaks valid grapheme cluster with Prepend + ASCII for speed" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -4756,7 +4760,7 @@ test "Terminal: print breaks valid grapheme cluster with Prepend + ASCII for spe
 }
 
 test "Terminal: print writes to bottom if scrolled" {
-    var t = try init(testing.allocator, .{ .cols = 5, .rows = 2 });
+    var t = try testInit(testing.allocator, .{ .cols = 5, .rows = 2 });
     defer t.deinit(testing.allocator);
 
     // Basic grid writing
@@ -4798,7 +4802,7 @@ test "Terminal: print writes to bottom if scrolled" {
 }
 
 test "Terminal: print charset" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // G1 should have no effect
@@ -4827,7 +4831,7 @@ test "Terminal: print charset" {
 }
 
 test "Terminal: print charset outside of ASCII" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // G1 should have no effect
@@ -4852,7 +4856,7 @@ test "Terminal: print charset outside of ASCII" {
 }
 
 test "Terminal: print invoke charset" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     t.configureCharset(.G1, .dec_special);
@@ -4876,7 +4880,7 @@ test "Terminal: print invoke charset" {
 }
 
 test "Terminal: print invoke charset single" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     t.configureCharset(.G1, .dec_special);
@@ -4896,7 +4900,7 @@ test "Terminal: print invoke charset single" {
 test "Terminal: print kitty unicode placeholder" {
     if (comptime !build_options.kitty_graphics) return error.SkipZigTest;
 
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     try t.print(kitty.graphics.unicode.placeholder);
@@ -4914,7 +4918,7 @@ test "Terminal: print kitty unicode placeholder" {
 }
 
 test "Terminal: soft wrap" {
-    var t = try init(testing.allocator, .{ .cols = 3, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 3, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Basic grid writing
@@ -4929,7 +4933,7 @@ test "Terminal: soft wrap" {
 }
 
 test "Terminal: soft wrap with semantic prompt" {
-    var t = try init(testing.allocator, .{ .cols = 3, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 3, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Mark our prompt.
@@ -4950,7 +4954,7 @@ test "Terminal: soft wrap with semantic prompt" {
 }
 
 test "Terminal: disabled wraparound with wide char and one space" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     t.modes.set(.wraparound, false);
@@ -4982,7 +4986,7 @@ test "Terminal: disabled wraparound with wide char and one space" {
 }
 
 test "Terminal: disabled wraparound with wide char and no space" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     t.modes.set(.wraparound, false);
@@ -5013,7 +5017,7 @@ test "Terminal: disabled wraparound with wide char and no space" {
 }
 
 test "Terminal: disabled wraparound with wide grapheme and half space" {
-    var t = try init(testing.allocator, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(testing.allocator, .{ .rows = 5, .cols = 5 });
     defer t.deinit(testing.allocator);
 
     t.modes.set(.grapheme_cluster, true);
@@ -5046,7 +5050,7 @@ test "Terminal: disabled wraparound with wide grapheme and half space" {
 }
 
 test "Terminal: print right margin wrap" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     try t.printString("123456789");
@@ -5069,7 +5073,7 @@ test "Terminal: print right margin wrap" {
 }
 
 test "Terminal: print right margin wrap dirty tracking" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     try t.printString("123456789");
@@ -5098,7 +5102,7 @@ test "Terminal: print right margin wrap dirty tracking" {
 }
 
 test "Terminal: print right margin outside" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     try t.printString("123456789");
@@ -5118,7 +5122,7 @@ test "Terminal: print right margin outside" {
 }
 
 test "Terminal: print right margin outside wrap" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     try t.printString("123456789");
@@ -5135,7 +5139,7 @@ test "Terminal: print right margin outside wrap" {
 }
 
 test "Terminal: print wide char at right margin does not create spacer head" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     t.modes.set(.enable_left_and_right_margin, true);
@@ -5172,7 +5176,7 @@ test "Terminal: print wide char at right margin does not create spacer head" {
 }
 
 test "Terminal: print with hyperlink" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Setup our hyperlink and print
@@ -5197,7 +5201,7 @@ test "Terminal: print with hyperlink" {
 }
 
 test "Terminal: print over cell with same hyperlink" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Setup our hyperlink and print
@@ -5224,7 +5228,7 @@ test "Terminal: print over cell with same hyperlink" {
 }
 
 test "Terminal: print and end hyperlink" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Setup our hyperlink and print
@@ -5261,7 +5265,7 @@ test "Terminal: print and end hyperlink" {
 }
 
 test "Terminal: print and change hyperlink" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Setup our hyperlink and print
@@ -5296,7 +5300,7 @@ test "Terminal: print and change hyperlink" {
 }
 
 test "Terminal: overwrite hyperlink" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Setup our hyperlink and print
@@ -5329,7 +5333,7 @@ test "Terminal: overwrite hyperlink" {
 // flag. The integrity check inside setHyperlink (or increaseCapacity)
 // sees the unwrapped spacer head and panics. Found via fuzzing.
 test "Terminal: print wide char at right edge with hyperlink" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     try t.screens.active.startHyperlink("http://example.com", null);
@@ -5369,7 +5373,7 @@ test "Terminal: print wide char at right edge with hyperlink" {
 }
 
 test "Terminal: linefeed and carriage return" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Print and CR.
@@ -5397,7 +5401,7 @@ test "Terminal: linefeed and carriage return" {
 }
 
 test "Terminal: linefeed unsets pending wrap" {
-    var t = try init(testing.allocator, .{ .cols = 5, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 5, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Basic grid writing
@@ -5411,7 +5415,7 @@ test "Terminal: linefeed unsets pending wrap" {
 }
 
 test "Terminal: linefeed mode automatic carriage return" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     // Basic grid writing
@@ -5427,7 +5431,7 @@ test "Terminal: linefeed mode automatic carriage return" {
 }
 
 test "Terminal: carriage return unsets pending wrap" {
-    var t = try init(testing.allocator, .{ .cols = 5, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 5, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Basic grid writing
@@ -5438,7 +5442,7 @@ test "Terminal: carriage return unsets pending wrap" {
 }
 
 test "Terminal: carriage return origin mode moves to left margin" {
-    var t = try init(testing.allocator, .{ .cols = 5, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 5, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     t.modes.set(.origin, true);
@@ -5449,7 +5453,7 @@ test "Terminal: carriage return origin mode moves to left margin" {
 }
 
 test "Terminal: carriage return left of left margin moves to zero" {
-    var t = try init(testing.allocator, .{ .cols = 5, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 5, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     t.screens.active.cursor.x = 1;
@@ -5459,7 +5463,7 @@ test "Terminal: carriage return left of left margin moves to zero" {
 }
 
 test "Terminal: carriage return right of left margin moves to left margin" {
-    var t = try init(testing.allocator, .{ .cols = 5, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 5, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     t.screens.active.cursor.x = 3;
@@ -5469,7 +5473,7 @@ test "Terminal: carriage return right of left margin moves to left margin" {
 }
 
 test "Terminal: backspace" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // BS
@@ -5487,7 +5491,7 @@ test "Terminal: backspace" {
 
 test "Terminal: horizontal tabs" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 20, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 20, .rows = 5 });
     defer t.deinit(alloc);
 
     // HT
@@ -5508,7 +5512,7 @@ test "Terminal: horizontal tabs" {
 
 test "Terminal: horizontal tabs starting on tabstop" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 20, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 20, .rows = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(t.screens.active.cursor.y, 9);
@@ -5526,7 +5530,7 @@ test "Terminal: horizontal tabs starting on tabstop" {
 
 test "Terminal: horizontal tabs with right margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 20, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 20, .rows = 5 });
     defer t.deinit(alloc);
 
     t.scrolling_region.left = 2;
@@ -5545,7 +5549,7 @@ test "Terminal: horizontal tabs with right margin" {
 
 test "Terminal: horizontal tabs back" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 20, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 20, .rows = 5 });
     defer t.deinit(alloc);
 
     // Edge of screen
@@ -5568,7 +5572,7 @@ test "Terminal: horizontal tabs back" {
 
 test "Terminal: horizontal tabs back starting on tabstop" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 20, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 20, .rows = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(t.screens.active.cursor.y, 9);
@@ -5586,7 +5590,7 @@ test "Terminal: horizontal tabs back starting on tabstop" {
 
 test "Terminal: horizontal tabs with left margin in origin mode" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 20, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 20, .rows = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.origin, true);
@@ -5606,7 +5610,7 @@ test "Terminal: horizontal tabs with left margin in origin mode" {
 
 test "Terminal: horizontal tab back with cursor before left margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 20, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 20, .rows = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.origin, true);
@@ -5626,7 +5630,7 @@ test "Terminal: horizontal tab back with cursor before left margin" {
 
 test "Terminal: cursorPos resets wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -5644,7 +5648,7 @@ test "Terminal: cursorPos resets wrap" {
 
 test "Terminal: cursorPos off the screen" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(500, 500);
@@ -5659,7 +5663,7 @@ test "Terminal: cursorPos off the screen" {
 
 test "Terminal: cursorPos relative to origin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.scrolling_region.top = 2;
@@ -5677,7 +5681,7 @@ test "Terminal: cursorPos relative to origin" {
 
 test "Terminal: cursorPos relative to origin with left/right" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.scrolling_region.top = 2;
@@ -5697,7 +5701,7 @@ test "Terminal: cursorPos relative to origin with left/right" {
 
 test "Terminal: cursorPos limits with full scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.scrolling_region.top = 2;
@@ -5717,7 +5721,7 @@ test "Terminal: cursorPos limits with full scroll region" {
 
 // Probably outdated, but dates back to the original terminal implementation.
 test "Terminal: setCursorPos (original test)" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     try testing.expectEqual(@as(usize, 0), t.screens.active.cursor.x);
@@ -5770,7 +5774,7 @@ test "Terminal: setCursorPos (original test)" {
 
 test "Terminal: setTopAndBottomMargin simple" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -5800,7 +5804,7 @@ test "Terminal: setTopAndBottomMargin simple" {
 
 test "Terminal: setTopAndBottomMargin top only" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -5830,7 +5834,7 @@ test "Terminal: setTopAndBottomMargin top only" {
 
 test "Terminal: setTopAndBottomMargin top and bottom" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -5858,7 +5862,7 @@ test "Terminal: setTopAndBottomMargin top and bottom" {
 
 test "Terminal: setTopAndBottomMargin top equal to bottom" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -5887,7 +5891,7 @@ test "Terminal: setTopAndBottomMargin top equal to bottom" {
 
 test "Terminal: setLeftAndRightMargin simple" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -5915,7 +5919,7 @@ test "Terminal: setLeftAndRightMargin simple" {
 
 test "Terminal: setLeftAndRightMargin left only" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -5948,7 +5952,7 @@ test "Terminal: setLeftAndRightMargin left only" {
 
 test "Terminal: setLeftAndRightMargin left and right" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -5979,7 +5983,7 @@ test "Terminal: setLeftAndRightMargin left and right" {
 
 test "Terminal: setLeftAndRightMargin left equal right" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -6010,7 +6014,7 @@ test "Terminal: setLeftAndRightMargin left equal right" {
 
 test "Terminal: setLeftAndRightMargin mode 69 unset" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -6041,7 +6045,7 @@ test "Terminal: setLeftAndRightMargin mode 69 unset" {
 
 test "Terminal: insertLines simple" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -6070,7 +6074,7 @@ test "Terminal: insertLines simple" {
 
 test "Terminal: insertLines colors with bg color" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -6111,7 +6115,7 @@ test "Terminal: insertLines colors with bg color" {
 
 test "Terminal: insertLines handles style refs" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 3 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -6145,7 +6149,7 @@ test "Terminal: insertLines handles style refs" {
 
 test "Terminal: insertLines outside of scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -6174,7 +6178,7 @@ test "Terminal: insertLines outside of scroll region" {
 
 test "Terminal: insertLines top/bottom scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -6207,7 +6211,7 @@ test "Terminal: insertLines top/bottom scroll region" {
 
 test "Terminal: insertLines across page boundary marks all shifted rows dirty" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 10, .max_scrollback = 1024 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 10, .max_scrollback = 1024 });
     defer t.deinit(alloc);
 
     const first_page = t.screens.active.pages.pages.first.?;
@@ -6253,7 +6257,7 @@ test "Terminal: insertLines across page boundary marks all shifted rows dirty" {
 
 test "Terminal: insertLines (legacy test)" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 5 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -6286,7 +6290,7 @@ test "Terminal: insertLines (legacy test)" {
 
 test "Terminal: insertLines zero" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 5 });
     defer t.deinit(alloc);
 
     // This should do nothing
@@ -6296,7 +6300,7 @@ test "Terminal: insertLines zero" {
 
 test "Terminal: insertLines with scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 6 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 6 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -6335,7 +6339,7 @@ test "Terminal: insertLines with scroll region" {
 
 test "Terminal: insertLines more than remaining" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 5 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -6373,7 +6377,7 @@ test "Terminal: insertLines more than remaining" {
 
 test "Terminal: insertLines resets pending wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -6391,7 +6395,7 @@ test "Terminal: insertLines resets pending wrap" {
 
 test "Terminal: insertLines resets wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
 
     try t.print('1');
@@ -6417,7 +6421,7 @@ test "Terminal: insertLines resets wrap" {
 
 test "Terminal: insertLines multi-codepoint graphemes" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Disable grapheme clustering
@@ -6449,7 +6453,7 @@ test "Terminal: insertLines multi-codepoint graphemes" {
 
 test "Terminal: insertLines left/right scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("ABC123");
@@ -6480,7 +6484,7 @@ test "Terminal: insertLines left/right scroll region" {
 
 test "Terminal: scrollUp simple" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -6513,7 +6517,7 @@ test "Terminal: scrollUp simple" {
 
 test "Terminal: scrollUp moves hyperlink" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -6564,7 +6568,7 @@ test "Terminal: scrollUp moves hyperlink" {
 
 test "Terminal: scrollUp clears hyperlink" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.screens.active.startHyperlink("http://example.com", null);
@@ -6601,7 +6605,7 @@ test "Terminal: scrollUp clears hyperlink" {
 
 test "Terminal: scrollUp top/bottom scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -6631,7 +6635,7 @@ test "Terminal: scrollUp top/bottom scroll region" {
 
 test "Terminal: scrollUp left/right scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("ABC123");
@@ -6664,7 +6668,7 @@ test "Terminal: scrollUp left/right scroll region" {
 
 test "Terminal: scrollUp left/right scroll region hyperlink" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("ABC123");
@@ -6770,7 +6774,7 @@ test "Terminal: scrollUp left/right scroll region hyperlink" {
 
 test "Terminal: scrollUp preserves pending wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(1, 5);
@@ -6791,7 +6795,7 @@ test "Terminal: scrollUp preserves pending wrap" {
 
 test "Terminal: scrollUp full top/bottom region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("top");
@@ -6815,7 +6819,7 @@ test "Terminal: scrollUp full top/bottom region" {
 
 test "Terminal: scrollUp full top/bottomleft/right scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("top");
@@ -6846,7 +6850,7 @@ test "Terminal: scrollUp creates scrollback in primary screen" {
     // When in primary screen with full-width scroll region at top,
     // scrollUp (CSI S) should push lines into scrollback like xterm.
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 10 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 10 });
     defer t.deinit(alloc);
 
     // Fill the screen with content
@@ -6892,7 +6896,7 @@ test "Terminal: scrollUp creates scrollback in primary screen" {
 test "Terminal: scrollUp with max_scrollback zero" {
     // When max_scrollback is 0, scrollUp should still work but not retain history
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
     defer t.deinit(alloc);
 
     try t.printString("AAAAA");
@@ -6924,7 +6928,7 @@ test "Terminal: scrollUp with max_scrollback zero" {
 test "Terminal: scrollUp with max_scrollback zero and top margin" {
     // When max_scrollback is 0 and top margin is set, should use deleteLines path
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
     defer t.deinit(alloc);
 
     try t.printString("AAAAA");
@@ -6954,7 +6958,7 @@ test "Terminal: scrollUp with max_scrollback zero and top margin" {
 test "Terminal: scrollUp with max_scrollback zero and left/right margin" {
     // When max_scrollback is 0 with left/right margins, uses deleteLines path
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 10, .max_scrollback = 0 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 10, .max_scrollback = 0 });
     defer t.deinit(alloc);
 
     try t.printString("AAAAABBBBB");
@@ -6981,7 +6985,7 @@ test "Terminal: scrollUp with max_scrollback zero and left/right margin" {
 
 test "Terminal: scrollDown simple" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -7013,7 +7017,7 @@ test "Terminal: scrollDown simple" {
 
 test "Terminal: scrollDown hyperlink moves" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.screens.active.startHyperlink("http://example.com", null);
@@ -7064,7 +7068,7 @@ test "Terminal: scrollDown hyperlink moves" {
 
 test "Terminal: scrollDown outside of scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -7099,7 +7103,7 @@ test "Terminal: scrollDown outside of scroll region" {
 
 test "Terminal: scrollDown left/right scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("ABC123");
@@ -7133,7 +7137,7 @@ test "Terminal: scrollDown left/right scroll region" {
 
 test "Terminal: scrollDown left/right scroll region hyperlink" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.screens.active.startHyperlink("http://example.com", null);
@@ -7239,7 +7243,7 @@ test "Terminal: scrollDown left/right scroll region hyperlink" {
 
 test "Terminal: scrollDown outside of left/right scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("ABC123");
@@ -7273,7 +7277,7 @@ test "Terminal: scrollDown outside of left/right scroll region" {
 
 test "Terminal: scrollDown preserves pending wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 10 });
     defer t.deinit(alloc);
 
     t.setCursorPos(1, 5);
@@ -7294,7 +7298,7 @@ test "Terminal: scrollDown preserves pending wrap" {
 
 test "Terminal: eraseChars simple operation" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABC") |c| try t.print(c);
@@ -7315,7 +7319,7 @@ test "Terminal: eraseChars simple operation" {
 
 test "Terminal: eraseChars minimum one" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABC") |c| try t.print(c);
@@ -7334,7 +7338,7 @@ test "Terminal: eraseChars minimum one" {
 
 test "Terminal: eraseChars beyond screen edge" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("  ABC") |c| try t.print(c);
@@ -7350,7 +7354,7 @@ test "Terminal: eraseChars beyond screen edge" {
 
 test "Terminal: eraseChars wide character" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.print('橋');
@@ -7368,7 +7372,7 @@ test "Terminal: eraseChars wide character" {
 
 test "Terminal: eraseChars resets pending wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -7386,7 +7390,7 @@ test "Terminal: eraseChars resets pending wrap" {
 
 test "Terminal: eraseChars resets wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE123") |c| try t.print(c);
@@ -7416,7 +7420,7 @@ test "Terminal: eraseChars resets wrap" {
 
 test "Terminal: eraseChars preserves background sgr" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     for ("ABC") |c| try t.print(c);
@@ -7455,7 +7459,7 @@ test "Terminal: eraseChars preserves background sgr" {
 
 test "Terminal: eraseChars handles refcounted styles" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.setAttribute(.{ .bold = {} });
@@ -7477,7 +7481,7 @@ test "Terminal: eraseChars handles refcounted styles" {
 
 test "Terminal: eraseChars protected attributes respected with iso" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -7494,7 +7498,7 @@ test "Terminal: eraseChars protected attributes respected with iso" {
 
 test "Terminal: eraseChars protected attributes ignored with dec most recent" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -7513,7 +7517,7 @@ test "Terminal: eraseChars protected attributes ignored with dec most recent" {
 
 test "Terminal: eraseChars protected attributes ignored with dec set" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.dec);
@@ -7530,7 +7534,7 @@ test "Terminal: eraseChars protected attributes ignored with dec set" {
 
 test "Terminal: eraseChars wide char boundary conditions" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 1, .cols = 8 });
+    var t = try testInit(alloc, .{ .rows = 1, .cols = 8 });
     defer t.deinit(alloc);
 
     try t.printString("😀a😀b😀");
@@ -7553,7 +7557,7 @@ test "Terminal: eraseChars wide char boundary conditions" {
 
 test "Terminal: eraseChars wide char splits proper cell boundaries" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 1, .cols = 30 });
+    var t = try testInit(alloc, .{ .rows = 1, .cols = 30 });
     defer t.deinit(alloc);
 
     // This is a test for a bug: https://github.com/ghostty-org/ghostty/issues/2817
@@ -7583,7 +7587,7 @@ test "Terminal: eraseChars wide char splits proper cell boundaries" {
 
 test "Terminal: eraseChars wide char wrap boundary conditions" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 3, .cols = 8 });
+    var t = try testInit(alloc, .{ .rows = 3, .cols = 8 });
     defer t.deinit(alloc);
 
     try t.printString(".......😀abcde😀......");
@@ -7614,7 +7618,7 @@ test "Terminal: eraseChars wide char wrap boundary conditions" {
 
 test "Terminal: reverseIndex" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 5 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -7641,7 +7645,7 @@ test "Terminal: reverseIndex" {
 
 test "Terminal: reverseIndex from the top" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -7674,7 +7678,7 @@ test "Terminal: reverseIndex from the top" {
 
 test "Terminal: reverseIndex top of scrolling region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 10 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -7707,7 +7711,7 @@ test "Terminal: reverseIndex top of scrolling region" {
 
 test "Terminal: reverseIndex top of screen" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -7728,7 +7732,7 @@ test "Terminal: reverseIndex top of screen" {
 
 test "Terminal: reverseIndex not top of screen" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -7749,7 +7753,7 @@ test "Terminal: reverseIndex not top of screen" {
 
 test "Terminal: reverseIndex top/bottom margins" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -7770,7 +7774,7 @@ test "Terminal: reverseIndex top/bottom margins" {
 
 test "Terminal: reverseIndex outside top/bottom margins" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -7791,7 +7795,7 @@ test "Terminal: reverseIndex outside top/bottom margins" {
 
 test "Terminal: reverseIndex left/right margins" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -7813,7 +7817,7 @@ test "Terminal: reverseIndex left/right margins" {
 
 test "Terminal: reverseIndex outside left/right margins" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -7835,7 +7839,7 @@ test "Terminal: reverseIndex outside left/right margins" {
 
 test "Terminal: index" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 5 });
     defer t.deinit(alloc);
 
     try t.index();
@@ -7853,7 +7857,7 @@ test "Terminal: index" {
 
 test "Terminal: index from the bottom" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(5, 1);
@@ -7876,7 +7880,7 @@ test "Terminal: index from the bottom" {
 
 test "Terminal: index scrolling with hyperlink" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(5, 1);
@@ -7921,7 +7925,7 @@ test "Terminal: index scrolling with hyperlink" {
 
 test "Terminal: index outside of scrolling region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 5 });
     defer t.deinit(alloc);
 
     try testing.expectEqual(@as(usize, 0), t.screens.active.cursor.y);
@@ -7932,7 +7936,7 @@ test "Terminal: index outside of scrolling region" {
 
 test "Terminal: index from the bottom outside of scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 2);
@@ -7952,7 +7956,7 @@ test "Terminal: index from the bottom outside of scroll region" {
 
 test "Terminal: index no scroll region, top of screen" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -7972,7 +7976,7 @@ test "Terminal: index no scroll region, top of screen" {
 
 test "Terminal: index bottom of primary screen" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(5, 1);
@@ -7993,7 +7997,7 @@ test "Terminal: index bottom of primary screen" {
 
 test "Terminal: index bottom of primary screen background sgr" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(5, 1);
@@ -8026,7 +8030,7 @@ test "Terminal: index bottom of primary screen background sgr" {
 
 test "Terminal: index inside scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 3);
@@ -8047,7 +8051,7 @@ test "Terminal: index inside scroll region" {
 
 test "Terminal: index bottom of scroll region with hyperlinks" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 2);
@@ -8095,7 +8099,7 @@ test "Terminal: index bottom of scroll region with hyperlinks" {
 
 test "Terminal: index bottom of scroll region clear hyperlinks" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(2, 3);
@@ -8134,7 +8138,7 @@ test "Terminal: index bottom of scroll region clear hyperlinks" {
 
 test "Terminal: index bottom of scroll region with background SGR" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 3);
@@ -8171,7 +8175,7 @@ test "Terminal: index bottom of scroll region with background SGR" {
 
 test "Terminal: index bottom of primary screen with scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 3);
@@ -8199,7 +8203,7 @@ test "Terminal: index bottom of primary screen with scroll region" {
 
 test "Terminal: index outside left/right margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 3);
@@ -8223,7 +8227,7 @@ test "Terminal: index outside left/right margin" {
 
 test "Terminal: index inside left/right margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     try t.printString("AAAAAA");
@@ -8257,7 +8261,7 @@ test "Terminal: index inside left/right margin" {
 
 test "Terminal: index bottom of scroll region creates scrollback" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 3);
@@ -8282,7 +8286,7 @@ test "Terminal: index bottom of scroll region creates scrollback" {
 
 test "Terminal: index bottom of scroll region no scrollback" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 3);
@@ -8303,7 +8307,7 @@ test "Terminal: index bottom of scroll region no scrollback" {
 
 test "Terminal: index bottom of scroll region blank line preserves SGR" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 3);
@@ -8344,7 +8348,7 @@ test "Terminal: index bottom of scroll region blank line preserves SGR" {
 
 test "Terminal: cursorUp basic" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(3, 1);
@@ -8361,7 +8365,7 @@ test "Terminal: cursorUp basic" {
 
 test "Terminal: cursorUp below top scroll margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(2, 4);
@@ -8379,7 +8383,7 @@ test "Terminal: cursorUp below top scroll margin" {
 
 test "Terminal: cursorUp above top scroll margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(3, 5);
@@ -8398,7 +8402,7 @@ test "Terminal: cursorUp above top scroll margin" {
 
 test "Terminal: cursorUp resets wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -8416,7 +8420,7 @@ test "Terminal: cursorUp resets wrap" {
 
 test "Terminal: cursorLeft no wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -8434,7 +8438,7 @@ test "Terminal: cursorLeft no wrap" {
 
 test "Terminal: cursorLeft unsets pending wrap state" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -8452,7 +8456,7 @@ test "Terminal: cursorLeft unsets pending wrap state" {
 
 test "Terminal: cursorLeft unsets pending wrap state with longer jump" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -8470,7 +8474,7 @@ test "Terminal: cursorLeft unsets pending wrap state with longer jump" {
 
 test "Terminal: cursorLeft reverse wrap with pending wrap state" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, true);
@@ -8491,7 +8495,7 @@ test "Terminal: cursorLeft reverse wrap with pending wrap state" {
 
 test "Terminal: cursorLeft reverse wrap extended with pending wrap state" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, true);
@@ -8512,7 +8516,7 @@ test "Terminal: cursorLeft reverse wrap extended with pending wrap state" {
 
 test "Terminal: cursorLeft reverse wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, true);
@@ -8532,7 +8536,7 @@ test "Terminal: cursorLeft reverse wrap" {
 
 test "Terminal: cursorLeft reverse wrap with no soft wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, true);
@@ -8554,7 +8558,7 @@ test "Terminal: cursorLeft reverse wrap with no soft wrap" {
 
 test "Terminal: cursorLeft reverse wrap before left margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, true);
@@ -8572,7 +8576,7 @@ test "Terminal: cursorLeft reverse wrap before left margin" {
 
 test "Terminal: cursorLeft extended reverse wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, true);
@@ -8594,7 +8598,7 @@ test "Terminal: cursorLeft extended reverse wrap" {
 
 test "Terminal: cursorLeft extended reverse wrap bottom wraparound" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 3 });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, true);
@@ -8616,7 +8620,7 @@ test "Terminal: cursorLeft extended reverse wrap bottom wraparound" {
 
 test "Terminal: cursorLeft extended reverse wrap is priority if both set" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 3 });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, true);
@@ -8639,7 +8643,7 @@ test "Terminal: cursorLeft extended reverse wrap is priority if both set" {
 
 test "Terminal: cursorLeft extended reverse wrap above top scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, true);
@@ -8655,7 +8659,7 @@ test "Terminal: cursorLeft extended reverse wrap above top scroll region" {
 
 test "Terminal: cursorLeft reverse wrap on first row" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, true);
@@ -8671,7 +8675,7 @@ test "Terminal: cursorLeft reverse wrap on first row" {
 
 test "Terminal: cursorDown basic" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -8687,7 +8691,7 @@ test "Terminal: cursorDown basic" {
 
 test "Terminal: cursorDown above bottom scroll margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 3);
@@ -8704,7 +8708,7 @@ test "Terminal: cursorDown above bottom scroll margin" {
 
 test "Terminal: cursorDown below bottom scroll margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setTopAndBottomMargin(1, 3);
@@ -8722,7 +8726,7 @@ test "Terminal: cursorDown below bottom scroll margin" {
 
 test "Terminal: cursorDown resets wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -8740,7 +8744,7 @@ test "Terminal: cursorDown resets wrap" {
 
 test "Terminal: cursorRight resets wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -8758,7 +8762,7 @@ test "Terminal: cursorRight resets wrap" {
 
 test "Terminal: cursorRight to the edge of screen" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.cursorRight(100);
@@ -8773,7 +8777,7 @@ test "Terminal: cursorRight to the edge of screen" {
 
 test "Terminal: cursorRight left of right margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.scrolling_region.right = 2;
@@ -8789,7 +8793,7 @@ test "Terminal: cursorRight left of right margin" {
 
 test "Terminal: cursorRight right of right margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.scrolling_region.right = 2;
@@ -8806,7 +8810,7 @@ test "Terminal: cursorRight right of right margin" {
 
 test "Terminal: deleteLines simple" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -8835,7 +8839,7 @@ test "Terminal: deleteLines simple" {
 
 test "Terminal: deleteLines colors with bg color" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("ABC");
@@ -8876,7 +8880,7 @@ test "Terminal: deleteLines colors with bg color" {
 
 test "Terminal: deleteLines across page boundary marks all shifted rows dirty" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 10, .max_scrollback = 1024 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 10, .max_scrollback = 1024 });
     defer t.deinit(alloc);
 
     const first_page = t.screens.active.pages.pages.first.?;
@@ -8922,7 +8926,7 @@ test "Terminal: deleteLines across page boundary marks all shifted rows dirty" {
 
 test "Terminal: deleteLines (legacy)" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(alloc, .{ .cols = 80, .rows = 80 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -8957,7 +8961,7 @@ test "Terminal: deleteLines (legacy)" {
 
 test "Terminal: deleteLines with scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(alloc, .{ .cols = 80, .rows = 80 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9000,7 +9004,7 @@ test "Terminal: deleteLines with scroll region" {
 
 test "Terminal: deleteLines with scroll region, large count" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(alloc, .{ .cols = 80, .rows = 80 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9043,7 +9047,7 @@ test "Terminal: deleteLines with scroll region, large count" {
 
 test "Terminal: deleteLines with scroll region, cursor outside of region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(alloc, .{ .cols = 80, .rows = 80 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9078,7 +9082,7 @@ test "Terminal: deleteLines with scroll region, cursor outside of region" {
 
 test "Terminal: deleteLines resets pending wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -9096,7 +9100,7 @@ test "Terminal: deleteLines resets pending wrap" {
 
 test "Terminal: deleteLines resets wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
 
     try t.print('1');
@@ -9127,7 +9131,7 @@ test "Terminal: deleteLines resets wrap" {
 
 test "Terminal: deleteLines left/right scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("ABC123");
@@ -9159,7 +9163,7 @@ test "Terminal: deleteLines left/right scroll region" {
 
 test "Terminal: deleteLines left/right scroll region from top" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("ABC123");
@@ -9190,7 +9194,7 @@ test "Terminal: deleteLines left/right scroll region from top" {
 
 test "Terminal: deleteLines left/right scroll region high count" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("ABC123");
@@ -9222,7 +9226,7 @@ test "Terminal: deleteLines left/right scroll region high count" {
 
 test "Terminal: deleteLines wide character spacer head" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 3 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9258,7 +9262,7 @@ test "Terminal: deleteLines wide character spacer head" {
 
 test "Terminal: deleteLines wide character spacer head left scroll margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 3 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9299,7 +9303,7 @@ test "Terminal: deleteLines wide character spacer head left scroll margin" {
 
 test "Terminal: deleteLines wide character spacer head right scroll margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 3 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9340,7 +9344,7 @@ test "Terminal: deleteLines wide character spacer head right scroll margin" {
 
 test "Terminal: deleteLines wide character spacer head left and right scroll margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 3 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9382,7 +9386,7 @@ test "Terminal: deleteLines wide character spacer head left and right scroll mar
 
 test "Terminal: deleteLines wide character spacer head left (< 2) and right scroll margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 3 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9424,7 +9428,7 @@ test "Terminal: deleteLines wide character spacer head left (< 2) and right scro
 
 test "Terminal: deleteLines wide characters split by left/right scroll region boundaries" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 2 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9459,7 +9463,7 @@ test "Terminal: deleteLines wide characters split by left/right scroll region bo
 
 test "Terminal: deleteLines zero" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 5 });
     defer t.deinit(alloc);
 
     // This should do nothing
@@ -9469,7 +9473,7 @@ test "Terminal: deleteLines zero" {
 
 test "Terminal: default style is empty" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -9484,7 +9488,7 @@ test "Terminal: default style is empty" {
 
 test "Terminal: bold style" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.setAttribute(.{ .bold = {} });
@@ -9502,7 +9506,7 @@ test "Terminal: bold style" {
 
 test "Terminal: garbage collect overwritten" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.setAttribute(.{ .bold = {} });
@@ -9525,7 +9529,7 @@ test "Terminal: garbage collect overwritten" {
 
 test "Terminal: do not garbage collect old styles in use" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.setAttribute(.{ .bold = {} });
@@ -9547,7 +9551,7 @@ test "Terminal: do not garbage collect old styles in use" {
 
 test "Terminal: print with style marks the row as styled" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.setAttribute(.{ .bold = {} });
@@ -9563,7 +9567,7 @@ test "Terminal: print with style marks the row as styled" {
 
 test "Terminal: DECALN" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 2 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9590,7 +9594,7 @@ test "Terminal: DECALN" {
 
 test "Terminal: decaln reset margins" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 3, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 3, .rows = 3 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9608,7 +9612,7 @@ test "Terminal: decaln reset margins" {
 
 test "Terminal: decaln preserves color" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 3, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 3, .rows = 3 });
     defer t.deinit(alloc);
 
     // Initial value
@@ -9637,7 +9641,7 @@ test "Terminal: decaln preserves color" {
 
 test "Terminal: DECALN resets graphemes with protected mode" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 3, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 3, .rows = 3 });
     defer t.deinit(alloc);
 
     // Add protected mode. A previous version of DECALN accidentally preserved
@@ -9673,7 +9677,7 @@ test "Terminal: DECALN resets graphemes with protected mode" {
 
 test "Terminal: insertBlanks zero" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 2 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -9694,7 +9698,7 @@ test "Terminal: insertBlanks" {
     // NOTE: this is not verified with conformance tests, so these
     // tests might actually be verifying wrong behavior.
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 2 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -9718,7 +9722,7 @@ test "Terminal: insertBlanks pushes off end" {
     // NOTE: this is not verified with conformance tests, so these
     // tests might actually be verifying wrong behavior.
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 3, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 3, .rows = 2 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -9741,7 +9745,7 @@ test "Terminal: insertBlanks more than size" {
     // NOTE: this is not verified with conformance tests, so these
     // tests might actually be verifying wrong behavior.
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 3, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 3, .rows = 2 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -9762,7 +9766,7 @@ test "Terminal: insertBlanks more than size" {
 
 test "Terminal: insertBlanks no scroll region, fits" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     for ("ABC") |c| try t.print(c);
@@ -9781,7 +9785,7 @@ test "Terminal: insertBlanks no scroll region, fits" {
 
 test "Terminal: insertBlanks preserves background sgr" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     for ("ABC") |c| try t.print(c);
@@ -9811,7 +9815,7 @@ test "Terminal: insertBlanks preserves background sgr" {
 
 test "Terminal: insertBlanks shift off screen" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 10 });
     defer t.deinit(alloc);
 
     for ("  ABC") |c| try t.print(c);
@@ -9830,7 +9834,7 @@ test "Terminal: insertBlanks shift off screen" {
 
 test "Terminal: insertBlanks split multi-cell character" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 10 });
     defer t.deinit(alloc);
 
     for ("123") |c| try t.print(c);
@@ -9849,7 +9853,7 @@ test "Terminal: insertBlanks split multi-cell character" {
 
 test "Terminal: insertBlanks inside left/right scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     t.scrolling_region.left = 2;
@@ -9872,7 +9876,7 @@ test "Terminal: insertBlanks inside left/right scroll region" {
 
 test "Terminal: insertBlanks outside left/right scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 6, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 6, .rows = 10 });
     defer t.deinit(alloc);
 
     t.setCursorPos(1, 4);
@@ -9895,7 +9899,7 @@ test "Terminal: insertBlanks outside left/right scroll region" {
 
 test "Terminal: insertBlanks left/right scroll region large count" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     t.modes.set(.origin, true);
@@ -9916,7 +9920,7 @@ test "Terminal: insertBlanks left/right scroll region large count" {
 
 test "Terminal: insertBlanks deleting graphemes" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Disable grapheme clustering
@@ -9952,7 +9956,7 @@ test "Terminal: insertBlanks deleting graphemes" {
 
 test "Terminal: insertBlanks shift graphemes" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Enable grapheme clustering
@@ -9988,7 +9992,7 @@ test "Terminal: insertBlanks shift graphemes" {
 
 test "Terminal: insertBlanks split multi-cell character from tail" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("橋123");
@@ -10012,7 +10016,7 @@ test "Terminal: insertBlanks shifts hyperlinks" {
     // link should be preserved, blanks should not be linked
 
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 2 });
     defer t.deinit(alloc);
 
     try t.screens.active.startHyperlink("http://example.com", null);
@@ -10053,7 +10057,7 @@ test "Terminal: insertBlanks shifts hyperlinks" {
 
 test "Terminal: insertBlanks pushes hyperlink off end completely" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 3, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 3, .rows = 2 });
     defer t.deinit(alloc);
 
     try t.screens.active.startHyperlink("http://example.com", null);
@@ -10089,7 +10093,7 @@ test "Terminal: insertBlanks wide char straddling right margin" {
     // away via swapCells but leaves the orphaned spacer_tail in place,
     // causing a page integrity violation.
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Fill row: A B C D 橋 _ _ _ _ _
@@ -10124,7 +10128,7 @@ test "Terminal: insertBlanks wide char spacer_tail orphaned beyond right margin"
     // is left behind, causing a page integrity violation:
     //   "spacer tail not following wide"
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Fill cols 0–9 with wide chars: 中中中中中
@@ -10154,7 +10158,7 @@ test "Terminal: insertBlanks wide char spacer_tail orphaned beyond right margin"
 
 test "Terminal: insert mode with space" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 2 });
     defer t.deinit(alloc);
 
     for ("hello") |c| try t.print(c);
@@ -10171,7 +10175,7 @@ test "Terminal: insert mode with space" {
 
 test "Terminal: insert mode doesn't wrap pushed characters" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 2 });
     defer t.deinit(alloc);
 
     for ("hello") |c| try t.print(c);
@@ -10188,7 +10192,7 @@ test "Terminal: insert mode doesn't wrap pushed characters" {
 
 test "Terminal: insert mode does nothing at the end of the line" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 2 });
     defer t.deinit(alloc);
 
     for ("hello") |c| try t.print(c);
@@ -10204,7 +10208,7 @@ test "Terminal: insert mode does nothing at the end of the line" {
 
 test "Terminal: insert mode with wide characters" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 2 });
     defer t.deinit(alloc);
 
     for ("hello") |c| try t.print(c);
@@ -10221,7 +10225,7 @@ test "Terminal: insert mode with wide characters" {
 
 test "Terminal: insert mode with wide characters at end" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 2 });
     defer t.deinit(alloc);
 
     for ("well") |c| try t.print(c);
@@ -10237,7 +10241,7 @@ test "Terminal: insert mode with wide characters at end" {
 
 test "Terminal: insert mode pushing off wide character" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 2 });
     defer t.deinit(alloc);
 
     for ("123") |c| try t.print(c);
@@ -10255,7 +10259,7 @@ test "Terminal: insert mode pushing off wide character" {
 
 test "Terminal: deleteChars" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -10274,7 +10278,7 @@ test "Terminal: deleteChars" {
 
 test "Terminal: deleteChars zero count" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -10293,7 +10297,7 @@ test "Terminal: deleteChars zero count" {
 
 test "Terminal: deleteChars more than half" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -10312,7 +10316,7 @@ test "Terminal: deleteChars more than half" {
 
 test "Terminal: deleteChars more than line width" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -10331,7 +10335,7 @@ test "Terminal: deleteChars more than line width" {
 
 test "Terminal: deleteChars should shift left" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -10350,7 +10354,7 @@ test "Terminal: deleteChars should shift left" {
 
 test "Terminal: deleteChars resets pending wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -10368,7 +10372,7 @@ test "Terminal: deleteChars resets pending wrap" {
 
 test "Terminal: deleteChars resets wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE123") |c| try t.print(c);
@@ -10397,7 +10401,7 @@ test "Terminal: deleteChars resets wrap" {
 
 test "Terminal: deleteChars simple operation" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("ABC123");
@@ -10416,7 +10420,7 @@ test "Terminal: deleteChars simple operation" {
 
 test "Terminal: deleteChars preserves background sgr" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     for ("ABC123") |c| try t.print(c);
@@ -10449,7 +10453,7 @@ test "Terminal: deleteChars preserves background sgr" {
 
 test "Terminal: deleteChars outside scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 6, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 6, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("ABC123");
@@ -10470,7 +10474,7 @@ test "Terminal: deleteChars outside scroll region" {
 
 test "Terminal: deleteChars inside scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 6, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 6, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("ABC123");
@@ -10491,7 +10495,7 @@ test "Terminal: deleteChars inside scroll region" {
 
 test "Terminal: deleteChars split wide character from spacer tail" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 6, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 6, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("A橋123");
@@ -10507,7 +10511,7 @@ test "Terminal: deleteChars split wide character from spacer tail" {
 
 test "Terminal: deleteChars split wide character from wide" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 6, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 6, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("橋123");
@@ -10530,7 +10534,7 @@ test "Terminal: deleteChars split wide character from wide" {
 
 test "Terminal: deleteChars split wide character from end" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 6, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 6, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("A橋123");
@@ -10553,7 +10557,7 @@ test "Terminal: deleteChars split wide character from end" {
 
 test "Terminal: deleteChars with a spacer head at the end" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 10 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 10 });
     defer t.deinit(alloc);
 
     try t.printString("0123橋123");
@@ -10578,7 +10582,7 @@ test "Terminal: deleteChars with a spacer head at the end" {
 
 test "Terminal: deleteChars split wide character tail" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(1, t.cols - 1);
@@ -10596,7 +10600,7 @@ test "Terminal: deleteChars split wide character tail" {
 
 test "Terminal: deleteChars wide char boundary conditions" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 1, .cols = 8 });
+    var t = try testInit(alloc, .{ .rows = 1, .cols = 8 });
     defer t.deinit(alloc);
 
     // EXPLANATION(qwerasd):
@@ -10660,7 +10664,7 @@ test "Terminal: deleteChars wide char boundary conditions" {
 
 test "Terminal: deleteChars wide char wrap boundary conditions" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 3, .cols = 8 });
+    var t = try testInit(alloc, .{ .rows = 3, .cols = 8 });
     defer t.deinit(alloc);
 
     // EXPLANATION(qwerasd):
@@ -10716,7 +10720,7 @@ test "Terminal: deleteChars wide char wrap boundary conditions" {
 
 test "Terminal: deleteChars wide char across right margin" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 3, .cols = 8 });
+    var t = try testInit(alloc, .{ .rows = 3, .cols = 8 });
     defer t.deinit(alloc);
 
     // scroll region
@@ -10759,7 +10763,7 @@ test "Terminal: deleteChars wide char across right margin" {
 
 test "Terminal: saveCursor" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 3, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 3, .rows = 3 });
     defer t.deinit(alloc);
 
     try t.setAttribute(.{ .bold = {} });
@@ -10777,7 +10781,7 @@ test "Terminal: saveCursor" {
 
 test "Terminal: saveCursor position" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(1, 5);
@@ -10797,7 +10801,7 @@ test "Terminal: saveCursor position" {
 
 test "Terminal: saveCursor pending wrap state" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(1, 5);
@@ -10817,7 +10821,7 @@ test "Terminal: saveCursor pending wrap state" {
 
 test "Terminal: saveCursor origin mode" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.origin, true);
@@ -10837,7 +10841,7 @@ test "Terminal: saveCursor origin mode" {
 
 test "Terminal: saveCursor resize" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     t.setCursorPos(1, 10);
@@ -10855,7 +10859,7 @@ test "Terminal: saveCursor resize" {
 
 test "Terminal: saveCursor protected pen" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -10870,7 +10874,7 @@ test "Terminal: saveCursor protected pen" {
 
 test "Terminal: saveCursor doesn't modify hyperlink state" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 3, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 3, .rows = 3 });
     defer t.deinit(alloc);
 
     try t.screens.active.startHyperlink("http://example.com", null);
@@ -10888,7 +10892,7 @@ test "Terminal: restoreCursor uses default style on OutOfSpace" {
     const alloc = testing.allocator;
 
     // Use a single row so the page can't be split
-    var t = try init(alloc, .{ .cols = 10, .rows = 1 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 1 });
     defer t.deinit(alloc);
 
     // Set a style and save the cursor
@@ -10940,7 +10944,7 @@ test "Terminal: restoreCursor uses default style on OutOfSpace" {
 
 test "Terminal: setProtectedMode" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 3, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 3, .rows = 3 });
     defer t.deinit(alloc);
 
     try testing.expect(!t.screens.active.cursor.protected);
@@ -10956,7 +10960,7 @@ test "Terminal: setProtectedMode" {
 
 test "Terminal: eraseLine simple erase right" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -10974,7 +10978,7 @@ test "Terminal: eraseLine simple erase right" {
 
 test "Terminal: eraseLine resets pending wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -10992,7 +10996,7 @@ test "Terminal: eraseLine resets pending wrap" {
 
 test "Terminal: eraseLine resets wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE123") |c| try t.print(c);
@@ -11019,7 +11023,7 @@ test "Terminal: eraseLine resets wrap" {
 
 test "Terminal: eraseLine right preserves background sgr" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -11052,7 +11056,7 @@ test "Terminal: eraseLine right preserves background sgr" {
 
 test "Terminal: eraseLine right wide character" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     for ("AB") |c| try t.print(c);
@@ -11072,7 +11076,7 @@ test "Terminal: eraseLine right wide character" {
 
 test "Terminal: eraseLine right protected attributes respected with iso" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -11091,7 +11095,7 @@ test "Terminal: eraseLine right protected attributes respected with iso" {
 
 test "Terminal: eraseLine right protected attributes ignored with dec most recent" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -11112,7 +11116,7 @@ test "Terminal: eraseLine right protected attributes ignored with dec most recen
 
 test "Terminal: eraseLine right protected attributes ignored with dec set" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.dec);
@@ -11131,7 +11135,7 @@ test "Terminal: eraseLine right protected attributes ignored with dec set" {
 
 test "Terminal: eraseLine right protected requested" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     for ("12345678") |c| try t.print(c);
@@ -11152,7 +11156,7 @@ test "Terminal: eraseLine right protected requested" {
 
 test "Terminal: eraseLine simple erase left" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -11170,7 +11174,7 @@ test "Terminal: eraseLine simple erase left" {
 
 test "Terminal: eraseLine left resets wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -11190,7 +11194,7 @@ test "Terminal: eraseLine left resets wrap" {
 
 test "Terminal: eraseLine left preserves background sgr" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -11223,7 +11227,7 @@ test "Terminal: eraseLine left preserves background sgr" {
 
 test "Terminal: eraseLine left wide character" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     for ("AB") |c| try t.print(c);
@@ -11243,7 +11247,7 @@ test "Terminal: eraseLine left wide character" {
 
 test "Terminal: eraseLine left protected attributes respected with iso" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -11262,7 +11266,7 @@ test "Terminal: eraseLine left protected attributes respected with iso" {
 
 test "Terminal: eraseLine left protected attributes ignored with dec most recent" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -11283,7 +11287,7 @@ test "Terminal: eraseLine left protected attributes ignored with dec most recent
 
 test "Terminal: eraseLine left protected attributes ignored with dec set" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.dec);
@@ -11302,7 +11306,7 @@ test "Terminal: eraseLine left protected attributes ignored with dec set" {
 
 test "Terminal: eraseLine left protected requested" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     for ("123456789") |c| try t.print(c);
@@ -11323,7 +11327,7 @@ test "Terminal: eraseLine left protected requested" {
 
 test "Terminal: eraseLine complete preserves background sgr" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -11356,7 +11360,7 @@ test "Terminal: eraseLine complete preserves background sgr" {
 
 test "Terminal: eraseLine complete protected attributes respected with iso" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -11375,7 +11379,7 @@ test "Terminal: eraseLine complete protected attributes respected with iso" {
 
 test "Terminal: eraseLine complete protected attributes ignored with dec most recent" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -11396,7 +11400,7 @@ test "Terminal: eraseLine complete protected attributes ignored with dec most re
 
 test "Terminal: eraseLine complete protected attributes ignored with dec set" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.dec);
@@ -11415,7 +11419,7 @@ test "Terminal: eraseLine complete protected attributes ignored with dec set" {
 
 test "Terminal: eraseLine complete protected requested" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     for ("123456789") |c| try t.print(c);
@@ -11436,7 +11440,7 @@ test "Terminal: eraseLine complete protected requested" {
 
 test "Terminal: tabClear single" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 30, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 30, .rows = 5 });
     defer t.deinit(alloc);
 
     t.horizontalTab();
@@ -11449,7 +11453,7 @@ test "Terminal: tabClear single" {
 
 test "Terminal: tabClear all" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 30, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 30, .rows = 5 });
     defer t.deinit(alloc);
 
     t.tabClear(.all);
@@ -11461,7 +11465,7 @@ test "Terminal: tabClear all" {
 
 test "Terminal: printRepeat simple" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("A");
@@ -11477,7 +11481,7 @@ test "Terminal: printRepeat simple" {
 
 test "Terminal: printRepeat wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("    A");
@@ -11493,7 +11497,7 @@ test "Terminal: printRepeat wrap" {
 
 test "Terminal: printRepeat no previous character" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printRepeat(1);
@@ -11508,7 +11512,7 @@ test "Terminal: printRepeat no previous character" {
 
 test "Terminal: printAttributes" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     var storage: [64]u8 = undefined;
@@ -11519,7 +11523,7 @@ test "Terminal: printAttributes" {
         defer t.setAttribute(.unset) catch unreachable;
         try t.printAttributes(&writer);
         try testing.expectEqualStrings("0;38:2::1:2:3", writer.buffered());
-        writer.consumeAll();
+        _ = writer.consumeAll();
     }
 
     {
@@ -11528,7 +11532,7 @@ test "Terminal: printAttributes" {
         defer t.setAttribute(.unset) catch unreachable;
         try t.printAttributes(&writer);
         try testing.expectEqualStrings("0;1;48:2::1:2:3", writer.buffered());
-        writer.consumeAll();
+        _ = writer.consumeAll();
     }
 
     {
@@ -11545,7 +11549,7 @@ test "Terminal: printAttributes" {
         defer t.setAttribute(.unset) catch unreachable;
         try t.printAttributes(&writer);
         try testing.expectEqualStrings("0;1;2;3;4;5;7;8;9;38:2::100:200:255;48:2::101:102:103", writer.buffered());
-        writer.consumeAll();
+        _ = writer.consumeAll();
     }
 
     {
@@ -11553,19 +11557,19 @@ test "Terminal: printAttributes" {
         defer t.setAttribute(.unset) catch unreachable;
         try t.printAttributes(&writer);
         try testing.expectEqualStrings("0;4", writer.buffered());
-        writer.consumeAll();
+        _ = writer.consumeAll();
     }
 
     {
         try t.printAttributes(&writer);
         try testing.expectEqualStrings("0", writer.buffered());
-        writer.consumeAll();
+        _ = writer.consumeAll();
     }
 }
 
 test "Terminal: eraseDisplay simple erase below" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABC") |c| try t.print(c);
@@ -11593,7 +11597,7 @@ test "Terminal: eraseDisplay simple erase below" {
 
 test "Terminal: eraseDisplay erase below preserves SGR bg" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABC") |c| try t.print(c);
@@ -11633,7 +11637,7 @@ test "Terminal: eraseDisplay erase below preserves SGR bg" {
 
 test "Terminal: eraseDisplay below split multi-cell" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("AB橋C");
@@ -11655,7 +11659,7 @@ test "Terminal: eraseDisplay below split multi-cell" {
 
 test "Terminal: eraseDisplay below protected attributes respected with iso" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -11678,7 +11682,7 @@ test "Terminal: eraseDisplay below protected attributes respected with iso" {
 
 test "Terminal: eraseDisplay below protected attributes ignored with dec most recent" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -11703,7 +11707,7 @@ test "Terminal: eraseDisplay below protected attributes ignored with dec most re
 
 test "Terminal: eraseDisplay below protected attributes ignored with dec set" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.dec);
@@ -11726,7 +11730,7 @@ test "Terminal: eraseDisplay below protected attributes ignored with dec set" {
 
 test "Terminal: eraseDisplay below protected attributes respected with force" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.dec);
@@ -11749,7 +11753,7 @@ test "Terminal: eraseDisplay below protected attributes respected with force" {
 
 test "Terminal: eraseDisplay simple erase above" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABC") |c| try t.print(c);
@@ -11776,7 +11780,7 @@ test "Terminal: eraseDisplay simple erase above" {
 
 test "Terminal: eraseDisplay erase above preserves SGR bg" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABC") |c| try t.print(c);
@@ -11816,7 +11820,7 @@ test "Terminal: eraseDisplay erase above preserves SGR bg" {
 
 test "Terminal: eraseDisplay above split multi-cell" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("AB橋C");
@@ -11838,7 +11842,7 @@ test "Terminal: eraseDisplay above split multi-cell" {
 
 test "Terminal: eraseDisplay above protected attributes respected with iso" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -11861,7 +11865,7 @@ test "Terminal: eraseDisplay above protected attributes respected with iso" {
 
 test "Terminal: eraseDisplay above protected attributes ignored with dec most recent" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.iso);
@@ -11886,7 +11890,7 @@ test "Terminal: eraseDisplay above protected attributes ignored with dec most re
 
 test "Terminal: eraseDisplay above protected attributes ignored with dec set" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.dec);
@@ -11909,7 +11913,7 @@ test "Terminal: eraseDisplay above protected attributes ignored with dec set" {
 
 test "Terminal: eraseDisplay above protected attributes respected with force" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.setProtectedMode(.dec);
@@ -11932,7 +11936,7 @@ test "Terminal: eraseDisplay above protected attributes respected with force" {
 
 test "Terminal: eraseDisplay protected complete" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -11960,7 +11964,7 @@ test "Terminal: eraseDisplay protected complete" {
 
 test "Terminal: eraseDisplay protected below" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -11982,7 +11986,7 @@ test "Terminal: eraseDisplay protected below" {
 
 test "Terminal: eraseDisplay scroll complete" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -11999,7 +12003,7 @@ test "Terminal: eraseDisplay scroll complete" {
 
 test "Terminal: eraseDisplay protected above" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     try t.print('A');
@@ -12021,7 +12025,7 @@ test "Terminal: eraseDisplay protected above" {
 
 test "Terminal: eraseDisplay complete preserves cursor" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Set our cursur
@@ -12038,7 +12042,7 @@ test "Terminal: eraseDisplay complete preserves cursor" {
 
 test "Terminal: semantic prompt" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Prompt
@@ -12082,7 +12086,7 @@ test "Terminal: semantic prompt" {
 
 test "Terminal: semantic prompt continuations" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Prompt
@@ -12132,7 +12136,7 @@ test "Terminal: index in prompt mode marks new row as prompt continuation" {
     // a newline, assume the new row is a prompt continuation (since Fish
     // doesn't emit OSC133 k=s markers for continuation lines).
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Start a prompt
@@ -12169,7 +12173,7 @@ test "Terminal: index in input mode does not mark new row as prompt" {
     // Input mode should NOT trigger prompt continuation on newline
     // (only prompt mode does, not input mode)
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Start a prompt then switch to input
@@ -12198,7 +12202,7 @@ test "Terminal: index in input mode does not mark new row as prompt" {
 test "Terminal: index in output mode does not mark new row as prompt" {
     // Output mode should NOT trigger prompt continuation
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Complete prompt cycle: prompt -> input -> output
@@ -12227,7 +12231,7 @@ test "Terminal: OSC133C at x=0 on prompt row clears prompt mark" {
     // then immediately sends OSC133C (start output) at column 0, we
     // should clear the prompt continuation mark we just set.
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Start a prompt
@@ -12264,7 +12268,7 @@ test "Terminal: OSC133C at x=0 on prompt row clears prompt mark" {
 test "Terminal: OSC133C at x>0 on prompt row does not clear prompt mark" {
     // If we're not at column 0, we shouldn't clear the prompt mark
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Start a prompt on a row
@@ -12306,7 +12310,7 @@ test "Terminal: OSC133C at x>0 on prompt row does not clear prompt mark" {
 test "Terminal: multiple newlines in prompt mode marks all rows" {
     // Multiple newlines should each mark their row as prompt continuation
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Start a prompt
@@ -12349,7 +12353,7 @@ test "Terminal: multiple newlines in prompt mode marks all rows" {
 
 test "Terminal: OSC133A click_events=1 sets click to click_events" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Verify default state is none
@@ -12366,7 +12370,7 @@ test "Terminal: OSC133A click_events=1 sets click to click_events" {
 
 test "Terminal: OSC133A click_events=0 does not set click_events" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // OSC 133;A with click_events=0
@@ -12381,7 +12385,7 @@ test "Terminal: OSC133A click_events=0 does not set click_events" {
 
 test "Terminal: OSC133A cl option sets click to cl value" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // OSC 133;A with cl=m (multiple)
@@ -12395,7 +12399,7 @@ test "Terminal: OSC133A cl option sets click to cl value" {
 
 test "Terminal: OSC133A cl=line sets click to line" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     try t.semanticPrompt(.{
@@ -12408,7 +12412,7 @@ test "Terminal: OSC133A cl=line sets click to line" {
 
 test "Terminal: OSC133A click_events=1 takes priority over cl" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // OSC 133;A with both click_events=1 and cl=m
@@ -12423,7 +12427,7 @@ test "Terminal: OSC133A click_events=1 takes priority over cl" {
 
 test "Terminal: OSC133A click_events=0 falls back to cl" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // OSC 133;A with click_events=0 and cl=v
@@ -12438,7 +12442,7 @@ test "Terminal: OSC133A click_events=0 falls back to cl" {
 
 test "Terminal: OSC133A no click options leaves click as none" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // OSC 133;A with no click-related options
@@ -12452,7 +12456,7 @@ test "Terminal: OSC133A no click options leaves click as none" {
 
 test "Terminal: cursorIsAtPrompt" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     try testing.expect(!t.cursorIsAtPrompt());
@@ -12481,7 +12485,7 @@ test "Terminal: cursorIsAtPrompt" {
 
 test "Terminal: cursorIsAtPrompt alternate screen" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 3, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 3, .rows = 2 });
     defer t.deinit(alloc);
 
     try testing.expect(!t.cursorIsAtPrompt());
@@ -12496,7 +12500,7 @@ test "Terminal: cursorIsAtPrompt alternate screen" {
 }
 
 test "Terminal: fullReset with a non-empty pen" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     try t.setAttribute(.{ .direct_color_fg = .{ .r = 0xFF, .g = 0, .b = 0x7F } });
@@ -12518,7 +12522,7 @@ test "Terminal: fullReset with a non-empty pen" {
 }
 
 test "Terminal: fullReset hyperlink" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     try t.screens.active.startHyperlink("http://example.com", null);
@@ -12527,7 +12531,7 @@ test "Terminal: fullReset hyperlink" {
 }
 
 test "Terminal: fullReset with a non-empty saved cursor" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     try t.setAttribute(.{ .direct_color_fg = .{ .r = 0xFF, .g = 0, .b = 0x7F } });
@@ -12548,7 +12552,7 @@ test "Terminal: fullReset with a non-empty saved cursor" {
 }
 
 test "Terminal: fullReset origin mode" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     t.setCursorPos(3, 5);
@@ -12562,7 +12566,7 @@ test "Terminal: fullReset origin mode" {
 }
 
 test "Terminal: fullReset status display" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     t.status_display = .status_line;
@@ -12572,7 +12576,7 @@ test "Terminal: fullReset status display" {
 
 // https://github.com/mitchellh/ghostty/issues/1607
 test "Terminal: fullReset clears alt screen kitty keyboard state" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     try t.switchScreenMode(.@"1049", true);
@@ -12590,7 +12594,7 @@ test "Terminal: fullReset clears alt screen kitty keyboard state" {
 }
 
 test "Terminal: fullReset default modes" {
-    var t = try init(testing.allocator, .{
+    var t = try testInit(testing.allocator, .{
         .cols = 10,
         .rows = 10,
         .default_modes = .{ .grapheme_cluster = true },
@@ -12602,7 +12606,7 @@ test "Terminal: fullReset default modes" {
 }
 
 test "Terminal: fullReset tracked pins" {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 80 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 80 });
     defer t.deinit(testing.allocator);
 
     // Create a tracked pin
@@ -12616,7 +12620,7 @@ test "Terminal: fullReset tracked pins" {
 // this test around to ensure we don't regress at multiple layers.
 test "Terminal: resize less cols with wide char then print" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 3, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 3, .rows = 3 });
     defer t.deinit(alloc);
 
     try t.print('x');
@@ -12632,7 +12636,7 @@ test "Terminal: resize with left and right margin set" {
     const alloc = testing.allocator;
     const cols = 70;
     const rows = 23;
-    var t = try init(alloc, .{ .cols = cols, .rows = rows });
+    var t = try testInit(alloc, .{ .cols = cols, .rows = rows });
     defer t.deinit(alloc);
 
     t.modes.set(.enable_left_and_right_margin, true);
@@ -12650,7 +12654,7 @@ test "Terminal: resize with wraparound off" {
     const alloc = testing.allocator;
     const cols = 4;
     const rows = 2;
-    var t = try init(alloc, .{ .cols = cols, .rows = rows });
+    var t = try testInit(alloc, .{ .cols = cols, .rows = rows });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, false);
@@ -12670,7 +12674,7 @@ test "Terminal: resize with wraparound on" {
     const alloc = testing.allocator;
     const cols = 4;
     const rows = 2;
-    var t = try init(alloc, .{ .cols = cols, .rows = rows });
+    var t = try testInit(alloc, .{ .cols = cols, .rows = rows });
     defer t.deinit(alloc);
 
     t.modes.set(.wraparound, true);
@@ -12688,7 +12692,7 @@ test "Terminal: resize with wraparound on" {
 
 test "Terminal: resize with high unique style per cell" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 30, .rows = 30 });
+    var t = try testInit(alloc, .{ .cols = 30, .rows = 30 });
     defer t.deinit(alloc);
 
     for (0..t.rows) |y| {
@@ -12708,7 +12712,7 @@ test "Terminal: resize with high unique style per cell" {
 
 test "Terminal: resize with high unique style per cell with wrapping" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 30, .rows = 30 });
+    var t = try testInit(alloc, .{ .cols = 30, .rows = 30 });
     defer t.deinit(alloc);
 
     const cell_count: u16 = @intCast(t.rows * t.cols);
@@ -12729,7 +12733,7 @@ test "Terminal: resize with high unique style per cell with wrapping" {
 
 test "Terminal: resize with reflow and saved cursor" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 3 });
     defer t.deinit(alloc);
     try t.printString("1A2B");
     t.setCursorPos(2, 2);
@@ -12771,7 +12775,7 @@ test "Terminal: resize with reflow and saved cursor" {
 
 test "Terminal: resize with reflow and saved cursor pending wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 3 });
     defer t.deinit(alloc);
     try t.printString("1A2B");
     {
@@ -12810,7 +12814,7 @@ test "Terminal: resize with reflow and saved cursor pending wrap" {
 
 test "Terminal: DECCOLM without DEC mode 40" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.@"132_column", true);
@@ -12822,7 +12826,7 @@ test "Terminal: DECCOLM without DEC mode 40" {
 
 test "Terminal: DECCOLM unset" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.enable_mode_3, true);
@@ -12833,7 +12837,7 @@ test "Terminal: DECCOLM unset" {
 
 test "Terminal: DECCOLM resets pending wrap" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     for ("ABCDE") |c| try t.print(c);
@@ -12848,7 +12852,7 @@ test "Terminal: DECCOLM resets pending wrap" {
 
 test "Terminal: DECCOLM preserves SGR bg" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.setAttribute(.{ .direct_color_bg = .{
@@ -12872,7 +12876,7 @@ test "Terminal: DECCOLM preserves SGR bg" {
 
 test "Terminal: DECCOLM resets scroll region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.enable_left_and_right_margin, true);
@@ -12891,7 +12895,7 @@ test "Terminal: DECCOLM resets scroll region" {
 
 test "Terminal: mode 47 alt screen plain" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Print on primary screen
@@ -12942,7 +12946,7 @@ test "Terminal: mode 47 alt screen plain" {
 
 test "Terminal: mode 47 copies cursor both directions" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Color our cursor red
@@ -12978,7 +12982,7 @@ test "Terminal: mode 47 copies cursor both directions" {
 
 test "Terminal: mode 1047 alt screen plain" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Print on primary screen
@@ -13029,7 +13033,7 @@ test "Terminal: mode 1047 alt screen plain" {
 
 test "Terminal: mode 1047 copies cursor both directions" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Color our cursor red
@@ -13065,7 +13069,7 @@ test "Terminal: mode 1047 copies cursor both directions" {
 
 test "Terminal: mode 1049 alt screen plain" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Print on primary screen
@@ -13130,7 +13134,7 @@ test "Terminal: mode 1049 alt screen plain" {
 // characters straddling the right margin boundary leave orphaned spacer_tails.
 test "Terminal: deleteLines wide char at right margin with full clear" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 80, .rows = 24 });
+    var t = try testInit(alloc, .{ .cols = 80, .rows = 24 });
     defer t.deinit(alloc);
 
     // Place a wide character at col 39 (1-indexed) on several rows.

@@ -410,7 +410,7 @@ test "kittygfx more chunks with q=1" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Initial chunk has q=1
@@ -440,7 +440,7 @@ test "kittygfx more chunks with q=0" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Initial chunk has q=0
@@ -470,7 +470,7 @@ test "kittygfx more chunks with chunk increasing q" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     // Initial chunk has q=0
@@ -500,7 +500,7 @@ test "kittygfx default format is rgba" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     const cmd = try command.Parser.parseString(
@@ -520,7 +520,7 @@ test "kittygfx test valid u32 (expect invalid image ID)" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     const cmd = try command.Parser.parseString(
@@ -537,7 +537,7 @@ test "kittygfx test valid i32 (expect invalid image ID)" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     const cmd = try command.Parser.parseString(
@@ -554,7 +554,7 @@ test "kittygfx no response with no image ID or number" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     {
@@ -572,7 +572,7 @@ test "kittygfx no response with no image ID or number load and display" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     {
