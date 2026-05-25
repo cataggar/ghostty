@@ -1,5 +1,4 @@
 const std = @import("std");
-const fs = std.fs;
 const Allocator = std.mem.Allocator;
 const args = @import("args.zig");
 const Action = @import("ghostty.zig").Action;
@@ -55,7 +54,12 @@ pub const Options = struct {
 ///   ghostty +ssh-cache --remove=user@example.com # Remove a destination
 ///   ghostty +ssh-cache --prune=30d               # Remove entries older than 30 days
 ///   ghostty +ssh-cache --clear                   # Clear entire cache
-pub fn run(alloc_gpa: Allocator) !u8 {
+pub fn run(
+    alloc_gpa: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    proc_args: std.process.Args,
+) !u8 {
     var arena = std.heap.ArenaAllocator.init(alloc_gpa);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -64,13 +68,13 @@ pub fn run(alloc_gpa: Allocator) !u8 {
     defer opts.deinit();
 
     var stdout_buffer: [1024]u8 = undefined;
-    var stdout_file: std.fs.File = .stdout();
-    var stdout_writer = stdout_file.writer(&stdout_buffer);
+    var stdout_file: std.Io.File = .stdout();
+    var stdout_writer = stdout_file.writer(io, &stdout_buffer);
     const stdout = &stdout_writer.interface;
 
     var stderr_buffer: [1024]u8 = undefined;
-    var stderr_file: std.fs.File = .stderr();
-    var stderr_writer = stderr_file.writer(&stderr_buffer);
+    var stderr_file: std.Io.File = .stderr();
+    var stderr_writer = stderr_file.writer(io, &stderr_buffer);
     const stderr = &stderr_writer.interface;
 
     // The cache is queried by a positional destination (`user@host` or a
@@ -81,7 +85,7 @@ pub fn run(alloc_gpa: Allocator) !u8 {
     var query: ?[]const u8 = null;
     var flags: std.ArrayList([]const u8) = .empty;
     {
-        var iter = try args.argsIterator(alloc_gpa);
+        var iter = try args.argsIterator(proc_args, alloc_gpa);
         defer iter.deinit();
         while (iter.next()) |arg| {
             const is_host_flag = std.mem.startsWith(u8, arg, "--host=");
@@ -117,7 +121,7 @@ pub fn run(alloc_gpa: Allocator) !u8 {
 
     {
         var iter = args.sliceIterator(flags.items);
-        args.parse(Options, alloc_gpa, &opts, &iter) catch |err| switch (err) {
+        args.parse(Options, alloc_gpa, io, env, &opts, &iter) catch |err| switch (err) {
             error.InvalidField => {
                 try stderr.print("Error: unknown flag.\n", .{});
                 stderr.flush() catch {};
@@ -132,7 +136,7 @@ pub fn run(alloc_gpa: Allocator) !u8 {
         };
     }
 
-    const result = runInner(alloc, opts, query, stdout, stderr);
+    const result = runInner(alloc, io, env, opts, query, stdout, stderr);
 
     // Flushing *shouldn't* fail but...
     stdout.flush() catch {};
@@ -142,6 +146,8 @@ pub fn run(alloc_gpa: Allocator) !u8 {
 
 pub fn runInner(
     alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     opts: Options,
     query: ?[]const u8,
     stdout: *std.Io.Writer,
@@ -165,8 +171,13 @@ pub fn runInner(
     }
 
     // Setup our disk cache to the standard location
-    const cache_path = try DiskCache.defaultPath(alloc, "ghostty");
-    const cache: DiskCache = .{ .path = cache_path };
+    const cache_path = try DiskCache.defaultPath(
+        alloc,
+        io,
+        env,
+        "ghostty",
+    );
+    const cache: DiskCache = .{ .io = io, .path = cache_path };
 
     if (opts.clear) {
         try cache.clear();
@@ -174,7 +185,7 @@ pub fn runInner(
     }
 
     if (opts.add) |dest| {
-        cache.add(alloc, dest, std.time.timestamp()) catch |err| switch (err) {
+        cache.add(alloc, dest, std.Io.Timestamp.now(io, .real).toSeconds()) catch |err| switch (err) {
             error.InvalidCacheKey => {
                 try stderr.print(
                     "Error: Invalid destination '{s}' (expected hostname or user@hostname)\n",
@@ -258,17 +269,18 @@ pub fn runInner(
         }
 
         if (matches.count() == 0) return 1;
-        try listEntries(alloc, &matches, stdout);
+        try listEntries(alloc, io, &matches, stdout);
         return 0;
     }
 
     // List all destinations by default.
-    try listEntries(alloc, &entries, stdout);
+    try listEntries(alloc, io, &entries, stdout);
     return 0;
 }
 
 fn listEntries(
     alloc: Allocator,
+    io: std.Io,
     entries: *const std.StringHashMap(Entry),
     writer: *std.Io.Writer,
 ) !void {
@@ -295,7 +307,7 @@ fn listEntries(
         widest = @max(widest, entry.hostname.len);
     }
 
-    const now = std.time.timestamp();
+    const now = std.Io.Timestamp.now(io, .real).toSeconds();
     for (items.items) |entry| {
         try writer.print("{s}", .{entry.hostname});
         try writer.splatByteAll(' ', widest - entry.hostname.len + 2);
@@ -462,6 +474,9 @@ test {
 test "runInner rejects multiple actions" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    const io = testing.io;
+    var env: std.process.Environ.Map = .init(alloc);
+    defer env.deinit();
 
     var stdout: std.Io.Writer.Allocating = .init(alloc);
     defer stdout.deinit();
@@ -469,10 +484,18 @@ test "runInner rejects multiple actions" {
     defer stderr.deinit();
 
     // The check runs before any cache access, so it never touches disk.
-    const code = try runInner(alloc, .{
-        .add = "example.com",
-        .remove = "other.com",
-    }, null, &stdout.writer, &stderr.writer);
+    const code = try runInner(
+        alloc,
+        io,
+        &env,
+        .{
+            .add = "example.com",
+            .remove = "other.com",
+        },
+        null,
+        &stdout.writer,
+        &stderr.writer,
+    );
 
     try testing.expectEqual(@as(u8, 2), code);
     try testing.expectEqualStrings("", stdout.written());
@@ -480,9 +503,15 @@ test "runInner rejects multiple actions" {
 
     // A positional query is itself an action: query + a flag conflicts.
     stderr.clearRetainingCapacity();
-    const code2 = try runInner(alloc, .{
-        .clear = true,
-    }, "example.com", &stdout.writer, &stderr.writer);
+    const code2 = try runInner(
+        alloc,
+        io,
+        &env,
+        .{ .clear = true },
+        "example.com",
+        &stdout.writer,
+        &stderr.writer,
+    );
     try testing.expectEqual(@as(u8, 2), code2);
     try testing.expect(std.mem.indexOf(u8, stderr.written(), "only one") != null);
 }

@@ -35,22 +35,18 @@ pub fn encodeColorSchemeReport(
 
 /// An enum(u16) of the available device status requests.
 pub const Request = dsr_enum: {
-    var names: [entries.len][:0]const u8 = undefined;
+    var names: [entries.len][]const u8 = undefined;
     var values: [entries.len]Tag.Backing = undefined;
-    for (entries, 0..) |entry, i| {
-        names[i] = entry.name;
-        values[i] = @bitCast(Tag{
+
+    for (entries, &names, &values) |entry, *name, *value| {
+        name.* = entry.name;
+        value.* = @bitCast(Tag{
             .value = entry.value,
             .question = entry.question,
         });
     }
 
-    break :dsr_enum @Enum(
-        Tag.Backing,
-        .exhaustive,
-        &names,
-        &values,
-    );
+    break :dsr_enum @Enum(Tag.Backing, .exhaustive, &names, &values);
 };
 
 /// The tag type for our enum is a u16 but we use a packed struct

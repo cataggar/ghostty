@@ -30,9 +30,9 @@ pub const Action = enum {
 };
 
 /// An entrypoint for the synthetic generator CLI.
-pub fn main() !void {
-    const alloc = std.heap.c_allocator;
-    const action_ = try cli.action.detectArgs(Action, alloc);
+pub fn main(init: std.process.Init) !void {
+    const alloc = init.arena.allocator();
+    const action_ = try cli.action.detectArgs(Action, alloc, init.minimal.args);
     const action = action_ orelse return error.NoAction;
     try mainAction(alloc, action, .cli);
 }
@@ -41,7 +41,7 @@ pub const Args = union(enum) {
     /// The arguments passed to the CLI via argc/argv.
     cli,
 
-    /// Simple string arguments, parsed via std.process.ArgIteratorGeneral.
+    /// Simple string arguments, parsed via std.process.Args.IteratorGeneral.
     string: []const u8,
 };
 
@@ -74,7 +74,7 @@ fn mainActionImpl(
             try cli.args.parse(Options, alloc, &opts, &iter);
         },
         .string => |str| {
-            var iter = try std.process.ArgIteratorGeneral(.{}).init(
+            var iter = try std.process.Args.IteratorGeneral(.{}).init(
                 alloc,
                 str,
             );
@@ -93,7 +93,7 @@ fn mainActionImpl(
 
     // Our output always goes to stdout.
     var buffer: [2048]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&buffer);
+    var stdout_writer = std.Io.File.stdout().writer(&buffer);
     const writer = &stdout_writer.interface;
 
     // Create our implementation

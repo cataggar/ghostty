@@ -55,6 +55,8 @@ pub const Error = error{
 pub fn parse(
     comptime T: type,
     alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     dst: *T,
     iter: anytype,
 ) !void {
@@ -90,6 +92,8 @@ pub fn parse(
         if (@hasDecl(T, "parseManuallyHook")) {
             if (!try dst.parseManuallyHook(
                 arena_alloc,
+                io,
+                env,
                 arg,
                 iter,
             )) return;
@@ -125,7 +129,7 @@ pub fn parse(
         var key: []const u8 = arg[2..];
         const value: ?[]const u8 = value: {
             // If the arg has "=" then the value is after the "=".
-            if (mem.find(u8, key, "=")) |idx| {
+            if (mem.indexOf(u8, key, "=")) |idx| {
                 defer key = key[0..idx];
                 break :value key[idx + 1 ..];
             }
@@ -474,7 +478,7 @@ pub fn parseTaggedUnion(comptime T: type, alloc: Allocator, v: []const u8) !T {
 
     // Get the union tag that is being set. We support values with no colon
     // if the value is void so its not an error to have no colon.
-    const colon_idx = mem.find(u8, v, ":") orelse v.len;
+    const colon_idx = mem.indexOf(u8, v, ":") orelse v.len;
     const tag_str = std.mem.trim(u8, v[0..colon_idx], whitespace);
     const value = if (colon_idx < v.len) v[colon_idx + 1 ..] else "";
 
@@ -489,7 +493,13 @@ pub fn parseTaggedUnion(comptime T: type, alloc: Allocator, v: []const u8) !T {
 
             // We need to create a struct that looks like this union field.
             // This lets us use parseIntoField as if its a dedicated struct.
-            const Target = @Struct(.auto, null, &.{field.name}, &.{field.type}, &@splat(.{}));
+            const Target = @Struct(
+                .auto,
+                null,
+                &.{field.name},
+                &.{field.type},
+                &.{.{ .@"align" = @alignOf(field.type) }},
+            );
 
             // Parse the value into the struct
             var t: Target = undefined;
@@ -536,7 +546,7 @@ pub fn parseAutoStruct(
     loop: while (try iter.next()) |entry| {
         // Find the key/value, trimming whitespace. The value may be quoted
         // which we strip the quotes from.
-        const idx = mem.find(u8, entry, ":") orelse return error.InvalidValue;
+        const idx = mem.indexOf(u8, entry, ":") orelse return error.InvalidValue;
         const key = std.mem.trim(u8, entry[0..idx], whitespace);
 
         // used if we need to decode a double-quoted string.
@@ -666,7 +676,7 @@ test "parse: simple" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a=42 --b --b-f=false",
     );
@@ -678,7 +688,7 @@ test "parse: simple" {
     try testing.expect(!data.@"b-f");
 
     // Reparsing works
-    var iter2 = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter2 = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a=84",
     );
@@ -700,7 +710,7 @@ test "parse: quoted value" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a=\"42\" --b=\"hello!\"",
     );
@@ -720,7 +730,7 @@ test "parse: empty value resets to default" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a= --b=",
     );
@@ -739,7 +749,7 @@ test "parse: positional arguments are invalid" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a=84 what",
     );
@@ -763,7 +773,7 @@ test "parse: diagnostic tracking" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--what --a=42",
     );
@@ -847,7 +857,7 @@ test "parse: compatibility handler" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a=yuh",
     );
@@ -873,7 +883,7 @@ test "parse: compatibility renamed" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--old=true --b=true",
     );
@@ -1352,8 +1362,8 @@ pub fn ArgsIterator(comptime Iterator: type) type {
 }
 
 /// Create an args iterator for the process args. This will skip argv0.
-pub fn argsIterator(alloc_gpa: Allocator) internal_os.args.ArgIterator.InitError!ArgsIterator(internal_os.args.ArgIterator) {
-    var iter = try internal_os.args.iterator(alloc_gpa);
+pub fn argsIterator(args: std.process.Args, alloc: Allocator) internal_os.args.ArgIterator.InitError!ArgsIterator(internal_os.args.ArgIterator) {
+    var iter = try internal_os.args.iterator(args, alloc);
     errdefer iter.deinit();
     _ = iter.next(); // skip argv0
     return .{ .iterator = iter };
@@ -1362,7 +1372,7 @@ pub fn argsIterator(alloc_gpa: Allocator) internal_os.args.ArgIterator.InitError
 test "ArgsIterator" {
     const testing = std.testing;
 
-    const child = try std.process.ArgIteratorGeneral(.{}).init(
+    const child = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--what +list-things --a=42",
     );
@@ -1450,7 +1460,7 @@ pub const LineIterator = struct {
             break entry;
         } else return null;
 
-        if (mem.find(u8, entry, "=")) |idx| {
+        if (mem.indexOf(u8, entry, "=")) |idx| {
             const key = std.mem.trim(u8, entry[0..idx], whitespace);
             const value = value: {
                 var value = std.mem.trim(u8, entry[idx + 1 ..], whitespace);

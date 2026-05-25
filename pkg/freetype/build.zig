@@ -37,9 +37,9 @@ pub fn build(b: *std.Build) !void {
     module.addIncludePath(b.path(""));
 
     if (b.systemIntegrationOption("freetype", .{})) {
-        module.linkSystemLibrary("freetype2", dynamic_link_opts);
+        module.linkSystemLibrary("freetype2", .{});
         if (test_exe) |exe| {
-            exe.root_module.linkSystemLibrary("freetype2", dynamic_link_opts);
+            exe.root_module.linkSystemLibrary("freetype2", .{});
         }
     } else {
         const lib = try buildLib(b, module, .{
@@ -68,10 +68,10 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-    lib.root_module.link_libc = true;
     if (target.result.os.tag.isDarwin()) {
         const apple_sdk = @import("apple_sdk");
         try apple_sdk.addPaths(b, lib);
@@ -93,16 +93,13 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         });
     }
 
-    if (target.result.os.tag == .freebsd or target.result.abi == .musl or target.result.abi.isAndroid()) {
+    if (target.result.os.tag == .freebsd or target.result.abi == .musl) {
         try flags.append(b.allocator, "-fPIC");
-        lib.root_module.pic = true;
     }
-
-    const dynamic_link_opts = options.dynamic_link_opts;
 
     // Zlib
     if (b.systemIntegrationOption("zlib", .{})) {
-        lib.root_module.linkSystemLibrary("zlib", dynamic_link_opts);
+        lib.root_module.linkSystemLibrary("zlib", .{});
     } else {
         const zlib_dep = b.dependency("zlib", .{ .target = target, .optimize = optimize });
         lib.root_module.linkLibrary(zlib_dep.artifact("z"));
@@ -114,7 +111,7 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         try flags.append(b.allocator, "-DFT_CONFIG_OPTION_USE_PNG=1");
 
         if (b.systemIntegrationOption("libpng", .{})) {
-            lib.root_module.linkSystemLibrary("libpng", dynamic_link_opts);
+            lib.root_module.linkSystemLibrary("libpng", .{});
         } else {
             const libpng_dep = b.dependency(
                 "libpng",

@@ -63,11 +63,16 @@ const PipelineDescription = struct {
 
 /// We create a type for the pipeline collection based on our desc array.
 const PipelineCollection = t: {
-    var names: [pipeline_descs.len][:0]const u8 = undefined;
-    for (pipeline_descs, 0..) |pipeline, i| {
-        names[i] = pipeline[0];
+    const StructField = std.builtin.Type.StructField;
+
+    var names: [pipeline_descs.len][]const u8 = undefined;
+    var types = [_]type{Pipeline} ** pipeline_descs.len;
+    var attrs = [_]StructField.Attributes{.{ .@"align" = @alignOf(Pipeline) }} ** pipeline_descs.len;
+
+    for (pipeline_descs, &names) |pipeline, *name| {
+        name.* = pipeline[0];
     }
-    break :t @Struct(.auto, null, &names, &@splat(Pipeline), &@splat(.{}));
+    break :t @Struct(.auto, null, &names, &types, &attrs);
 };
 
 /// This contains the state for the shaders used by the Metal renderer.
@@ -334,7 +339,7 @@ fn initPostPipeline(data: [:0]const u8) !Pipeline {
 /// quote marks. If we ever want to process `#include`s for custom shaders
 /// then we need to write something better than this for it.
 fn loadShaderCode(comptime path: []const u8) [:0]const u8 {
-    return comptime processIncludes(@embedFile(path), std.fs.path.dirname(path).?);
+    return comptime processIncludes(@embedFile(path), std.Io.Dir.path.dirname(path).?);
 }
 
 /// Used by loadShaderCode
@@ -345,7 +350,7 @@ fn processIncludes(contents: [:0]const u8, basedir: []const u8) [:0]const u8 {
         if (std.mem.startsWith(u8, contents[i..], "#include")) {
             assert(std.mem.startsWith(u8, contents[i..], "#include \""));
             const start = i + "#include \"".len;
-            const end = std.mem.findScalarPos(u8, contents, start, '"').?;
+            const end = std.mem.indexOfScalarPos(u8, contents, start, '"').?;
             return std.fmt.comptimePrint(
                 "{s}{s}{s}",
                 .{

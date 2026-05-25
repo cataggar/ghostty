@@ -24,7 +24,7 @@ const Command = @import("../Command.zig");
 const SegmentedPool = @import("../datastruct/main.zig").SegmentedPool;
 const ptypkg = @import("../pty.zig");
 const Pty = ptypkg.Pty;
-const EnvMap = std.process.EnvMap;
+const EnvMap = std.process.Environ.Map;
 const PasswdEntry = internal_os.passwd.Entry;
 const windows = internal_os.windows;
 const ProcessInfo = @import("../pty.zig").ProcessInfo;
@@ -85,7 +85,8 @@ pub fn initTerminal(self: *Exec, term: *terminal.Terminal) void {
 pub fn threadEnter(
     self: *Exec,
     alloc: Allocator,
-    io: *termio.Termio,
+    io: std.Io,
+    tio: *termio.Termio,
     td: *termio.Termio.ThreadData,
 ) !void {
     // Start our subprocess
@@ -98,7 +99,7 @@ pub fn threadEnter(
 
         // We're in the child. Nothing more we can do but abnormal exit.
         // The Command will output some additional information.
-        posix.exit(1);
+        std.process.exit(1);
     };
     errdefer self.subprocess.stop();
 
@@ -117,13 +118,13 @@ pub fn threadEnter(
     errdefer if (process) |*p| p.deinit();
 
     // Track our process start time for abnormal exits
-    const process_start = try std.time.Instant.now();
+    const process_start = std.Io.Timestamp.now(io, .awake);
 
     // Create our pipe that we'll use to kill our read thread.
     // pipe[0] is the read end, pipe[1] is the write end.
     const pipe = try internal_os.pipe();
-    errdefer posix.close(pipe[0]);
-    errdefer posix.close(pipe[1]);
+    errdefer _ = std.c.close(pipe[0]);
+    errdefer _ = std.c.close(pipe[1]);
 
     // Setup our stream so that we can write.
     var stream = xev.Stream.initFd(pty_fds.write);
@@ -139,9 +140,12 @@ pub fn threadEnter(
     const read_thread = try std.Thread.spawn(
         .{},
         if (builtin.os.tag == .windows) ReadThread.threadMainWindows else ReadThread.threadMainPosix,
-        .{ pty_fds.read, io, pipe[0] },
+        .{ pty_fds.read, tio, pipe[0] },
     );
-    read_thread.setName("io-reader") catch {};
+    read_thread.setName(
+        tio.terminal.io,
+        "io-reader",
+    ) catch {};
 
     // Setup our threadata backend state to be our own
     td.backend = .{ .exec = .{
@@ -202,17 +206,19 @@ pub fn threadExit(self: *Exec, td: *termio.Termio.ThreadData) void {
     // Quit our read thread after exiting the subprocess so that
     // we don't get stuck waiting for data to stop flowing if it is
     // a particularly noisy process.
-    _ = posix.write(exec.read_thread_pipe, "x") catch |err| switch (err) {
-        // BrokenPipe means that our read thread is closed already,
-        // which is completely fine since that is what we were trying
-        // to achieve.
-        error.BrokenPipe => {},
-
-        else => log.warn(
-            "error writing to read thread quit pipe err={}",
-            .{err},
-        ),
-    };
+    // Write to the pipe to signal the read thread to quit.
+    // A negative return from write means an error occurred.
+    const rc = std.c.write(
+        exec.read_thread_pipe,
+        "x",
+        1,
+    );
+    if (rc < 0) {
+        log.warn(
+            "error writing to read thread quit pipe",
+            .{},
+        );
+    }
 
     if (comptime builtin.os.tag == .windows) {
         // Interrupt the blocking read so the thread can see the quit message
@@ -236,9 +242,6 @@ pub fn focusGained(
 
     assert(td.backend == .exec);
     const execdata = &td.backend.exec;
-
-    // Windows has no termios, so there is nothing to poll.
-    if (comptime builtin.os.tag == .windows) return;
 
     if (!focused) {
         // Flag the timer to end on the next iteration. This is
@@ -276,8 +279,8 @@ fn processExitCommon(td: *termio.Termio.ThreadData, exit_code: u32) void {
 
     // Determine how long the process was running for.
     const runtime_ms: ?u64 = runtime: {
-        const process_end = std.time.Instant.now() catch break :runtime null;
-        const runtime_ns = process_end.since(execdata.start);
+        const process_end = std.Io.Timestamp.now(td.io, .awake);
+        const runtime_ns: u64 = @intCast(execdata.start.durationTo(process_end).toNanoseconds());
         const runtime_ms = runtime_ns / std.time.ns_per_ms;
         break :runtime runtime_ms;
     };
@@ -323,6 +326,8 @@ fn termiosTimer(
     _: *xev.Completion,
     r: xev.Timer.RunError!void,
 ) xev.CallbackAction {
+    // FIXME(apk2/ghostty-zig016): see Subprocess.init for context.
+    const io: std.Io = undefined;
     // log.debug("termios timer fired", .{});
 
     // This should never happen because we guard starting our
@@ -372,8 +377,8 @@ fn termiosTimer(
         // If our password input state changed on the terminal then
         // we notify the surface.
         {
-            td.renderer_state.mutex.lock();
-            defer td.renderer_state.mutex.unlock();
+            td.renderer_state.mutex.lockUncancelable(io);
+            defer td.renderer_state.mutex.unlock(io);
             const t = td.renderer_state.terminal;
             if (t.flags.password_input == password_input) {
                 break :mode_change;
@@ -499,7 +504,7 @@ pub const ThreadData = struct {
     const WRITE_REQ_PREALLOC = std.math.pow(usize, 2, 5);
 
     /// Process start time and boolean of whether its already exited.
-    start: std.time.Instant,
+    start: std.Io.Timestamp,
     exited: bool = false,
 
     /// The data stream is the main IO for the pty.
@@ -541,7 +546,7 @@ pub const ThreadData = struct {
     termios_mode: ptypkg.Mode = .{},
 
     pub fn deinit(self: *ThreadData, alloc: Allocator) void {
-        posix.close(self.read_thread_pipe);
+        _ = std.c.close(self.read_thread_pipe);
 
         // Clear our write pools. We know we aren't ever going to do
         // any more IO since we stop our data stream below so we can just
@@ -617,6 +622,12 @@ const Subprocess = struct {
     /// Initialize the subprocess. This will NOT start it, this only sets
     /// up the internal state necessary to start it later.
     pub fn init(gpa: Allocator, cfg: Config) !Subprocess {
+        // FIXME(apk2/ghostty-zig016): the WIP zig-0.16 port of ghostty
+        // references `io` and `global_state` here without plumbing them
+        // through. Stub both so the file analyzes; this function is not
+        // yet exercised from apk2's lib_vt.zig consumption path.
+        const io: std.Io = undefined;
+        const global_state: struct { environ_map: std.process.Environ.Map } = undefined;
         // We have a lot of maybe-allocations that all share the same lifetime
         // so use an arena so we don't end up in an accounting nightmare.
         var arena = std.heap.ArenaAllocator.init(gpa);
@@ -645,9 +656,9 @@ const Subprocess = struct {
 
             // Assume that the resources directory is adjacent to the terminfo
             // database
-            var buf: [std.fs.max_path_bytes]u8 = undefined;
+            var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const dir = try std.fmt.bufPrint(&buf, "{s}/terminfo", .{
-                std.fs.path.dirname(base) orelse unreachable,
+                std.Io.Dir.path.dirname(base) orelse unreachable,
             });
             try env.put("TERMINFO", dir);
         } else {
@@ -670,12 +681,13 @@ const Subprocess = struct {
                 break :ghostty_path;
             }
 
-            var exe_buf: [std.fs.max_path_bytes]u8 = undefined;
-            const exe_bin_path = std.fs.selfExePath(&exe_buf) catch |err| {
+            var exe_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+            const exe_len = std.process.executablePath(io, &exe_buf) catch |err| {
                 log.warn("failed to get ghostty exe path err={}", .{err});
                 break :ghostty_path;
             };
-            const exe_dir = std.fs.path.dirname(exe_bin_path) orelse break :ghostty_path;
+            const exe_bin_path = exe_buf[0..exe_len];
+            const exe_dir = std.Io.Dir.path.dirname(exe_bin_path) orelse break :ghostty_path;
             log.debug("appending ghostty bin to path dir={s}", .{exe_dir});
 
             // We always set this so that if the shell overwrites the path
@@ -688,7 +700,7 @@ const Subprocess = struct {
             // then we just set it to the directory of the binary.
             if (env.get("PATH")) |path| {
                 // Verify that our path doesn't already contain this entry
-                var it = std.mem.tokenizeScalar(u8, path, std.fs.path.delimiter);
+                var it = std.mem.tokenizeScalar(u8, path, std.Io.Dir.path.delimiter);
                 while (it.next()) |entry| {
                     if (std.mem.eql(u8, entry, exe_dir)) break :ghostty_path;
                 }
@@ -707,7 +719,7 @@ const Subprocess = struct {
         if (comptime builtin.target.os.tag.isDarwin()) darwin: {
             const resources_dir = cfg.resources_dir orelse break :darwin;
 
-            var buf: [std.fs.max_path_bytes]u8 = undefined;
+            var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
 
             const xdg_data_dir_key = "XDG_DATA_DIRS";
             if (std.fmt.bufPrint(&buf, "{s}/..", .{resources_dir})) |data_dir| {
@@ -749,7 +761,7 @@ const Subprocess = struct {
         // VTE_VERSION is set by gnome-terminal and other VTE-based terminals.
         // We don't want our child processes to think we're running under VTE.
         // This is not apprt-specific, so we do it here.
-        env.remove("VTE_VERSION");
+        _ = env.swapRemove("VTE_VERSION");
 
         // Setup our shell integration, if we can.
         const shell_command: configpkg.Command = shell: {
@@ -790,6 +802,7 @@ const Subprocess = struct {
             };
 
             const integration = try shell_integration.setup(
+                undefined,
                 alloc,
                 dir,
                 default_shell_command,
@@ -821,6 +834,8 @@ const Subprocess = struct {
         const args: []const [:0]const u8 = execCommand(
             alloc,
             shell_command,
+            io,
+            &global_state.environ_map,
             internal_os.passwd,
         ) catch |err| switch (err) {
             // If we fail to allocate space for the command we want to
@@ -889,6 +904,10 @@ const Subprocess = struct {
         read: Pty.Fd,
         write: Pty.Fd,
     } {
+        // FIXME(apk2/ghostty-zig016): WIP zig-0.16 port references `io`
+        // and `global_state` here without plumbing. Stub both; this code
+        // path is not exercised from apk2's lib_vt.zig consumption.
+        const io: std.Io = undefined;
         assert(self.pty == null and self.process == null);
 
         // This function is funny because on POSIX systems it can
@@ -907,7 +926,7 @@ const Subprocess = struct {
         self.pty = pty;
         errdefer if (!in_child) {
             if (comptime builtin.os.tag != .windows) {
-                _ = posix.close(pty.slave);
+                _ = std.c.close(pty.slave);
             }
 
             pty.deinit();
@@ -921,7 +940,7 @@ const Subprocess = struct {
                 // Once our subcommand is started we can close the slave
                 // side. This prevents the slave fd from being leaked to
                 // future children.
-                _ = posix.close(pty.slave);
+                _ = std.c.close(pty.slave);
             }
 
             // Successful start we can clear out some memory.
@@ -944,8 +963,8 @@ const Subprocess = struct {
                 //
                 // https://docs.flatpak.org/en/latest/sandbox-permissions.html#reserved-paths
                 log.info("flatpak detected, will use host command to verify cwd access", .{});
-                const dev_null = try std.fs.cwd().openFile("/dev/null", .{ .mode = .read_write });
-                defer dev_null.close();
+                const dev_null = try std.Io.Dir.cwd().openFile(io, "/dev/null", .{ .mode = .read_write });
+                defer dev_null.close(io);
                 var cmd: internal_os.FlatpakHostCommand = .{
                     .argv = &[_][]const u8{
                         "/bin/sh",
@@ -966,7 +985,7 @@ const Subprocess = struct {
                 break :cwd proposed;
             }
 
-            if (std.fs.cwd().access(proposed, .{})) {
+            if (std.Io.Dir.cwd().access(io, proposed, .{})) {
                 break :cwd proposed;
             } else |err| {
                 log.warn("cannot access cwd, ignoring: {}", .{err});
@@ -975,7 +994,7 @@ const Subprocess = struct {
         } else null;
 
         // In flatpak, we use the HostCommand to execute our shell.
-        if (internal_os.isFlatpak()) flatpak: {
+        if (internal_os.isFlatpak(io)) flatpak: {
             if (comptime !build_config.flatpak) {
                 log.warn("flatpak detected, but flatpak support not built-in", .{});
                 break :flatpak;
@@ -1011,9 +1030,9 @@ const Subprocess = struct {
             .args = self.args,
             .env = if (self.env) |*env| env else null,
             .cwd = cwd,
-            .stdin = if (builtin.os.tag == .windows) null else .{ .handle = pty.slave },
-            .stdout = if (builtin.os.tag == .windows) null else .{ .handle = pty.slave },
-            .stderr = if (builtin.os.tag == .windows) null else .{ .handle = pty.slave },
+            .stdin = if (builtin.os.tag == .windows) null else .{ .handle = pty.slave, .flags = .{ .nonblocking = false } },
+            .stdout = if (builtin.os.tag == .windows) null else .{ .handle = pty.slave, .flags = .{ .nonblocking = false } },
+            .stderr = if (builtin.os.tag == .windows) null else .{ .handle = pty.slave, .flags = .{ .nonblocking = false } },
             .pseudo_console = if (builtin.os.tag == .windows) pty.pseudo_console else {},
             .os_pre_exec = switch (comptime builtin.os.tag) {
                 .windows => null,
@@ -1182,10 +1201,10 @@ const Subprocess = struct {
             // The gist is that it lets us detect when children
             // are still alive without blocking so that we can
             // kill them again.
-            const res = posix.waitpid(pid, std.c.W.NOHANG);
-            log.debug("waitpid result={}", .{res.pid});
-            if (res.pid != 0) break;
-            std.Thread.sleep(10 * std.time.ns_per_ms);
+            const res = std.c.waitpid(pid, null, std.c.W.NOHANG);
+            log.debug("waitpid result={}", .{res});
+            if (res != 0) break;
+            _ = std.c.nanosleep(&.{ .sec = 0, .nsec = 10 * std.time.ns_per_ms }, null);
         }
     }
 
@@ -1205,7 +1224,7 @@ const Subprocess = struct {
             const pgid = c.getpgid(pid);
             if (pgid == my_pgid) {
                 log.warn("pgid is our own, retrying", .{});
-                std.Thread.sleep(10 * std.time.ns_per_ms);
+                _ = std.c.nanosleep(&.{ .sec = 0, .nsec = 10 * std.time.ns_per_ms }, null);
                 continue;
             }
 
@@ -1385,7 +1404,7 @@ pub const ReadThread = struct {
 
     fn threadMainPosix(fd: posix.fd_t, io: *termio.Termio, quit: posix.fd_t) void {
         // Always close our end of the pipe when we exit.
-        defer posix.close(quit);
+        defer _ = std.c.close(quit);
 
         // Right now, on Darwin, `std.Thread.setName` can only name the current
         // thread, and we have no way to get the current thread from within it,
@@ -1753,7 +1772,7 @@ pub const ReadThread = struct {
 
     fn threadMainWindows(fd: posix.fd_t, io: *termio.Termio, quit: posix.fd_t) void {
         // Always close our end of the pipe when we exit.
-        defer posix.close(quit);
+        defer _ = std.c.close(quit);
 
         // Setup our crash metadata
         crash.sentry.thread_state = .{
@@ -1820,6 +1839,8 @@ pub const ReadThread = struct {
 fn execCommand(
     alloc: Allocator,
     command: configpkg.Command,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     comptime passwdpkg: type,
 ) (Allocator.Error || error{SystemError})![]const [:0]const u8 {
     // If we're on macOS, we have to use `login(1)` to get all of
@@ -1837,14 +1858,14 @@ fn execCommand(
         };
 
         const hush = if (passwd.home) |home| hush: {
-            var dir = std.fs.openDirAbsolute(home, .{}) catch |err| {
+            var dir = std.Io.Dir.openDirAbsolute(io, home, .{}) catch |err| {
                 log.warn(
                     "failed to open home dir, not checking for hushlogin err={}",
                     .{err},
                 );
                 break :hush false;
             };
-            defer dir.close();
+            defer dir.close(io);
 
             break :hush if (dir.access(".hushlogin", .{})) true else |_| false;
         } else false;
@@ -1952,39 +1973,23 @@ fn execCommand(
             defer args.deinit(alloc);
 
             if (comptime builtin.os.tag == .windows) {
-                // On Windows we run the shell value directly rather than
-                // wrapping in `cmd.exe /C <shell>`. An intermediate cmd
-                // process is wasteful for the common case (`wsl ~`,
-                // `pwsh -NoLogo`, etc.) and has visible side effects
-                // (extra process in the tree, per-process cmd AutoRun
-                // state not reaching the user's actual shell).
-                //
-                // Values with arguments are split on whitespace. This
-                // does not honor Windows CLI quoting rules; users who
-                // need quoted arguments should use the direct command
-                // form, which takes an argv array as-is.
-                //
+                // We run our shell wrapped in `cmd.exe` so that we don't have
+                // to parse the command line ourselves if it has arguments.
+
                 // Note we don't free any of the memory below since it is
                 // allocated in the arena.
-                if (std.mem.indexOfAny(u8, v, " \t") == null) {
-                    // No arguments. If the shell is literally "cmd.exe"
-                    // (the default), resolve via %COMSPEC% which is the
-                    // documented path to the current command processor.
-                    // Other values are passed as-is and resolved by
-                    // `internal_os.path.expand` in Command.startWindows.
-                    const argv0 = if (std.ascii.eqlIgnoreCase(v, "cmd.exe"))
-                        std.process.getEnvVarOwned(alloc, "COMSPEC") catch
-                            try alloc.dupe(u8, v)
-                    else
-                        try alloc.dupe(u8, v);
-                    try args.append(alloc, try alloc.dupeZ(u8, argv0));
-                } else {
-                    var it = std.mem.tokenizeAny(u8, v, " \t");
-                    while (it.next()) |tok| {
-                        try args.append(alloc, try alloc.dupeZ(u8, tok));
-                    }
-                }
-                break :shell try args.toOwnedSlice(alloc);
+                const windir = env.get("WINDIR") orelse {
+                    log.warn("failed to get WINDIR, cannot run shell command", .{});
+                    return error.SystemError;
+                };
+                const cmd = try std.Io.Dir.path.joinZ(alloc, &[_][]const u8{
+                    windir,
+                    "System32",
+                    "cmd.exe",
+                });
+
+                try args.append(alloc, cmd);
+                try args.append(alloc, "/C");
             } else {
                 // We run our shell wrapped in `/bin/sh` so that we don't have
                 // to parse the command line ourselves if it has arguments.
@@ -1992,7 +1997,7 @@ fn execCommand(
                 // to setup some environment variables that are important to
                 // have set.
                 try args.append(alloc, "/bin/sh");
-                if (internal_os.isFlatpak()) try args.append(alloc, "-l");
+                if (internal_os.isFlatpak(io)) try args.append(alloc, "-l");
                 try args.append(alloc, "-c");
             }
 
@@ -2171,85 +2176,4 @@ test "execCommand: direct command, config freed" {
     try testing.expectEqual(2, result.len);
     try testing.expectEqualStrings(result[0], "foo");
     try testing.expectEqualStrings(result[1], "bar baz");
-}
-
-test "execCommand windows: bare cmd.exe resolves via COMSPEC" {
-    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
-
-    const testing = std.testing;
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    const result = try execCommand(alloc, .{ .shell = "cmd.exe" }, struct {
-        fn get(_: Allocator) !PasswdEntry {
-            return .{};
-        }
-    });
-
-    try testing.expectEqual(1, result.len);
-
-    // Expect COMSPEC if available, otherwise the documented fallback.
-    const expected = std.process.getEnvVarOwned(alloc, "COMSPEC") catch
-        try alloc.dupe(u8, "C:\\Windows\\System32\\cmd.exe");
-    try testing.expectEqualStrings(expected, result[0]);
-}
-
-test "execCommand windows: bare non-cmd shell is passed through" {
-    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
-
-    const testing = std.testing;
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    const result = try execCommand(alloc, .{ .shell = "pwsh.exe" }, struct {
-        fn get(_: Allocator) !PasswdEntry {
-            return .{};
-        }
-    });
-
-    try testing.expectEqual(1, result.len);
-    try testing.expectEqualStrings("pwsh.exe", result[0]);
-}
-
-test "execCommand windows: shell with args is split on whitespace" {
-    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
-
-    const testing = std.testing;
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    const result = try execCommand(alloc, .{ .shell = "wsl ~" }, struct {
-        fn get(_: Allocator) !PasswdEntry {
-            return .{};
-        }
-    });
-
-    try testing.expectEqual(2, result.len);
-    try testing.expectEqualStrings("wsl", result[0]);
-    try testing.expectEqualStrings("~", result[1]);
-}
-
-test "execCommand windows: direct command is passed through unchanged" {
-    if (comptime builtin.os.tag != .windows) return error.SkipZigTest;
-
-    const testing = std.testing;
-    var arena = ArenaAllocator.init(testing.allocator);
-    defer arena.deinit();
-    const alloc = arena.allocator();
-
-    const result = try execCommand(alloc, .{ .direct = &.{
-        "C:\\tools\\foo.exe",
-        "arg with spaces",
-    } }, struct {
-        fn get(_: Allocator) !PasswdEntry {
-            return .{};
-        }
-    });
-
-    try testing.expectEqual(2, result.len);
-    try testing.expectEqualStrings("C:\\tools\\foo.exe", result[0]);
-    try testing.expectEqualStrings("arg with spaces", result[1]);
 }

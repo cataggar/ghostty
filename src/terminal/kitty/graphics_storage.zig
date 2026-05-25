@@ -914,7 +914,7 @@ fn trackPin(
 test "storage: add placement with zero placement id" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 100, .rows = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 100, .rows = 100 });
     defer t.deinit(alloc);
     t.width_px = 100;
     t.height_px = 100;
@@ -943,7 +943,7 @@ test "storage: add placement with zero placement id" {
 test "storage: delete all placements and images" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
     const tracked = t.screens.active.pages.countTrackedPins();
 
@@ -966,7 +966,7 @@ test "storage: delete all placements and images" {
 test "storage: delete all placements and images preserves limit" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
     const tracked = t.screens.active.pages.countTrackedPins();
 
@@ -991,7 +991,7 @@ test "storage: delete all placements and images preserves limit" {
 test "storage: delete all placements" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
     const tracked = t.screens.active.pages.countTrackedPins();
 
@@ -1014,7 +1014,7 @@ test "storage: delete all placements" {
 test "storage: delete all placements by image id" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
     const tracked = t.screens.active.pages.countTrackedPins();
 
@@ -1037,7 +1037,7 @@ test "storage: delete all placements by image id" {
 test "storage: delete all placements by image id and unused images" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
     const tracked = t.screens.active.pages.countTrackedPins();
 
@@ -1060,7 +1060,7 @@ test "storage: delete all placements by image id and unused images" {
 test "storage: delete placement by specific id" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
     const tracked = t.screens.active.pages.countTrackedPins();
 
@@ -1088,7 +1088,7 @@ test "storage: delete placement by specific id" {
 test "storage: delete intersecting cursor" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 100, .cols = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 100, .cols = 100 });
     defer t.deinit(alloc);
     t.width_px = 100;
     t.height_px = 100;
@@ -1120,7 +1120,7 @@ test "storage: delete intersecting cursor" {
 test "storage: delete intersecting cursor plus unused" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 100, .cols = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 100, .cols = 100 });
     defer t.deinit(alloc);
     t.width_px = 100;
     t.height_px = 100;
@@ -1152,7 +1152,7 @@ test "storage: delete intersecting cursor plus unused" {
 test "storage: delete intersecting cursor hits multiple" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 100, .cols = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 100, .cols = 100 });
     defer t.deinit(alloc);
     t.width_px = 100;
     t.height_px = 100;
@@ -1178,7 +1178,7 @@ test "storage: delete intersecting cursor hits multiple" {
 test "storage: delete by column" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 100, .cols = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 100, .cols = 100 });
     defer t.deinit(alloc);
     t.width_px = 100;
     t.height_px = 100;
@@ -1211,7 +1211,7 @@ test "storage: delete by column" {
 test "storage: delete by column 1x1" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 100, .cols = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 100, .cols = 100 });
     defer t.deinit(alloc);
     t.width_px = 100;
     t.height_px = 100;
@@ -1244,7 +1244,7 @@ test "storage: delete by column 1x1" {
 test "storage: delete by row" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 100, .cols = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 100, .cols = 100 });
     defer t.deinit(alloc);
     t.width_px = 100;
     t.height_px = 100;
@@ -1277,7 +1277,7 @@ test "storage: delete by row" {
 test "storage: delete by row 1x1" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 100, .cols = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 100, .cols = 100 });
     defer t.deinit(alloc);
     t.width_px = 100;
     t.height_px = 100;
@@ -1310,7 +1310,7 @@ test "storage: delete by row 1x1" {
 test "storage: delete images by range 1" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
     const tracked = t.screens.active.pages.countTrackedPins();
 
@@ -1335,7 +1335,7 @@ test "storage: delete images by range 1" {
 test "storage: delete images by range 2" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
     const tracked = t.screens.active.pages.countTrackedPins();
 
@@ -1360,7 +1360,7 @@ test "storage: delete images by range 2" {
 test "storage: delete images by range 3" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
     const tracked = t.screens.active.pages.countTrackedPins();
 
@@ -1385,7 +1385,7 @@ test "storage: delete images by range 3" {
 test "storage: delete images by range 4" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
     const tracked = t.screens.active.pages.countTrackedPins();
 
@@ -1411,7 +1411,7 @@ test "storage: aspect ratio calculation when only columns or rows specified" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 100, .rows = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 100, .rows = 100 });
     defer t.deinit(alloc);
     t.width_px = 1000; // 10 px per col
     t.height_px = 2000; // 20 px per row

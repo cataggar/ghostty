@@ -40,13 +40,13 @@ pub fn distResources(b: *std.Build) struct {
         .name = "framegen",
         .root_module = b.createModule(.{
             .target = b.graph.host,
+            .link_libc = true,
         }),
     });
     exe.root_module.addCSourceFile(.{
         .file = b.path("src/build/framegen/main.c"),
         .flags = &.{},
     });
-    exe.root_module.link_libc = true;
 
     if (b.systemIntegrationOption("zlib", .{})) {
         exe.root_module.linkSystemLibrary("zlib", .{

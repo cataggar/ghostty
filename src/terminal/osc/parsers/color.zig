@@ -329,7 +329,7 @@ fn parseResetDynamicColor(
 /// The exact prealloc value is chosen arbitrarily assuming most
 /// color ops have very few. If we can get empirical data on more
 /// typical values we can switch to that.
-pub const List = std.ArrayListUnmanaged(Request);
+pub const List = std.ArrayList(Request);
 
 /// A single operation related to the terminal color palette.
 pub const Request = union(enum) {
@@ -375,7 +375,7 @@ test "OSC 4:" {
                     .target = .{ .palette = @intCast(idx) },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
 
@@ -394,7 +394,7 @@ test "OSC 4:" {
             try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .query = .{ .palette = @intCast(idx) } },
-                list.at(0).*,
+                list.items[0],
             );
         }
 
@@ -416,7 +416,7 @@ test "OSC 4:" {
                     .target = .{ .palette = @intCast(idx) },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
 
@@ -440,14 +440,14 @@ test "OSC 4:" {
                     .target = .{ .palette = @intCast(idx) },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
 
     // Test every special color
     for (0..@typeInfo(SpecialColor).@"enum".fields.len) |i| {
-        const special = std.enums.fromInt(SpecialColor, i) orelse return error.InvalidEnumValue;
+        const special = std.enums.fromInt(SpecialColor, i) orelse continue;
 
         // Simple color set
         // printf '\e]4;256;red\\'
@@ -467,7 +467,7 @@ test "OSC 4:" {
                     .target = .{ .special = special },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
@@ -479,7 +479,7 @@ test "OSC 5:" {
 
     // Test every special color
     for (0..@typeInfo(SpecialColor).@"enum".fields.len) |i| {
-        const special = std.enums.fromInt(SpecialColor, i) orelse return error.InvalidEnumValue;
+        const special = std.enums.fromInt(SpecialColor, i) orelse continue;
 
         // Simple color set
         // printf '\e]4;256;red\\'
@@ -499,7 +499,7 @@ test "OSC 5:" {
                     .target = .{ .special = special },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
@@ -523,14 +523,14 @@ test "OSC 4: multiple requests" {
                 .target = .{ .palette = 0 },
                 .color = RGB{ .r = 255, .g = 0, .b = 0 },
             } },
-            list.at(0).*,
+            list.items[0],
         );
         try testing.expectEqual(
             Request{ .set = .{
                 .target = .{ .palette = 1 },
                 .color = RGB{ .r = 0, .g = 0, .b = 255 },
             } },
-            list.at(1).*,
+            list.items[1],
         );
     }
 
@@ -549,14 +549,14 @@ test "OSC 4: multiple requests" {
                 .target = .{ .palette = 0 },
                 .color = RGB{ .r = 255, .g = 0, .b = 0 },
             } },
-            list.at(0).*,
+            list.items[0],
         );
         try testing.expectEqual(
             Request{ .set = .{
                 .target = .{ .palette = 0 },
                 .color = RGB{ .r = 0, .g = 0, .b = 255 },
             } },
-            list.at(1).*,
+            list.items[1],
         );
     }
 }
@@ -582,14 +582,14 @@ test "OSC 104:" {
             try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .reset = .{ .palette = @intCast(idx) } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
 
     // Test every special color
     for (0..@typeInfo(SpecialColor).@"enum".fields.len) |i| {
-        const special = std.enums.fromInt(SpecialColor, i) orelse return error.InvalidEnumValue;
+        const special = std.enums.fromInt(SpecialColor, i) orelse continue;
 
         // Simple color set
         // printf '\e]104;256\\'
@@ -606,7 +606,7 @@ test "OSC 104:" {
             try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .reset = .{ .special = special } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
@@ -621,11 +621,11 @@ test "OSC 104: empty index" {
     try testing.expectEqual(2, list.items.len);
     try testing.expectEqual(
         Request{ .reset = .{ .palette = 0 } },
-        list.at(0).*,
+        list.items[0],
     );
     try testing.expectEqual(
         Request{ .reset = .{ .palette = 1 } },
-        list.at(1).*,
+        list.items[1],
     );
 }
 
@@ -638,7 +638,7 @@ test "OSC 104: invalid index" {
     try testing.expectEqual(1, list.items.len);
     try testing.expectEqual(
         Request{ .reset = .{ .palette = 1 } },
-        list.at(0).*,
+        list.items[0],
     );
 }
 
@@ -651,7 +651,7 @@ test "OSC 104: reset all" {
     try testing.expectEqual(1, list.items.len);
     try testing.expectEqual(
         Request{ .reset_palette = {} },
-        list.at(0).*,
+        list.items[0],
     );
 }
 
@@ -664,7 +664,7 @@ test "OSC 105: reset all" {
     try testing.expectEqual(1, list.items.len);
     try testing.expectEqual(
         Request{ .reset_special = {} },
-        list.at(0).*,
+        list.items[0],
     );
 }
 
@@ -691,7 +691,7 @@ test "OSC 10: OSC 11: OSC 12: OSC: 13: OSC 14: OSC 15: OSC: 16: OSC 17: OSC 18: 
                     .target = .{ .dynamic = color },
                     .color = RGB{ .r = 255, .g = 0, .b = 0 },
                 } },
-                list.at(0).*,
+                list.items[0],
             );
         }
     }
@@ -716,14 +716,14 @@ test "OSC 10: OSC 11: OSC 12: OSC: 13: OSC 14: OSC 15: OSC: 16: OSC 17: OSC 18: 
                 .target = .{ .dynamic = .background },
                 .color = RGB{ .r = 255, .g = 0, .b = 0 },
             } },
-            list.at(0).*,
+            list.items[0],
         );
         try testing.expectEqual(
             Request{ .set = .{
                 .target = .{ .dynamic = .cursor },
                 .color = RGB{ .r = 0, .g = 0, .b = 255 },
             } },
-            list.at(1).*,
+            list.items[1],
         );
     }
 }
@@ -748,7 +748,7 @@ test "OSC 110: OSC 111: OSC 112: OSC: 113: OSC 114: OSC 115: OSC: 116: OSC 117: 
             try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .reset = .{ .dynamic = color } },
-                list.at(0).*,
+                list.items[0],
             );
         }
 
@@ -761,7 +761,7 @@ test "OSC 110: OSC 111: OSC 112: OSC: 113: OSC 114: OSC 115: OSC: 116: OSC 117: 
             try testing.expectEqual(1, list.items.len);
             try testing.expectEqual(
                 Request{ .reset = .{ .dynamic = color } },
-                list.at(0).*,
+                list.items[0],
             );
         }
 

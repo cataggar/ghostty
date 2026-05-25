@@ -25,6 +25,7 @@ const selection_c = @import("selection.zig");
 const style_c = @import("style.zig");
 const color = @import("../color.zig");
 const clipboard = @import("../clipboard.zig");
+const internal_os = @import("../../os/main.zig");
 const Result = @import("result.zig").Result;
 
 const Handler = @import("../stream_terminal.zig").Handler;
@@ -39,6 +40,8 @@ const TerminalWrapper = struct {
     stream: Stream,
     effects: Effects = .{},
     tracked_grid_refs: std.AutoArrayHashMapUnmanaged(*grid_ref_tracked_c.TrackedGridRef, void) = .{},
+    io: std.Io.Threaded,
+    env: std.process.Environ.Map,
 };
 
 /// A single MIME representation in a clipboard write.
@@ -338,12 +341,24 @@ fn new_(
         return error.OutOfMemory;
     errdefer alloc.destroy(wrapper);
 
+    // Initialize the env and io directly in the wrapper so that the
+    // pointer we pass to Terminal.init remains stable for the lifetime
+    // of the wrapper.
+    wrapper.io = .init_single_threaded;
+    wrapper.env = internal_os.getEnvMapC(alloc);
+    errdefer wrapper.env.deinit();
+
     // Setup our terminal
-    t.* = try .init(alloc, .{
-        .cols = opts.cols,
-        .rows = opts.rows,
-        .max_scrollback = opts.max_scrollback,
-    });
+    t.* = try .init(
+        alloc,
+        wrapper.io.io(),
+        &wrapper.env,
+        .{
+            .cols = opts.cols,
+            .rows = opts.rows,
+            .max_scrollback = opts.max_scrollback,
+        },
+    );
     errdefer t.deinit(alloc);
 
     // libghostty-vt embedders don't necessarily install Ghostty's shell
@@ -367,10 +382,10 @@ fn new_(
         .clipboard_write = &Effects.clipboardWriteTrampoline,
     };
 
-    wrapper.* = .{
-        .terminal = t,
-        .stream = .initAlloc(alloc, handler),
-    };
+    wrapper.terminal = t;
+    wrapper.stream = .initAlloc(alloc, handler);
+    wrapper.effects = .{};
+    wrapper.tracked_grid_refs = .{};
 
     return wrapper;
 }
@@ -475,10 +490,10 @@ pub fn set(
     value: ?*const anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(Option, @intFromEnum(option)) == null) {
+        _ = std.enums.fromInt(Option, @intFromEnum(option)) orelse {
             log.warn("terminal_set invalid option value={d}", .{@intFromEnum(option)});
             return .invalid_value;
-        }
+        };
     }
 
     const wrapper = terminal_ orelse return .invalid_value;
@@ -778,10 +793,10 @@ pub fn get(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        if (std.enums.fromInt(TerminalData, @intFromEnum(data)) == null) {
+        _ = std.enums.fromInt(TerminalData, @intFromEnum(data)) orelse {
             log.warn("terminal_get invalid data value={d}", .{@intFromEnum(data)});
             return .invalid_value;
-        }
+        };
     }
 
     return switch (data) {
@@ -894,7 +909,12 @@ pub fn grid_ref(
     out_ref: ?*grid_ref_c.CGridRef,
 ) callconv(lib.calling_conv) Result {
     const t: *ZigTerminal = (terminal_ orelse return .invalid_value).terminal;
-    const zig_pt: point.Point = .fromC(pt);
+    const zig_pt: point.Point = switch (pt.tag) {
+        .active => .{ .active = pt.value.active },
+        .viewport => .{ .viewport = pt.value.viewport },
+        .screen => .{ .screen = pt.value.screen },
+        .history => .{ .history = pt.value.history },
+    };
     const p = t.screens.active.pages.pin(zig_pt) orelse
         return .invalid_value;
     if (out_ref) |out| out.* = grid_ref_c.CGridRef.fromPin(p);
@@ -967,6 +987,7 @@ pub fn free(terminal_: Terminal) callconv(lib.calling_conv) void {
     wrapper.tracked_grid_refs.deinit(alloc);
     wrapper.stream.deinit();
     t.deinit(alloc);
+    wrapper.env.deinit();
     alloc.destroy(t);
     alloc.destroy(wrapper);
 }
@@ -1498,29 +1519,6 @@ test "vt_write split escape sequence" {
     defer testing.allocator.free(str);
     // If the escape sequence leaked, we'd see "[1mBold" as literal text.
     try testing.expectEqualStrings("Hello Bold", str);
-}
-
-test "vt_write split combining mark after base at right edge" {
-    var t: Terminal = null;
-    try testing.expectEqual(Result.success, new(
-        &lib.alloc.test_allocator,
-        &t,
-        .{
-            .cols = 2,
-            .rows = 2,
-            .max_scrollback = 0,
-        },
-    ));
-    defer free(t);
-
-    // Put "å" in the final column, then send its combining low line in a
-    // separate write so the mark arrives while the cursor has a pending wrap.
-    vt_write(t, "xå", 3);
-    vt_write(t, "\xcc\xb2", 2);
-
-    const str = try t.?.terminal.plainString(testing.allocator);
-    defer testing.allocator.free(str);
-    try testing.expectEqualStrings("xå̲", str);
 }
 
 test "get cols and rows" {

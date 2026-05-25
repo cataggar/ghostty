@@ -885,7 +885,7 @@ test "unicode diacritic" {
 
 test "unicode placement: none" {
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -900,7 +900,7 @@ test "unicode placement: none" {
 
 test "unicode placement: single row/col" {
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -924,7 +924,7 @@ test "unicode placement: single row/col" {
 
 test "unicode placement: continuation break" {
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 5, .cols = 10 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 5, .cols = 10 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -958,7 +958,7 @@ test "unicode placement: continuation break" {
 
 test "unicode placement: continuation with diacritics set" {
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 5, .cols = 10 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 5, .cols = 10 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -985,7 +985,7 @@ test "unicode placement: continuation with diacritics set" {
 
 test "unicode placement: continuation with no col" {
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 5, .cols = 10 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 5, .cols = 10 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -1012,7 +1012,7 @@ test "unicode placement: continuation with no col" {
 
 test "unicode placement: continuation with no diacritics" {
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 5, .cols = 10 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 5, .cols = 10 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -1039,7 +1039,7 @@ test "unicode placement: continuation with no diacritics" {
 
 test "unicode placement: run ending" {
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 5, .cols = 10 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 5, .cols = 10 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -1066,7 +1066,7 @@ test "unicode placement: run ending" {
 
 test "unicode placement: run starting in the middle" {
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 5, .cols = 10 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 5, .cols = 10 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -1093,7 +1093,7 @@ test "unicode placement: run starting in the middle" {
 
 test "unicode placement: specifying image id as palette" {
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -1118,7 +1118,7 @@ test "unicode placement: specifying image id as palette" {
 
 test "unicode placement: specifying image id with high bits" {
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -1143,7 +1143,7 @@ test "unicode placement: specifying image id with high bits" {
 
 test "unicode placement: specifying placement id as palette" {
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
     t.modes.set(.grapheme_cluster, true);
 
@@ -1177,7 +1177,7 @@ test "unicode render placement: dog 4x2" {
     const cell_width = 36;
     const cell_height = 80;
 
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 100, .rows = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 100, .rows = 100 });
     defer t.deinit(alloc);
     var s: ImageStorage = .{};
     defer s.deinit(alloc, t.screens.active);
@@ -1244,7 +1244,7 @@ test "unicode render placement: dog 2x2 with blank cells" {
     const cell_width = 36;
     const cell_height = 80;
 
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 100, .rows = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 100, .rows = 100 });
     defer t.deinit(alloc);
     var s: ImageStorage = .{};
     defer s.deinit(alloc, t.screens.active);
@@ -1310,7 +1310,7 @@ test "unicode render placement: dog 1x1" {
     const cell_width = 36;
     const cell_height = 80;
 
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 100, .rows = 100 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 100, .rows = 100 });
     defer t.deinit(alloc);
     var s: ImageStorage = .{};
     defer s.deinit(alloc, t.screens.active);
