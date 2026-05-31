@@ -42,6 +42,10 @@ pub fn build(b: *std.Build) !void {
                 "-D_CRT_NONSTDC_NO_DEPRECATE",
             });
         }
+        if (target.result.abi.isAndroid()) {
+            try flags.append(b.allocator, "-fPIC");
+            lib.root_module.pic = true;
+        }
         lib.root_module.addCSourceFiles(.{
             .root = upstream.path(""),
             .files = srcs,
