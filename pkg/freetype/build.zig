@@ -93,8 +93,9 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
         });
     }
 
-    if (target.result.os.tag == .freebsd or target.result.abi == .musl) {
+    if (target.result.os.tag == .freebsd or target.result.abi == .musl or target.result.abi.isAndroid()) {
         try flags.append(b.allocator, "-fPIC");
+        lib.root_module.pic = true;
     }
 
     // Zlib
