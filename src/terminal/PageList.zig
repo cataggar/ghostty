@@ -691,7 +691,7 @@ pub fn reset(self: *PageList) void {
     _ = self.pool.pages.reset(self.pool.page_alloc, .{
         .retain_with_limit = page_count * PagePool.item_size,
     });
-    _ = self.pool.nodes.reset(self.pool.page_alloc, .{
+    _ = self.pool.nodes.reset(self.pool.alloc, .{
         .retain_with_limit = page_count * NodePool.item_size,
     });
 
