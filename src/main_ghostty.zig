@@ -102,7 +102,7 @@ pub fn main(init: std.process.Init) !MainReturn {
         alloc,
         io,
         init_minimal.args,
-        init_minimal.environ,
+        &state.environ_map,
     );
     defer app.destroy();
 

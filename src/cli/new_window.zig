@@ -234,6 +234,7 @@ fn runArgs(
 
     if (apprt.App.performIpc(
         alloc,
+        io,
         if (opts.class) |class| .{ .class = class } else .detect,
         .new_window,
         .{

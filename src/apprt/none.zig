@@ -9,6 +9,7 @@ pub const App = struct {
     /// Always return false as there is no apprt to communicate with.
     pub fn performIpc(
         _: Allocator,
+        _: std.Io,
         _: apprt.ipc.Target,
         comptime action: apprt.ipc.Action.Key,
         _: apprt.ipc.Action.Value(action),

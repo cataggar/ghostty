@@ -16,8 +16,12 @@ const DBus = @import("DBus.zig");
 ///   --method org.gtk.Actions.Activate \
 ///   toggle-quick-terminal [] []
 /// ```
-pub fn toggleQuickTerminal(alloc: Allocator, target: apprt.ipc.Target) (Allocator.Error || std.Io.Writer.Error || apprt.ipc.Errors)!bool {
-    var dbus = try DBus.init(alloc, target, "toggle-quick-terminal");
+pub fn toggleQuickTerminal(
+    alloc: Allocator,
+    io: std.Io,
+    target: apprt.ipc.Target,
+) (Allocator.Error || std.Io.Writer.Error || apprt.ipc.Errors)!bool {
+    var dbus = try DBus.init(alloc, io, target, "toggle-quick-terminal");
     defer dbus.deinit(alloc);
     try dbus.send();
     return true;

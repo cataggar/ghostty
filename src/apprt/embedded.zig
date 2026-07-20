@@ -331,6 +331,7 @@ pub const App = struct {
     /// to use.
     pub fn performIpc(
         _: Allocator,
+        _: std.Io,
         _: apprt.ipc.Target,
         comptime action: apprt.ipc.Action.Key,
         _: apprt.ipc.Action.Value(action),
