@@ -5,6 +5,11 @@ pub const Targets = packed struct {
     wayland: bool = false,
 };
 
+pub const Versions = struct {
+    gtk: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
+    adwaita: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
+};
+
 /// Returns the targets that GTK4 was compiled with.
 pub fn targets(b: *std.Build) Targets {
     // Run pkg-config. We allow it to fail so that zig build --help
@@ -12,7 +17,7 @@ pub fn targets(b: *std.Build) Targets {
     // GTK isn't found anyways.
     var code: u8 = undefined;
     const output = b.runAllowFail(
-        &.{ "pkg-config", "--variable=targets", "gtk4" },
+        &.{ pkgConfigExe(b), "--variable=targets", "gtk4" },
         &code,
         .ignore,
     ) catch return .{};
@@ -24,4 +29,41 @@ pub fn targets(b: *std.Build) Targets {
         .x11 = x11,
         .wayland = wayland,
     };
+}
+
+/// Returns the versions of the GTK libraries available to the build.
+pub fn versions(b: *std.Build) Versions {
+    return .{
+        .gtk = packageVersion(b, "gtk4") orelse .{
+            .major = 0,
+            .minor = 0,
+            .patch = 0,
+        },
+        .adwaita = packageVersion(b, "libadwaita-1") orelse .{
+            .major = 0,
+            .minor = 0,
+            .patch = 0,
+        },
+    };
+}
+
+fn packageVersion(
+    b: *std.Build,
+    package: []const u8,
+) ?std.SemanticVersion {
+    var code: u8 = undefined;
+    const output = b.runAllowFail(
+        &.{ pkgConfigExe(b), "--modversion", package },
+        &code,
+        .ignore,
+    ) catch return null;
+    if (code != 0) return null;
+
+    return std.SemanticVersion.parse(
+        std.mem.trim(u8, output, &std.ascii.whitespace),
+    ) catch null;
+}
+
+fn pkgConfigExe(b: *std.Build) []const u8 {
+    return b.graph.environ_map.get("PKG_CONFIG") orelse "pkg-config";
 }

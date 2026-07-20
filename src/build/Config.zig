@@ -39,6 +39,8 @@ wasm_shared: bool = true,
 exe_entrypoint: ExeEntrypoint = .ghostty,
 version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
 lib_version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
+gtk_version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
+adw_version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
 
 /// Binary properties
 pie: bool = false,
@@ -120,12 +122,15 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
     // to run even on non-Linux platforms because any failures result in
     // defaults.
     const gtk_targets = gtk.targets(b);
+    const gtk_versions = gtk.versions(b);
 
     var config: Config = .{
         .optimize = optimize,
         .target = target,
         .wasm_target = wasm_target,
         .is_dep = is_dep,
+        .gtk_version = gtk_versions.gtk,
+        .adw_version = gtk_versions.adwaita,
     };
 
     //---------------------------------------------------------------
@@ -526,6 +531,8 @@ pub fn addOptions(self: *const Config, step: *std.Build.Step.Options) !void {
     step.addOption(ExeEntrypoint, "exe_entrypoint", self.exe_entrypoint);
     step.addOption(WasmTarget, "wasm_target", self.wasm_target);
     step.addOption(bool, "wasm_shared", self.wasm_shared);
+    step.addOption(std.SemanticVersion, "gtk_version", self.gtk_version);
+    step.addOption(std.SemanticVersion, "adw_version", self.adw_version);
 
     // Our version. We also add the string version so we don't need
     // to do any allocations at runtime. This has to be long enough to
