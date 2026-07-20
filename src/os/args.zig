@@ -13,6 +13,13 @@ pub fn iterator(args: std.process.Args, allocator: Allocator) ArgIterator.InitEr
     return .initAllocator(args, allocator);
 }
 
+pub fn testingArgs() std.process.Args {
+    return .{ .vector = switch (builtin.os.tag) {
+        .windows => std.unicode.utf8ToUtf16LeStringLiteral("test"),
+        else => &.{"test"},
+    } };
+}
+
 /// Duck-typed to std.process.Args.Iterator
 pub const ArgIterator = switch (builtin.os.tag) {
     .macos => IteratorMacOS,
@@ -124,7 +131,7 @@ test "args" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var iter = try iterator(.{ .vector = &.{"test"} }, alloc);
+    var iter = try iterator(testingArgs(), alloc);
     defer iter.deinit();
     try testing.expect(iter.next().?.len > 0);
 }

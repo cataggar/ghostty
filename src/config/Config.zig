@@ -3980,7 +3980,7 @@ fn loadIterTest(self: *Config, alloc: Allocator, iter: anytype) !void {
 fn finalizeTest(self: *Config) !void {
     var env = try std.testing.environ.createMap(std.testing.allocator);
     defer env.deinit();
-    try self.finalize(std.testing.io, .{ .vector = &.{"test"} }, &env);
+    try self.finalize(std.testing.io, internal_os.args.testingArgs(), &env);
 }
 
 fn tempDirTest() !internal_os.TempDir {
@@ -4013,7 +4013,7 @@ fn changeConditionalStateTest(
     return self.changeConditionalState(
         new,
         std.testing.io,
-        .{ .vector = &.{"test"} },
+        internal_os.args.testingArgs(),
         &env,
     );
 }

@@ -479,10 +479,12 @@ test "fontconfig" {
     // Load freetype
     var lib = try Library.init(alloc);
     defer lib.deinit();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
     // Get a deferred face from fontconfig
     var def = def: {
-        var fc = discovery.Fontconfig.init(lib);
+        var fc = discovery.Fontconfig.init(lib, testing.io, &env);
         defer fc.deinit();
         var it = try fc.discover(alloc, .{ .family = "monospace", .size = 12 });
         defer it.deinit();

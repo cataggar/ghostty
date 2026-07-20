@@ -1183,8 +1183,10 @@ test "fontconfig" {
 
     var lib = try Library.init(alloc);
     defer lib.deinit();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
-    var fc = Fontconfig.init(lib);
+    var fc = Fontconfig.init(lib, testing.io, &env);
     defer fc.deinit();
     var it = try fc.discover(alloc, .{ .family = "monospace", .size = 12 });
     defer it.deinit();
@@ -1198,8 +1200,10 @@ test "fontconfig codepoint" {
 
     var lib = try Library.init(alloc);
     defer lib.deinit();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
-    var fc = Fontconfig.init(lib);
+    var fc = Fontconfig.init(lib, testing.io, &env);
     defer fc.deinit();
     var it = try fc.discover(alloc, .{ .codepoint = 'A', .size = 12 });
     defer it.deinit();
@@ -1352,8 +1356,10 @@ test "windows" {
 
     var lib = try Library.init(alloc);
     defer lib.deinit();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
-    var win = Windows.init(lib);
+    var win = Windows.init(lib, testing.io, &env);
     defer win.deinit();
 
     // Arial ships on every stock Windows install.
