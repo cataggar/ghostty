@@ -14,7 +14,11 @@ pub const Options = struct {};
 
 /// The `version` command is used to display information about Ghostty. Recognized as
 /// either `+version` or `--version`.
-pub fn run(alloc: Allocator, io: std.Io) !u8 {
+pub fn run(
+    alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+) !u8 {
     var buffer: [1024]u8 = undefined;
     const stdout_file: std.Io.File = .stdout();
     var stdout_writer = stdout_file.writer(io, &buffer);
@@ -48,7 +52,7 @@ pub fn run(alloc: Allocator, io: std.Io) !u8 {
             defer if (kernel_info) |k| alloc.free(k);
             try stdout.print("  - kernel version: {s}\n", .{kernel_info orelse "Kernel information unavailable"});
         }
-        try stdout.print("  - desktop env   : {t}\n", .{internal_os.desktopEnvironment()});
+        try stdout.print("  - desktop env   : {t}\n", .{internal_os.desktopEnvironment(env)});
         try stdout.print("  - GTK version   :\n", .{});
         try stdout.print("    build         : {f}\n", .{gtk_version.comptime_version});
         try stdout.print("    runtime       : {f}\n", .{gtk_version.getRuntimeVersion()});

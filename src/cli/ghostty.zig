@@ -154,7 +154,7 @@ pub const Action = enum {
         args: std.process.Args,
     ) !u8 {
         return switch (self) {
-            .version => try version.run(alloc, io),
+            .version => try version.run(alloc, io, env),
             .help => try help.run(alloc, io, env, args),
             .@"list-fonts" => try list_fonts.run(alloc, io, env, args),
             .@"list-keybinds" => try list_keybinds.run(alloc, io, env, args),
