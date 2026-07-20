@@ -372,7 +372,7 @@ test "feed with match spanning page boundary" {
 
 test "compressed history match spanning page boundary remains compressed" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{
+    var t: Terminal = try .testInit(alloc, .{
         .cols = 80,
         .rows = 24,
         .max_scrollback = 10 * 1024 * 1024,

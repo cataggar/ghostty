@@ -67,7 +67,6 @@
 const SelectionGesture = @This();
 
 const std = @import("std");
-const builtin = @import("builtin");
 const assert = std.debug.assert;
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
@@ -80,15 +79,11 @@ const Selection = @import("Selection.zig");
 const Terminal = @import("Terminal.zig");
 const point = @import("point.zig");
 
-const freestanding_wasm = builtin.target.cpu.arch == .wasm32 and
-    builtin.target.os.tag == .freestanding;
-
 /// Monotonic timestamp type for click-repeat detection.
 ///
-/// Freestanding wasm cannot reference std.time.Instant because Zig's stdlib
-/// Instant type depends on POSIX timespec for that target, so represent the C
-/// API nanosecond timestamp directly as a u64 there.
-pub const Time = if (freestanding_wasm) u64 else std.time.Instant;
+/// This represents the nanosecond timestamps provided by the C API and works
+/// on all libghostty-vt targets, including freestanding wasm.
+pub const Time = std.Io.Timestamp;
 
 /// The tracked pin of the initial left click along with the screen
 /// that the pin is part of.
@@ -667,13 +662,7 @@ fn pressRepeat(
 }
 
 fn timeSince(time: Time, prev_time: Time) ?u64 {
-    if (comptime freestanding_wasm) {
-        if (time < prev_time) return null;
-        return time - prev_time;
-    }
-
-    if (time.order(prev_time) == .lt) return null;
-    return time.since(prev_time);
+    return std.math.cast(u64, prev_time.durationTo(time).toNanoseconds());
 }
 
 /// Convert a caller-provided floating-point position to a pixel coordinate.
@@ -947,7 +936,7 @@ fn untrackPin(self: *SelectionGesture, t: *Terminal) void {
     screen.pages.untrackPin(pin);
 }
 
-fn testPress(t: *Terminal, x: u16, y: u32, time: ?std.time.Instant) Press {
+fn testPress(t: *Terminal, x: u16, y: u32, time: ?Time) Press {
     return .{
         .time = time,
         .pin = t.screens.active.pages.pin(.{ .active = .{
@@ -962,14 +951,12 @@ fn testPress(t: *Terminal, x: u16, y: u32, time: ?std.time.Instant) Press {
     };
 }
 
-fn testInstant(ns: u64) std.time.Instant {
-    return switch (builtin.os.tag) {
-        .windows, .uefi, .wasi => .{ .timestamp = ns },
-        else => .{ .timestamp = .{
-            .sec = @intCast(ns / std.time.ns_per_s),
-            .nsec = @intCast(ns % std.time.ns_per_s),
-        } },
-    };
+fn testInstant(ns: u64) Time {
+    return .fromNanoseconds(ns);
+}
+
+fn testNow() Time {
+    return .now(testing.io, .awake);
 }
 
 fn testDrag(t: *Terminal, x: u16, y: u32, xpos: f64, ypos: f64) Drag {
@@ -1430,13 +1417,13 @@ test "SelectionGesture rectangle drag selection logic" {
 }
 
 test "SelectionGesture press records initial click" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     _ = try gesture.press(&t, testPress(&t, 1, 2, time));
 
     try testing.expectEqual(@as(u3, 1), gesture.left_click_count);
@@ -1447,14 +1434,14 @@ test "SelectionGesture press records initial click" {
 }
 
 test "SelectionGesture press returns standard click selections" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 20, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 20, .rows = 5 });
     defer t.deinit(testing.allocator);
     try t.printString("alpha beta\none two");
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     var event = testPress(&t, 1, 0, time);
     event.word_boundary_codepoints = &.{ ' ' };
 
@@ -1474,14 +1461,14 @@ test "SelectionGesture press returns standard click selections" {
 }
 
 test "SelectionGesture press behaviors choose press and drag behavior" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 20, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 20, .rows = 5 });
     defer t.deinit(testing.allocator);
     try t.printString("alpha beta\none two\nthree four");
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     var event = testPress(&t, 1, 0, time);
     event.behaviors = &.{ .cell, .line, .word };
     event.word_boundary_codepoints = &.{ ' ' };
@@ -1506,7 +1493,7 @@ test "SelectionGesture press behaviors choose press and drag behavior" {
 }
 
 test "SelectionGesture output behavior selects and drags semantic output" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 10, .rows = 6 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 10, .rows = 6 });
     defer t.deinit(testing.allocator);
 
     const screen = t.screens.active;
@@ -1522,7 +1509,7 @@ test "SelectionGesture output behavior selects and drags semantic output" {
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    var event = testPress(&t, 1, 0, try std.time.Instant.now());
+    var event = testPress(&t, 1, 0, testNow());
     event.behaviors = &.{ .output, .word, .line };
 
     const press_selection = (try gesture.press(&t, event)).?;
@@ -1542,13 +1529,13 @@ test "SelectionGesture output behavior selects and drags semantic output" {
 }
 
 test "SelectionGesture drag returns selection and records autoscroll" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    var press_event = testPress(&t, 1, 1, try std.time.Instant.now());
+    var press_event = testPress(&t, 1, 1, testNow());
     press_event.xpos = 10;
     _ = try gesture.press(&t, press_event);
 
@@ -1570,13 +1557,13 @@ test "SelectionGesture drag returns selection and records autoscroll" {
 }
 
 test "SelectionGesture drag clamps unrepresentable positions" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    var press_event = testPress(&t, 1, 1, try std.time.Instant.now());
+    var press_event = testPress(&t, 1, 1, testNow());
     press_event.xpos = 10;
     _ = try gesture.press(&t, press_event);
 
@@ -1594,13 +1581,13 @@ test "SelectionGesture drag clamps unrepresentable positions" {
 }
 
 test "SelectionGesture drag saturates overflowing geometry" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    _ = try gesture.press(&t, testPress(&t, 1, 1, try std.time.Instant.now()));
+    _ = try gesture.press(&t, testPress(&t, 1, 1, testNow()));
     var drag_event = testDrag(&t, 1, 1, 10, 50);
     drag_event.geometry.columns = std.math.maxInt(u32);
     drag_event.geometry.cell_width = std.math.maxInt(u32);
@@ -1608,13 +1595,13 @@ test "SelectionGesture drag saturates overflowing geometry" {
 }
 
 test "SelectionGesture drag rejects empty geometry" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    _ = try gesture.press(&t, testPress(&t, 1, 1, try std.time.Instant.now()));
+    _ = try gesture.press(&t, testPress(&t, 1, 1, testNow()));
     var drag_event = testDrag(&t, 1, 1, 10, 50);
     drag_event.geometry.columns = 0;
     drag_event.geometry.cell_width = 0;
@@ -1622,13 +1609,13 @@ test "SelectionGesture drag rejects empty geometry" {
 }
 
 test "SelectionGesture release clears autoscroll and records drag" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    _ = try gesture.press(&t, testPress(&t, 1, 1, try std.time.Instant.now()));
+    _ = try gesture.press(&t, testPress(&t, 1, 1, testNow()));
     try testing.expectEqual(false, gesture.left_click_dragged);
 
     _ = gesture.drag(&t, testDrag(&t, 1, 1, 10, 1));
@@ -1643,13 +1630,13 @@ test "SelectionGesture release clears autoscroll and records drag" {
 }
 
 test "SelectionGesture release with invalidated click records drag" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    _ = try gesture.press(&t, testPress(&t, 1, 1, try std.time.Instant.now()));
+    _ = try gesture.press(&t, testPress(&t, 1, 1, testNow()));
     try testing.expectEqual(false, gesture.left_click_dragged);
 
     _ = try t.screens.getInit(testing.allocator, .alternate, .{
@@ -1664,13 +1651,13 @@ test "SelectionGesture release with invalidated click records drag" {
 }
 
 test "SelectionGesture same-cell threshold selection records drag" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    var press_event = testPress(&t, 1, 1, try std.time.Instant.now());
+    var press_event = testPress(&t, 1, 1, testNow());
     press_event.xpos = 10;
     _ = try gesture.press(&t, press_event);
     try testing.expectEqual(false, gesture.left_click_dragged);
@@ -1685,7 +1672,7 @@ test "SelectionGesture same-cell threshold selection records drag" {
 }
 
 test "SelectionGesture drag without press returns null" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
@@ -1696,13 +1683,13 @@ test "SelectionGesture drag without press returns null" {
 }
 
 test "SelectionGesture drag autoscroll edge boundaries" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    var press_event = testPress(&t, 1, 1, try std.time.Instant.now());
+    var press_event = testPress(&t, 1, 1, testNow());
     press_event.xpos = 10;
     _ = try gesture.press(&t, press_event);
 
@@ -1720,13 +1707,13 @@ test "SelectionGesture drag autoscroll edge boundaries" {
 }
 
 test "SelectionGesture autoscroll tick scrolls and continues drag" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    var press_event = testPress(&t, 1, 1, try std.time.Instant.now());
+    var press_event = testPress(&t, 1, 1, testNow());
     press_event.xpos = 10;
     _ = try gesture.press(&t, press_event);
 
@@ -1744,7 +1731,7 @@ test "SelectionGesture autoscroll tick scrolls and continues drag" {
 }
 
 test "SelectionGesture autoscroll tick resolves drag pin after scrolling" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 3, .max_scrollback = 10 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 3, .max_scrollback = 10 });
     defer t.deinit(testing.allocator);
     try t.printString("1111\n2222\n3333\n4444\n5555");
     t.scrollViewport(.{ .delta = -2 });
@@ -1752,7 +1739,7 @@ test "SelectionGesture autoscroll tick resolves drag pin after scrolling" {
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    var press_event = testPress(&t, 1, 1, try std.time.Instant.now());
+    var press_event = testPress(&t, 1, 1, testNow());
     press_event.xpos = 10;
     _ = try gesture.press(&t, press_event);
 
@@ -1773,13 +1760,13 @@ test "SelectionGesture autoscroll tick resolves drag pin after scrolling" {
 }
 
 test "SelectionGesture autoscroll tick stops with invalidated click" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    var press_event = testPress(&t, 1, 1, try std.time.Instant.now());
+    var press_event = testPress(&t, 1, 1, testNow());
     press_event.xpos = 10;
     _ = try gesture.press(&t, press_event);
 
@@ -1798,14 +1785,14 @@ test "SelectionGesture autoscroll tick stops with invalidated click" {
 }
 
 test "SelectionGesture deep press selects word and consumes drag" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 20, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 20, .rows = 5 });
     defer t.deinit(testing.allocator);
     try t.printString("alpha beta");
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    _ = try gesture.press(&t, testPress(&t, 1, 0, try std.time.Instant.now()));
+    _ = try gesture.press(&t, testPress(&t, 1, 0, testNow()));
     _ = gesture.drag(&t, testDrag(&t, 1, 0, 10, 1));
     try testing.expectEqual(.up, gesture.left_drag_autoscroll);
 
@@ -1819,7 +1806,7 @@ test "SelectionGesture deep press selects word and consumes drag" {
         false,
     ), sel);
     try testing.expectEqual(@as(u3, 0), gesture.left_click_count);
-    try testing.expectEqual(@as(?std.time.Instant, null), gesture.left_click_time);
+    try testing.expectEqual(@as(?Time, null), gesture.left_click_time);
     try testing.expectEqual(true, gesture.left_click_dragged);
     try testing.expectEqual(.none, gesture.left_drag_autoscroll);
     try testing.expect(gesture.left_click_pin == null);
@@ -1830,13 +1817,13 @@ test "SelectionGesture deep press selects word and consumes drag" {
 }
 
 test "SelectionGesture drag with invalidated click returns null" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    var press_event = testPress(&t, 1, 1, try std.time.Instant.now());
+    var press_event = testPress(&t, 1, 1, testNow());
     press_event.xpos = 10;
     _ = try gesture.press(&t, press_event);
 
@@ -1854,14 +1841,14 @@ test "SelectionGesture drag with invalidated click returns null" {
 }
 
 test "SelectionGesture double-click drag selects by word" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 20, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 20, .rows = 5 });
     defer t.deinit(testing.allocator);
     try t.printString("alpha beta gamma");
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     _ = try gesture.press(&t, testPress(&t, 1, 0, time));
     _ = try gesture.press(&t, testPress(&t, 1, 0, time));
 
@@ -1877,14 +1864,14 @@ test "SelectionGesture double-click drag selects by word" {
 }
 
 test "SelectionGesture double-click drag selects by word backwards" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 20, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 20, .rows = 5 });
     defer t.deinit(testing.allocator);
     try t.printString("alpha beta gamma");
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     _ = try gesture.press(&t, testPress(&t, 7, 0, time));
     _ = try gesture.press(&t, testPress(&t, 7, 0, time));
 
@@ -1900,14 +1887,14 @@ test "SelectionGesture double-click drag selects by word backwards" {
 }
 
 test "SelectionGesture double-click drag on empty cell selects nearest word" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 20, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 20, .rows = 5 });
     defer t.deinit(testing.allocator);
     try t.printString("alpha beta");
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     _ = try gesture.press(&t, testPress(&t, 1, 0, time));
     _ = try gesture.press(&t, testPress(&t, 1, 0, time));
 
@@ -1923,14 +1910,14 @@ test "SelectionGesture double-click drag on empty cell selects nearest word" {
 }
 
 test "SelectionGesture triple-click drag selects by line" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 20, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 20, .rows = 5 });
     defer t.deinit(testing.allocator);
     try t.printString("alpha beta\none two\nthree four");
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     _ = try gesture.press(&t, testPress(&t, 1, 0, time));
     _ = try gesture.press(&t, testPress(&t, 1, 0, time));
     _ = try gesture.press(&t, testPress(&t, 1, 0, time));
@@ -1945,14 +1932,14 @@ test "SelectionGesture triple-click drag selects by line" {
 }
 
 test "SelectionGesture triple-click drag selects by line backwards" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 20, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 20, .rows = 5 });
     defer t.deinit(testing.allocator);
     try t.printString("alpha beta\none two\nthree four");
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     _ = try gesture.press(&t, testPress(&t, 2, 2, time));
     _ = try gesture.press(&t, testPress(&t, 2, 2, time));
     _ = try gesture.press(&t, testPress(&t, 2, 2, time));
@@ -1967,13 +1954,13 @@ test "SelectionGesture triple-click drag selects by line backwards" {
 }
 
 test "SelectionGesture repeat increments click count" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     _ = try gesture.press(&t, testPress(&t, 1, 1, time));
     _ = try gesture.press(&t, testPress(&t, 1, 1, time));
 
@@ -1981,54 +1968,54 @@ test "SelectionGesture repeat increments click count" {
 }
 
 test "SelectionGesture repeat clamps at triple click" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     for (0..4) |_| _ = try gesture.press(&t, testPress(&t, 1, 1, time));
 
     try testing.expectEqual(@as(u3, 3), gesture.left_click_count);
 }
 
 test "SelectionGesture null initial time stays single click" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
     _ = try gesture.press(&t, testPress(&t, 1, 1, null));
-    _ = try gesture.press(&t, testPress(&t, 1, 1, try std.time.Instant.now()));
+    _ = try gesture.press(&t, testPress(&t, 1, 1, testNow()));
 
     try testing.expectEqual(@as(u3, 1), gesture.left_click_count);
     try testing.expect(gesture.left_click_time != null);
 }
 
 test "SelectionGesture null repeat time stays single click" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    _ = try gesture.press(&t, testPress(&t, 1, 1, try std.time.Instant.now()));
+    _ = try gesture.press(&t, testPress(&t, 1, 1, testNow()));
     _ = try gesture.press(&t, testPress(&t, 1, 1, null));
 
     try testing.expectEqual(@as(u3, 1), gesture.left_click_count);
-    try testing.expectEqual(@as(?std.time.Instant, null), gesture.left_click_time);
+    try testing.expectEqual(@as(?Time, null), gesture.left_click_time);
 }
 
 test "SelectionGesture distant press resets click count" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     _ = try gesture.press(&t, testPress(&t, 1, 1, time));
     _ = try gesture.press(&t, testPress(&t, 4, 1, time));
 
@@ -2037,25 +2024,25 @@ test "SelectionGesture distant press resets click count" {
 }
 
 test "SelectionGesture expired repeat resets click count" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    var event = testPress(&t, 1, 1, try std.time.Instant.now());
+    var event = testPress(&t, 1, 1, testNow());
     event.repeat_interval = 0;
     _ = try gesture.press(&t, event);
 
-    std.Thread.sleep(std.time.ns_per_ms);
-    event.time = try std.time.Instant.now();
+    std.Io.sleep(testing.io, .fromMilliseconds(1), .awake) catch unreachable;
+    event.time = testNow();
     _ = try gesture.press(&t, event);
 
     try testing.expectEqual(@as(u3, 1), gesture.left_click_count);
 }
 
 test "SelectionGesture backwards repeat time resets click count" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
@@ -2067,17 +2054,17 @@ test "SelectionGesture backwards repeat time resets click count" {
     _ = try gesture.press(&t, testPress(&t, 1, 1, earlier));
 
     try testing.expectEqual(@as(u3, 1), gesture.left_click_count);
-    try testing.expectEqual(.eq, gesture.left_click_time.?.order(earlier));
+    try testing.expectEqual(.eq, std.math.order(gesture.left_click_time.?.nanoseconds, earlier.nanoseconds));
 }
 
 test "SelectionGesture screen switch resets click count" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     defer gesture.deinit(&t);
 
-    const time = try std.time.Instant.now();
+    const time = testNow();
     const primary_tracked = t.screens.active.pages.countTrackedPins();
     _ = try gesture.press(&t, testPress(&t, 1, 1, time));
 
@@ -2094,7 +2081,7 @@ test "SelectionGesture screen switch resets click count" {
 }
 
 test "SelectionGesture removed screen resets without untracking stale pin" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
@@ -2105,23 +2092,23 @@ test "SelectionGesture removed screen resets without untracking stale pin" {
         .rows = t.rows,
     });
     t.screens.switchTo(.alternate);
-    _ = try gesture.press(&t, testPress(&t, 1, 1, try std.time.Instant.now()));
+    _ = try gesture.press(&t, testPress(&t, 1, 1, testNow()));
 
     t.screens.switchTo(.primary);
     t.screens.remove(testing.allocator, .alternate);
-    _ = try gesture.press(&t, testPress(&t, 1, 1, try std.time.Instant.now()));
+    _ = try gesture.press(&t, testPress(&t, 1, 1, testNow()));
 
     try testing.expectEqual(@as(u3, 1), gesture.left_click_count);
     try testing.expectEqual(.primary, gesture.left_click_screen);
 }
 
 test "SelectionGesture deinit untracks pin" {
-    var t = try Terminal.init(testing.allocator, .{ .cols = 5, .rows = 5 });
+    var t = try Terminal.testInit(testing.allocator, .{ .cols = 5, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     var gesture: SelectionGesture = .init;
     const tracked = t.screens.active.pages.countTrackedPins();
-    _ = try gesture.press(&t, testPress(&t, 1, 1, try std.time.Instant.now()));
+    _ = try gesture.press(&t, testPress(&t, 1, 1, testNow()));
     try testing.expectEqual(tracked + 1, t.screens.active.pages.countTrackedPins());
 
     gesture.deinit(&t);

@@ -443,7 +443,7 @@ test "run iterator" {
 
     {
         // Make a screen with some data
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 5, .rows = 3 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 5, .rows = 3 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -467,7 +467,7 @@ test "run iterator" {
 
     // Spaces should be part of a run
     {
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 10, .rows = 3 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 10, .rows = 3 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -490,7 +490,7 @@ test "run iterator" {
 
     {
         // Make a screen with some data
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 5, .rows = 3 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 5, .rows = 3 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -527,7 +527,7 @@ test "run iterator: empty cells with background set" {
 
     {
         // Make a screen with some data
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 5, .rows = 3 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 5, .rows = 3 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -587,7 +587,7 @@ test "shape" {
     buf_idx += try std.unicode.utf8Encode(0x1F3FD, buf[buf_idx..]); // Medium skin tone
 
     // Make a screen with some data
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();
@@ -621,7 +621,7 @@ test "shape inconsolata ligs" {
     defer testdata.deinit();
 
     {
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 5, .rows = 3 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 5, .rows = 3 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -650,7 +650,7 @@ test "shape inconsolata ligs" {
     }
 
     {
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 5, .rows = 3 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 5, .rows = 3 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -687,7 +687,7 @@ test "shape monaspace ligs" {
     defer testdata.deinit();
 
     {
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 5, .rows = 3 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 5, .rows = 3 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -727,7 +727,7 @@ test "shape arabic forced LTR" {
     var testdata = try testShaperWithFont(alloc, .arabic);
     defer testdata.deinit();
 
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 120, .rows = 30 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 120, .rows = 30 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();
@@ -768,7 +768,7 @@ test "shape emoji width" {
     defer testdata.deinit();
 
     {
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 5, .rows = 3 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 5, .rows = 3 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -865,7 +865,7 @@ test "shape variation selector VS15" {
     buf_idx += try std.unicode.utf8Encode(0xFE0E, buf[buf_idx..]); // ZWJ to force text
 
     // Make a screen with some data
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();
@@ -906,7 +906,7 @@ test "shape variation selector VS16" {
     buf_idx += try std.unicode.utf8Encode(0xFE0F, buf[buf_idx..]); // ZWJ to force color
 
     // Make a screen with some data
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();
@@ -1040,7 +1040,7 @@ test "shape Devanagari string" {
     defer testdata.deinit();
 
     // Make a screen with some data
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 30, .rows = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 30, .rows = 3 });
     defer t.deinit(alloc);
 
     // Disable grapheme clustering
@@ -1162,7 +1162,7 @@ test "shape Tibetan characters" {
     buf_idx += try std.unicode.utf8Encode(0x0f00, buf[buf_idx..]); // ༀ
 
     // Make a screen with some data
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 30, .rows = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 30, .rows = 3 });
     defer t.deinit(alloc);
 
     // Enable grapheme clustering
@@ -1350,7 +1350,7 @@ test "shape Chakma vowel sign with ligature (vowel sign renders first)" {
     buf_idx += try std.unicode.utf8Encode(0x1112c, buf[buf_idx..]); // Vowel Sign U
 
     // Make a screen with some data
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 30, .rows = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 30, .rows = 3 });
     defer t.deinit(alloc);
 
     // Enable grapheme clustering
@@ -1425,7 +1425,7 @@ test "shape Bengali ligatures with out of order vowels" {
     buf_idx += try std.unicode.utf8Encode(0x09c7, buf[buf_idx..]); // Vowel sign E
 
     // Make a screen with some data
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 30, .rows = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 30, .rows = 3 });
     defer t.deinit(alloc);
 
     // Enable grapheme clustering
@@ -1482,7 +1482,7 @@ test "shape box glyphs" {
     buf_idx += try std.unicode.utf8Encode(0x2501, buf[buf_idx..]); //
 
     // Make a screen with some data
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();
@@ -1521,7 +1521,7 @@ test "shape selection boundary" {
     defer testdata.deinit();
 
     // Make a screen with some data
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();
@@ -1626,7 +1626,7 @@ test "shape cursor boundary" {
     defer testdata.deinit();
 
     // Make a screen with some data
-    var t = try terminal.Terminal.init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();
@@ -1863,7 +1863,7 @@ test "shape cell attribute change" {
 
     // Plain >= should shape into 1 run
     {
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 10, .rows = 3 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 10, .rows = 3 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -1889,7 +1889,7 @@ test "shape cell attribute change" {
 
     // Bold vs regular should split
     {
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 3, .rows = 10 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 3, .rows = 10 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -1917,7 +1917,7 @@ test "shape cell attribute change" {
 
     // Changing fg color should split
     {
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 3, .rows = 10 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 3, .rows = 10 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -1948,7 +1948,7 @@ test "shape cell attribute change" {
 
     // Changing bg color should not split
     {
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 3, .rows = 10 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 3, .rows = 10 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();
@@ -1979,7 +1979,7 @@ test "shape cell attribute change" {
 
     // Same bg color should not split
     {
-        var t = try terminal.Terminal.init(alloc, .{ .cols = 3, .rows = 10 });
+        var t = try terminal.Terminal.testInit(alloc, .{ .cols = 3, .rows = 10 });
         defer t.deinit(alloc);
 
         var s = t.vtStream();

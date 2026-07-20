@@ -1198,7 +1198,7 @@ test "select next" {
 
 test "select after resize resets stale flattened results" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{
+    var t: Terminal = try .testInit(alloc, .{
         .cols = 10,
         .rows = 3,
         .max_scrollback = std.math.maxInt(usize),
@@ -1525,7 +1525,7 @@ test "select prev wraps when all matches are in history" {
     // has none, so active_len == 0), selecting prev from index 0 must wrap
     // to the last result without underflowing `active_len - 1`.
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{
+    var t: Terminal = try .testInit(alloc, .{
         .cols = 10,
         .rows = 2,
         .max_scrollback = std.math.maxInt(usize),
@@ -1561,7 +1561,7 @@ test "select after all matches disappear drops the selection" {
     // reload/prune empties the results, the selection is dropped, so the next
     // select() hits the "no matches" guard instead of the wrap arithmetic.
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{ .cols = 10, .rows = 2 });
+    var t: Terminal = try .testInit(alloc, .{ .cols = 10, .rows = 2 });
     defer t.deinit(alloc);
 
     var s = t.vtStream();
@@ -1588,7 +1588,7 @@ test "select after all matches disappear drops the selection" {
 
 test "select after partial history erase drops a pruned selection" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{
+    var t: Terminal = try .testInit(alloc, .{
         .cols = 10,
         .rows = 2,
         .max_scrollback = std.math.maxInt(usize),
@@ -1620,7 +1620,7 @@ test "select after partial history erase drops a pruned selection" {
 
 test "select after history compaction ignores replaced results" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{
+    var t: Terminal = try .testInit(alloc, .{
         .cols = 10,
         .rows = 2,
         .max_scrollback = std.math.maxInt(usize),
@@ -1654,7 +1654,7 @@ test "select after history compaction ignores replaced results" {
 
 test "select after partial history page erase ignores shifted results" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{
+    var t: Terminal = try .testInit(alloc, .{
         .cols = 10,
         .rows = 2,
         .max_scrollback = std.math.maxInt(usize),
@@ -1687,7 +1687,7 @@ test "select after partial history page erase ignores shifted results" {
 
 test "reload defers pruning unselected history results" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{
+    var t: Terminal = try .testInit(alloc, .{
         .cols = 10,
         .rows = 2,
         .max_scrollback = std.math.maxInt(usize),
@@ -1721,7 +1721,7 @@ test "reload defers pruning unselected history results" {
 
 test "reload after partial history page erase drops shifted selection first" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{
+    var t: Terminal = try .testInit(alloc, .{
         .cols = 10,
         .rows = 2,
         .max_scrollback = std.math.maxInt(usize),
@@ -1759,7 +1759,7 @@ test "reload after partial history page erase drops shifted selection first" {
 
 test "select after history page split ignores moved results" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{
+    var t: Terminal = try .testInit(alloc, .{
         .cols = 10,
         .rows = 2,
         .max_scrollback = std.math.maxInt(usize),

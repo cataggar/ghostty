@@ -22,6 +22,7 @@
 //!
 //!     GHOSTTY_LZ4_SLOW=1 zig build test -Dtest-filter="lz4 differential"
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 const Allocator = std.mem.Allocator;
 const lz4 = @import("lz4.zig");
@@ -485,7 +486,14 @@ test "lz4 differential light" {
 test "lz4 differential exhaustive" {
     // Slow. Enable explicitly, ideally together with a test filter:
     //   GHOSTTY_LZ4_SLOW=1 zig build test -Dtest-filter="lz4 differential"
-    if (!std.process.hasEnvVarConstant("GHOSTTY_LZ4_SLOW"))
+    const environ: std.process.Environ = switch (comptime builtin.os.tag) {
+        .windows => .{ .block = .global },
+        .wasi, .freestanding, .other => return error.SkipZigTest,
+        else => .{ .block = .{
+            .slice = std.mem.sliceTo(std.c.environ, null),
+        } },
+    };
+    if (!environ.containsConstant("GHOSTTY_LZ4_SLOW"))
         return error.SkipZigTest;
 
     // Several independent seeds; the suite is deterministic per seed.

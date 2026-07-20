@@ -589,7 +589,7 @@ test "kittygfx retransmit same id gets fresh image generation" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
     const storage = &t.screens.active.kitty_images;
 
@@ -628,7 +628,7 @@ test "kittygfx delete then retransmit same id gets fresh generation" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try Terminal.testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
     const storage = &t.screens.active.kitty_images;
 

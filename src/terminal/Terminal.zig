@@ -654,9 +654,9 @@ fn printSliceFill(
         "hyperlink",
     }, 4);
 
-    // The bit offset of the codepoint content within a Cell, used to
-    // construct cell values from a template without field assignments.
-    const cp_shift = @bitOffsetOf(Cell, "content");
+    // The bit offset of the codepoint data within a Cell, used to construct
+    // cell values from a template without field assignments.
+    const cp_shift = @bitOffsetOf(Cell, "content") + 3;
 
     // Determine the run of codepoints in the same width class that we
     // can batch. For codepoints after the first, the previous codepoint
@@ -741,7 +741,7 @@ fn printSliceFill(
         const style_id = cursor.style_id;
         const template: Cell = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = 0 },
+            .content = .{ .codepoint = .{ .data = 0 } },
             .style_id = style_id,
             .wide = .narrow,
             .protected = cursor.protected,
@@ -1036,9 +1036,9 @@ pub fn print(self: *Terminal, c: u21) !void {
         // necessarily a grapheme break.
         if (prev.cell.codepoint() == 0) break :grapheme;
 
+        var previous_codepoint = prev.cell.content.codepoint.data;
         const grapheme_break = brk: {
             var state: uucode.grapheme.BreakState = .default;
-            var previous_codepoint = prev.cell.content.codepoint.data;
             if (prev.cell.hasGrapheme()) {
                 const cps = self.screens.active.cursor.page_pin.node.page().lookupGrapheme(prev.cell).?;
                 for (cps) |cp2| {
@@ -3821,7 +3821,7 @@ pub fn resize(
 
 test "Terminal: resize resets synchronized output" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     t.modes.set(.synchronized_output, true);
@@ -3831,7 +3831,7 @@ test "Terminal: resize resets synchronized output" {
 
 test "Terminal: resize rejects zero dimensions before mutation" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     t.width_px = 100;
@@ -3858,7 +3858,7 @@ test "Terminal: resize rejects zero dimensions before mutation" {
 
 test "Terminal: resize preserves pixel dimensions when omitted" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     t.width_px = 90;
@@ -3871,7 +3871,7 @@ test "Terminal: resize preserves pixel dimensions when omitted" {
 
 test "Terminal: resize updates pixels without changing cell dimensions" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     try t.resize(alloc, .{
@@ -3886,7 +3886,7 @@ test "Terminal: resize updates pixels without changing cell dimensions" {
 
 test "Terminal: resize pixel dimensions saturate" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 2, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 2, .rows = 3 });
     defer t.deinit(alloc);
 
     try t.resize(alloc, .{
@@ -3905,7 +3905,7 @@ test "Terminal: resize pixel dimensions saturate" {
 test "Terminal: resize preserves tabstops on allocation failure" {
     var failing = testing.FailingAllocator.init(testing.allocator, .{});
     const alloc = failing.allocator();
-    var t = try init(alloc, .{ .cols = 10, .rows = 1 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 1 });
     defer t.deinit(alloc);
 
     failing.fail_index = failing.alloc_index;
@@ -3929,7 +3929,7 @@ test "Terminal: resize failure paths preserve consistent state" {
         const tw = resize_tw;
         defer tw.end(.reset) catch unreachable;
 
-        var t = try init(alloc, .{ .cols = 10, .rows = 3 });
+        var t = try testInit(alloc, .{ .cols = 10, .rows = 3 });
         defer t.deinit(alloc);
 
         try t.printString("primary");
@@ -4059,7 +4059,7 @@ test "Terminal: alternate resize failure replaces active alternate screen" {
     const tw = resize_tw;
     defer tw.end(.reset) catch unreachable;
 
-    var t = try init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     _ = try t.switchScreen(.alternate);
@@ -4086,7 +4086,7 @@ test "Terminal: alternate resize replacement failure falls back to primary" {
     const tw = resize_tw;
     defer tw.end(.reset) catch unreachable;
 
-    var t = try init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     _ = try t.switchScreen(.alternate);
@@ -4128,7 +4128,7 @@ pub fn getPwd(self: *const Terminal) ?[:0]const u8 {
 test "Terminal: setPwd preserves a sentinel on allocation failure" {
     var failing = testing.FailingAllocator.init(testing.allocator, .{});
     const alloc = failing.allocator();
-    var t = try init(alloc, .{ .cols = 5, .rows = 1 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 1 });
     defer t.deinit(alloc);
 
     try t.pwd.ensureTotalCapacityPrecise(alloc, 3);
@@ -4138,7 +4138,7 @@ test "Terminal: setPwd preserves a sentinel on allocation failure" {
 }
 
 test "Terminal: setPwd accepts its current value" {
-    var t = try init(testing.allocator, .{ .cols = 5, .rows = 1 });
+    var t = try testInit(testing.allocator, .{ .cols = 5, .rows = 1 });
     defer t.deinit(testing.allocator);
 
     try t.setPwd("file:///tmp");
@@ -4172,7 +4172,7 @@ pub fn getTitle(self: *const Terminal) ?[:0]const u8 {
 test "Terminal: setTitle preserves a sentinel on allocation failure" {
     var failing = testing.FailingAllocator.init(testing.allocator, .{});
     const alloc = failing.allocator();
-    var t = try init(alloc, .{ .cols = 5, .rows = 1 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 1 });
     defer t.deinit(alloc);
 
     try t.title.ensureTotalCapacityPrecise(alloc, 5);
@@ -4182,7 +4182,7 @@ test "Terminal: setTitle preserves a sentinel on allocation failure" {
 }
 
 test "Terminal: setTitle accepts its current value" {
-    var t = try init(testing.allocator, .{ .cols = 5, .rows = 1 });
+    var t = try testInit(testing.allocator, .{ .cols = 5, .rows = 1 });
     defer t.deinit(testing.allocator);
 
     try t.setTitle("Ghostty");
@@ -4898,7 +4898,7 @@ test "Terminal: print multicodepoint grapheme, disabled mode 2027" {
 }
 
 test "Terminal: enabling grapheme mode handles stored breaks" {
-    var t = try init(testing.allocator, .{ .cols = 5, .rows = 1 });
+    var t = try testInit(testing.allocator, .{ .cols = 5, .rows = 1 });
     defer t.deinit(testing.allocator);
 
     t.modes.set(.grapheme_cluster, false);
@@ -4918,7 +4918,7 @@ test "Terminal: enabling grapheme mode handles stored breaks" {
 // cluster or string end. This keeps the streaming printer's cursor advance
 // in sync with the buffered measurement API for representative clusters.
 fn expectGraphemeWidthParity(cps: []const u21) !void {
-    var t = try init(testing.allocator, .{ .cols = 80, .rows = 5 });
+    var t = try testInit(testing.allocator, .{ .cols = 80, .rows = 5 });
     defer t.deinit(testing.allocator);
 
     t.modes.set(.grapheme_cluster, true);
@@ -9685,7 +9685,7 @@ test "Terminal: index bottom of scroll region blank line preserves SGR" {
 
 test "Terminal: index bottom of scroll region with top margin and background SGR" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.printString("1\n2\n3\n4\n5");
@@ -9725,7 +9725,7 @@ test "Terminal: index bottom of scroll region with top margin and background SGR
 
 test "Terminal: index bottom of alt screen full region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 3, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 3, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.switchScreenMode(.@"1049", true);
@@ -9758,7 +9758,7 @@ test "Terminal: index bottom of alt screen full region" {
 
 test "Terminal: index bottom of alt screen top region" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5 });
     defer t.deinit(alloc);
 
     try t.switchScreenMode(.@"1049", true);
@@ -9785,7 +9785,7 @@ test "Terminal: index bottom of alt screen top region" {
 
 test "Terminal: scrollUp top region no scrollback" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
+    var t = try testInit(alloc, .{ .rows = 5, .cols = 5, .max_scrollback = 0 });
     defer t.deinit(alloc);
 
     try t.printString("A\nB\nC\nD\nE");
@@ -12978,7 +12978,7 @@ test "Terminal: printRepeat no previous character" {
 
 test "Terminal: printSlice simple ascii" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 3 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 3 });
     defer t.deinit(alloc);
 
     try t.printSlice(&.{ 'h', 'e', 'l', 'l', 'o' });
@@ -12995,7 +12995,7 @@ test "Terminal: printSlice simple ascii" {
 
 test "Terminal: printSlice wraps and scrolls" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 2 });
     defer t.deinit(alloc);
 
     // 12 chars: fills row 1 (5), row 2 (5), wraps+scrolls, 2 more.
@@ -13012,7 +13012,7 @@ test "Terminal: printSlice wraps and scrolls" {
 
 test "Terminal: printSlice pending wrap state" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 5, .rows = 2 });
+    var t = try testInit(alloc, .{ .cols = 5, .rows = 2 });
     defer t.deinit(alloc);
 
     try t.printSlice(&.{ 'a', 'b', 'c', 'd', 'e' });
@@ -13037,12 +13037,12 @@ fn testPrintSliceDifferential(
     cols: size.CellCountInt,
     rows: size.CellCountInt,
 ) !void {
-    var t1 = try init(alloc, .{
+    var t1 = try testInit(alloc, .{
         .cols = cols,
         .rows = rows,
     });
     defer t1.deinit(alloc);
-    var t2 = try init(alloc, .{
+    var t2 = try testInit(alloc, .{
         .cols = cols,
         .rows = rows,
     });
@@ -13051,11 +13051,12 @@ fn testPrintSliceDifferential(
     // Alphabet of interesting codepoints: ascii, latin-1, combining
     // marks, CJK (wide), emoji (wide), ZWJ, variation selectors.
     const alphabet = [_]u21{
-        'a',     'b',     'Z',     '0',    ' ',    0x10,    0x1F,   0x7F,
-        'é',    0xFF,    0x301,   0x4E00, 0x4E01, 0x1F600, 0x200D, 0xFE0F,
-        'x',     'y',     0x1F9D1, 0x0308, 0xAD,   0x3042,  0xAC00, 'q',
-        'r',     's',     't',     'u',    'v',    'w',     '1',    '2',
-        0x1F1E6, 0x1F1E7, 0x1100,  0x1161, 0x11A8, 0x200C,  0x0430, 0x03B1,
+        'a',     'b',     'Z',    '0',    ' ',     0x10,   0x1F,   0x7F,
+        'é',
+        0xFF,    0x301,   0x4E00, 0x4E01, 0x1F600, 0x200D, 0xFE0F, 'x',
+        'y',     0x1F9D1, 0x0308, 0xAD,   0x3042,  0xAC00, 'q',    'r',
+        's',     't',     'u',    'v',    'w',     '1',    '2',    0x1F1E6,
+        0x1F1E7, 0x1100,  0x1161, 0x11A8, 0x200C,  0x0430, 0x03B1,
     };
 
     var cps_buf: [64]u32 = undefined;
@@ -14064,7 +14065,7 @@ test "Terminal: OSC133A click_events=1 sets click to click_events" {
 
 test "Terminal: OSC133A click_events=2 sets click to click_events (relative)" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 10, .rows = 5 });
+    var t = try testInit(alloc, .{ .cols = 10, .rows = 5 });
     defer t.deinit(alloc);
 
     // Verify default state is none
@@ -14211,7 +14212,7 @@ test "Terminal: cursorIsAtPrompt alternate screen" {
 }
 
 test "Terminal: cursor defaults update current default cursor" {
-    var t = try init(testing.allocator, .{
+    var t = try testInit(testing.allocator, .{
         .cols = 10,
         .rows = 10,
         .default_cursor_style = .bar,
@@ -14238,7 +14239,7 @@ test "Terminal: cursor defaults update current default cursor" {
 }
 
 test "Terminal: cursor defaults do not override explicit cursor" {
-    var t = try init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t = try testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     t.setCursorStyle(.blinking_bar);
@@ -14926,7 +14927,7 @@ test "Terminal: deleteLines wide char at right margin with full clear" {
 
 test "Terminal: glyph APC stores session glossary entries" {
     const alloc = testing.allocator;
-    var t = try init(alloc, .{ .cols = 80, .rows = 24 });
+    var t = try testInit(alloc, .{ .cols = 80, .rows = 24 });
     defer t.deinit(alloc);
 
     var register_parser = glyph.CommandParser.init(alloc, 1024 * 1024);

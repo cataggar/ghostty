@@ -1180,7 +1180,7 @@ const RowBuilder = struct {
                             .b = page_cell.content.color_rgb.b,
                         } } },
                         .bg_color_palette => .{ .bg_color = .{
-                            .palette = page_cell.content.color_palette,
+                            .palette = page_cell.content.color_palette.data,
                         } },
                         else => unreachable,
                     };
@@ -1420,7 +1420,7 @@ test "incremental updates match full rebuild" {
     var prng = std.Random.DefaultPrng.init(0xB0BA_CAFE);
     const rand = prng.random();
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 20,
         .rows = 8,
         .max_scrollback = 500,
@@ -1552,7 +1552,7 @@ test "begin and end update" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 3,
     });
@@ -1600,7 +1600,7 @@ test "bg color cells" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 3,
     });
@@ -2068,7 +2068,7 @@ test "flattened highlights require matching page serial" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var t = try Terminal.init(alloc, .{
+    var t = try Terminal.testInit(alloc, .{
         .cols = 10,
         .rows = 3,
     });

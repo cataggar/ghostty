@@ -247,7 +247,10 @@ pub const Glyf = struct {
         /// lifetime of the data that is used to initialize it.
         pub fn init(data: []const u8) error{EndOfStream}!Entry {
             var reader: std.Io.Reader = .fixed(data);
-            const header = try reader.takeStruct(Header, .big);
+            const header = reader.takeStruct(Header, .big) catch |err| switch (err) {
+                error.EndOfStream => return error.EndOfStream,
+                error.ReadFailed => unreachable,
+            };
             return .{ .header = header, .data = data[reader.seek..] };
         }
 
@@ -290,6 +293,31 @@ pub const Glyf = struct {
             CoordinateOverflow,
         };
 
+        fn takeInt(
+            reader: *std.Io.Reader,
+            comptime T: type,
+            endian: std.builtin.Endian,
+        ) error{EndOfStream}!T {
+            return reader.takeInt(T, endian) catch |err| switch (err) {
+                error.EndOfStream => error.EndOfStream,
+                error.ReadFailed => unreachable,
+            };
+        }
+
+        fn takeByte(reader: *std.Io.Reader) error{EndOfStream}!u8 {
+            return reader.takeByte() catch |err| switch (err) {
+                error.EndOfStream => error.EndOfStream,
+                error.ReadFailed => unreachable,
+            };
+        }
+
+        fn discardAll(reader: *std.Io.Reader, n: usize) error{EndOfStream}!void {
+            return reader.discardAll(n) catch |err| switch (err) {
+                error.EndOfStream => error.EndOfStream,
+                error.ReadFailed => unreachable,
+            };
+        }
+
         /// Determines the size (in bytes) of this entry.
         ///
         /// If the entry is valid, returns the number of bytes
@@ -327,7 +355,7 @@ pub const Glyf = struct {
                     // of each contour, in increasing numeric order.
                     var max_point_index: isize = -1;
                     for (0..num_contours) |_| {
-                        const index = try reader.takeInt(sfnt.uint16, .big);
+                        const index = try takeInt(&reader, sfnt.uint16, .big);
                         // The endpoints are supposed to monotonically increase.
                         if (index <= max_point_index) return error.EndPointsOutOfOrder;
                         max_point_index = index;
@@ -340,7 +368,7 @@ pub const Glyf = struct {
                     // If instructionLength is zero, no instructions
                     // are present for this glyph, and this field is
                     // followed directly by the flags field.
-                    const instructions_length = try reader.takeInt(sfnt.uint16, .big);
+                    const instructions_length = try takeInt(&reader, sfnt.uint16, .big);
 
                     // Since we don't have code that validates instruction
                     // byte code, we just reject all glyphs that contain any.
@@ -371,7 +399,7 @@ pub const Glyf = struct {
                     var x_coords_len: usize = 0;
                     var y_coords_len: usize = 0;
                     while (i <= max_point_index) : (i += 1) {
-                        const flag: SimpleFlags = @bitCast(try reader.takeByte());
+                        const flag: SimpleFlags = @bitCast(try takeByte(&reader));
 
                         // Determine how many bytes the x and y coordinates will
                         // be represented with in the corresponding arrays, add
@@ -391,7 +419,7 @@ pub const Glyf = struct {
                             // that count, and the x_coords_len and y_coords_len
                             // must be increased by the correct number of bytes
                             // as well.
-                            const repeat_count: usize = try reader.takeByte();
+                            const repeat_count: usize = try takeByte(&reader);
                             i += repeat_count;
                             x_coords_len += repeat_count * flag.xBytes();
                             y_coords_len += repeat_count * flag.yBytes();
@@ -413,7 +441,7 @@ pub const Glyf = struct {
                     // We determined the length of this section (in bytes)
                     // above while processing the flags, so that we can just
                     // skip that many bytes to validate this field.
-                    try reader.discardAll(x_coords_len);
+                    try discardAll(&reader, x_coords_len);
 
                     // uint8 or int16 yCoordinates[variable]
                     //
@@ -424,7 +452,7 @@ pub const Glyf = struct {
                     // We determined the length of this section (in bytes)
                     // above while processing the flags, so that we can just
                     // skip that many bytes to validate this field.
-                    try reader.discardAll(y_coords_len);
+                    try discardAll(&reader, y_coords_len);
                 },
 
                 .composite => {
@@ -453,8 +481,7 @@ pub const Glyf = struct {
                 .composite => return error.CompositeNotSupported,
             }
 
-            var fbs = std.io.fixedBufferStream(self.data);
-            const reader = fbs.reader();
+            var reader: std.Io.Reader = .fixed(self.data);
 
             // A zero-contour glyph may be header-only. See size for the
             // reason for the hardcoded 2 here.
@@ -471,7 +498,7 @@ pub const Glyf = struct {
             // If we have no contours, then the only possible remaining
             // field is instructionLength. Instructions are not supported.
             if (num_contours == 0) {
-                const instructions_length = try reader.readInt(sfnt.uint16, .big);
+                const instructions_length = try takeInt(&reader, sfnt.uint16, .big);
                 if (instructions_length > 0) return error.InstructionsNotSupported;
                 return .{ .points = &.{}, .contours = end_points };
             }
@@ -486,7 +513,7 @@ pub const Glyf = struct {
                 // with the valid index. The final endpoint tells us our point
                 // count, since endpoints are stored as inclusive point indices.
                 for (0..end_points.len) |i| {
-                    const index = try reader.readInt(sfnt.uint16, .big);
+                    const index = try takeInt(&reader, sfnt.uint16, .big);
                     if (index <= prev_end_point) return error.EndPointsOutOfOrder;
                     prev_end_point = index;
                     end_points[i] = index;
@@ -497,7 +524,7 @@ pub const Glyf = struct {
             };
 
             // Instructions are not supported.
-            const instructions_length = try reader.readInt(sfnt.uint16, .big);
+            const instructions_length = try takeInt(&reader, sfnt.uint16, .big);
             if (instructions_length > 0) return error.InstructionsNotSupported;
 
             // Allocate our points right away even though the next entries
@@ -520,12 +547,12 @@ pub const Glyf = struct {
             {
                 var point_i: usize = 0;
                 while (point_i < point_count) {
-                    const flag: SimpleFlags = @bitCast(try reader.readByte());
+                    const flag: SimpleFlags = @bitCast(try takeByte(&reader));
                     flags[point_i] = flag;
                     point_i += 1;
 
                     if (flag.repeat) {
-                        const repeat_count: usize = try reader.readByte();
+                        const repeat_count: usize = try takeByte(&reader);
                         if (point_i + repeat_count > point_count) return error.TooManyPoints;
 
                         for (0..repeat_count) |_| {
@@ -541,11 +568,11 @@ pub const Glyf = struct {
             for (flags, points) |flag, *point| {
                 const dx: i32 = if (flag.x_short) short: {
                     break :short if (flag.x_repeat_or_sign)
-                        @as(i32, try reader.readByte())
+                        @as(i32, try takeByte(&reader))
                     else
-                        -@as(i32, try reader.readByte());
+                        -@as(i32, try takeByte(&reader));
                 } else if (!flag.x_repeat_or_sign)
-                    @as(i32, try reader.readInt(sfnt.int16, .big))
+                    @as(i32, try takeInt(&reader, sfnt.int16, .big))
                 else
                     0;
 
@@ -562,11 +589,11 @@ pub const Glyf = struct {
             for (flags, points) |flag, *point| {
                 const dy: i32 = if (flag.y_short) short: {
                     break :short if (flag.y_repeat_or_sign)
-                        @as(i32, try reader.readByte())
+                        @as(i32, try takeByte(&reader))
                     else
-                        -@as(i32, try reader.readByte());
+                        -@as(i32, try takeByte(&reader));
                 } else if (!flag.y_repeat_or_sign)
-                    @as(i32, try reader.readInt(sfnt.int16, .big))
+                    @as(i32, try takeInt(&reader, sfnt.int16, .big))
                 else
                     0;
 

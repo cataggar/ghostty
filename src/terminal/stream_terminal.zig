@@ -183,11 +183,10 @@ pub const Handler = struct {
         self: *Handler,
         comptime action: Action.Tag,
         value: Action.Value(action),
-    ) !void {
+    ) void {
         self.vtFallible(action, value) catch |err| {
             self.semantic_failure = true;
             log.warn("error handling VT action action={} err={}", .{ action, err });
-            return err;
         };
     }
 
@@ -682,7 +681,7 @@ pub const Handler = struct {
         requests: *const osc_color.List,
         terminator: osc.Terminator,
     ) !void {
-        if (requests.count() == 0) return;
+        if (requests.items.len == 0) return;
 
         var stack = std.heap.stackFallback(1024, self.terminal.gpa());
         const alloc = stack.get();
@@ -690,8 +689,7 @@ pub const Handler = struct {
         defer response.deinit();
         const writer = &response.writer;
 
-        var it = requests.constIterator(0);
-        while (it.next()) |req| {
+        for (requests.items) |*req| {
             switch (req.*) {
                 .set => |set| {
                     switch (set.target) {
@@ -906,7 +904,7 @@ pub const Handler = struct {
 };
 
 test "resize clears synchronized output on unchanged cell dimensions" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .testInit(testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     var s: Stream = .initAlloc(testing.allocator, .init(&t));
@@ -925,7 +923,7 @@ test "resize clears synchronized output on unchanged cell dimensions" {
 }
 
 test "resize reports mode 2048 geometry" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .testInit(testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -967,7 +965,7 @@ test "resize suppresses mode 2048 reports" {
     };
     S.calls = 0;
 
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .testInit(testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
     var handler: Handler = .init(&t);
     handler.effects.write_pty = &S.writePty;
@@ -988,7 +986,7 @@ test "resize suppresses mode 2048 reports" {
     try testing.expectEqual(@as(usize, 0), S.calls);
 
     // A read-only stream has no write effect and remains successful.
-    var readonly_terminal: Terminal = try .init(
+    var readonly_terminal: Terminal = try .testInit(
         testing.allocator,
         .{ .cols = 80, .rows = 24 },
     );
@@ -1010,7 +1008,7 @@ test "resize suppresses mode 2048 reports" {
 test "resize failure preserves terminal state and does not write" {
     var failing = testing.FailingAllocator.init(testing.allocator, .{});
     const alloc = failing.allocator();
-    var t: Terminal = try .init(alloc, .{ .cols = 10, .rows = 1 });
+    var t: Terminal = try .testInit(alloc, .{ .cols = 10, .rows = 1 });
     defer t.deinit(alloc);
 
     const S = struct {
@@ -1044,12 +1042,12 @@ test "resize failure preserves terminal state and does not write" {
 }
 
 test "resize effects do not change canonical terminal state" {
-    var authoritative: Terminal = try .init(
+    var authoritative: Terminal = try .testInit(
         testing.allocator,
         .{ .cols = 10, .rows = 5 },
     );
     defer authoritative.deinit(testing.allocator);
-    var readonly: Terminal = try .init(
+    var readonly: Terminal = try .testInit(
         testing.allocator,
         .{ .cols = 10, .rows = 5 },
     );
@@ -1108,10 +1106,32 @@ test "basic print" {
     try testing.expectEqualStrings("Hello", str);
 }
 
+test "large newline output grows PageList with its general allocator" {
+    var general: std.heap.DebugAllocator(.{}) = .init;
+    defer std.debug.assert(general.deinit() == .ok);
+    const alloc = general.allocator();
+
+    var t: Terminal = try .testInit(alloc, .{
+        .cols = 80,
+        .rows = 24,
+        .max_scrollback = std.math.maxInt(usize),
+    });
+    defer t.deinit(alloc);
+
+    var s: Stream = .initAlloc(alloc, .init(&t));
+    defer s.deinit();
+
+    const newlines: [4096]u8 = @splat('\n');
+    s.nextSlice(&newlines);
+
+    // Four nodes are preheated. A fifth forces the node pool to grow.
+    try testing.expect(t.screens.active.pages.totalPages() > 4);
+}
+
 test "semantic failure is sticky while processing continues" {
     var failing = testing.FailingAllocator.init(testing.allocator, .{});
     const alloc = failing.allocator();
-    var t: Terminal = try .init(alloc, .{ .cols = 10, .rows = 2 });
+    var t: Terminal = try .testInit(alloc, .{ .cols = 10, .rows = 2 });
     defer t.deinit(alloc);
 
     var s: Stream = .initAlloc(alloc, .init(&t));
@@ -1358,7 +1378,7 @@ test "full reset" {
 }
 
 test "glyph protocol APC with write_pty callback" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .testInit(testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -1522,7 +1542,7 @@ test "OSC 12 set and reset cursor color" {
 }
 
 test "OSC color query responses" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -1673,7 +1693,7 @@ test "kitty color protocol reset foreground" {
 }
 
 test "kitty color protocol query responses" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .testInit(testing.allocator, .{ .cols = 10, .rows = 10 });
     defer t.deinit(testing.allocator);
 
     const S = struct {
@@ -1901,7 +1921,7 @@ test "bell effect callback" {
 }
 
 test "clipboard_write effect callback" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .testInit(testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     // A null callback (the default readonly effects) silently ignores writes.
@@ -2019,7 +2039,7 @@ test "clipboard_write effect callback" {
 }
 
 test "clipboard_write allocation failure is ignored" {
-    var t: Terminal = try .init(testing.allocator, .{ .cols = 80, .rows = 24 });
+    var t: Terminal = try .testInit(testing.allocator, .{ .cols = 80, .rows = 24 });
     defer t.deinit(testing.allocator);
 
     const S = struct {

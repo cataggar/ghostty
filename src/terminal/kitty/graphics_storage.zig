@@ -1456,7 +1456,7 @@ test "storage: aspect ratio calculation when only columns or rows specified" {
 test "storage: generation stamps on image add and replace" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
 
     var s: ImageStorage = .{};
@@ -1493,7 +1493,7 @@ test "storage: generation stamps on image add and replace" {
 test "storage: generation bumps on placement and delete" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
 
     var s: ImageStorage = .{};
@@ -1517,7 +1517,7 @@ test "storage: generation bumps on placement and delete" {
 test "storage: generation bumps when setLimit evicts or disables" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
 
     var s: ImageStorage = .{};
@@ -1545,7 +1545,7 @@ test "storage: generation bumps when setLimit evicts or disables" {
 test "storage: imageByNumber returns most recently transmitted" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
 
     var s: ImageStorage = .{};
@@ -1573,7 +1573,7 @@ test "storage: nextGeneration is unique and monotonic" {
 test "storage: no-op delete does not mark a mutation" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var t = try terminal.Terminal.init(alloc, .{ .rows = 3, .cols = 3 });
+    var t = try terminal.Terminal.testInit(alloc, .{ .rows = 3, .cols = 3 });
     defer t.deinit(alloc);
 
     var s: ImageStorage = .{};

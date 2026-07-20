@@ -355,9 +355,9 @@ pub const MemoryPool = struct {
     }
 
     pub fn reset(self: *MemoryPool, mode: ResetMode) void {
-        _ = self.pages.reset(mode);
-        _ = self.nodes.reset(mode);
-        _ = self.pins.reset(mode);
+        _ = self.pages.reset(self.page_alloc, mode);
+        _ = self.nodes.reset(self.alloc, mode);
+        _ = self.pins.reset(self.alloc, mode);
     }
 };
 
@@ -648,7 +648,7 @@ pub fn init(
 
     // We always track our viewport pin to ensure this is never an allocation
     try tw.check(.viewport_pin);
-    const viewport_pin = try pool.pins.create(pool.page_alloc);
+    const viewport_pin = try pool.pins.create(pool.alloc);
     viewport_pin.* = .{ .node = page_list.first.? };
     var tracked_pins: PinSet = .{};
     errdefer tracked_pins.deinit(pool.alloc);
@@ -3892,13 +3892,12 @@ const CompressionScratch = union(enum) {
         assert(required <= raw_len);
 
         if (required <= std_size) {
-            const memory = try pool.pages.create();
+            const memory = try pool.pages.create(pool.page_alloc);
             terminal_mem.recommit(memory);
             return .{ .pooled = memory };
         }
 
-        const page_alloc = pool.pages.arena.child_allocator;
-        return .{ .allocated = try page_alloc.alignedAlloc(
+        return .{ .allocated = try pool.page_alloc.alignedAlloc(
             u8,
             .fromByteUnits(std.heap.page_size_min),
             raw_len,
@@ -3919,8 +3918,7 @@ const CompressionScratch = union(enum) {
                 pool.pages.destroy(memory);
             },
             .allocated => |memory| {
-                const page_alloc = pool.pages.arena.child_allocator;
-                page_alloc.free(memory);
+                pool.page_alloc.free(memory);
             },
         }
     }
@@ -7481,7 +7479,7 @@ test "PageList preserved page keeps compressed storage" {
     try testing.expect(page_.dirty);
     try testing.expectEqual(
         @as(u21, 'X'),
-        page_.getRowAndCell(3, 2).cell.content.codepoint,
+        page_.getRowAndCell(3, 2).cell.content.codepoint.data,
     );
 
     // The node still owns the same compressed representation, and neither its
@@ -7654,7 +7652,7 @@ test "PageList lazily restores compressed history made active by resize" {
     _ = s.compress(.full);
     try testing.expect(first.isCompressed());
     const cell = s.getCell(.{ .active = .{} }).?;
-    try testing.expectEqual(@as(u21, 'X'), cell.cell.content.codepoint);
+    try testing.expectEqual(@as(u21, 'X'), cell.cell.content.codepoint.data);
     try testing.expect(!first.isCompressed());
     try testing.expectEqual(memory_ptr, first.page().memory.ptr);
     try testing.expectEqual(memory_len, first.page().memory.len);
@@ -7778,7 +7776,7 @@ test "PageList compression restores through page access" {
     const page_pin: Pin = .{ .node = node, .x = 3, .y = 2 };
     try testing.expectEqual(
         @as(u21, 'X'),
-        page_pin.rowAndCell().cell.content.codepoint,
+        page_pin.rowAndCell().cell.content.codepoint.data,
     );
     try testing.expect(!node.isCompressed());
     try testing.expectEqual(memory_ptr, node.page().memory.ptr);
@@ -7803,7 +7801,7 @@ test "PageList compression restores through page access" {
     try testing.expect(!node.isCompressed());
     try testing.expectEqual(
         @as(u21, 'X'),
-        cloned.pages.first.?.page().getRowAndCell(3, 2).cell.content.codepoint,
+        cloned.pages.first.?.page().getRowAndCell(3, 2).cell.content.codepoint.data,
     );
 }
 
@@ -13444,7 +13442,7 @@ test "PageList resize less rows and cols cursor near top pushed to scrollback" {
             const cells = p.node.page().getCells(rac.row);
             for (cells, 0..) |*cell, x| cell.* = .{
                 .content_tag = .codepoint,
-                .content = .{ .codepoint = @intCast('A' + (x % 26)) },
+                .content = .{ .codepoint = .{ .data = @intCast('A' + (x % 26)) } },
             };
         }
     }
@@ -16738,7 +16736,7 @@ test "PageList compact then clone" {
         const rac = node.page().getRowAndCell(1, 2);
         rac.cell.* = .{
             .content_tag = .codepoint,
-            .content = .{ .codepoint = 'X' },
+            .content = .{ .codepoint = .{ .data = 'X' } },
         };
     }
 
@@ -16757,7 +16755,7 @@ test "PageList compact then clone" {
     {
         const node2 = s2.pages.first.?;
         const rac = node2.page().getRowAndCell(1, 2);
-        try testing.expectEqual(@as(u21, 'X'), rac.cell.content.codepoint);
+        try testing.expectEqual(@as(u21, 'X'), rac.cell.content.codepoint.data);
     }
 }
 

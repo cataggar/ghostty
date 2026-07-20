@@ -416,7 +416,7 @@ pub fn compress(
 ) callconv(lib.calling_conv) Result {
     const t: *ZigTerminal = (terminal_ orelse return .invalid_value).terminal;
     const out_result = out_result_ orelse return .invalid_value;
-    const mode = std.meta.intToEnum(CompressionMode, mode_) catch
+    const mode = std.enums.fromInt(CompressionMode, mode_) orelse
         return .invalid_value;
 
     out_result.* = t.compress(mode);

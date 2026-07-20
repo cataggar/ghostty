@@ -271,7 +271,7 @@ test "simple search" {
 
 test "fingerprint detects node generation changes" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     var search: ViewportSearch = try .init(alloc, "needle");
@@ -298,7 +298,7 @@ test "fingerprint detects node generation changes" {
 
 test "fingerprint only allocates on changes" {
     const alloc = testing.allocator;
-    var t: Terminal = try .init(alloc, .{ .cols = 10, .rows = 10 });
+    var t: Terminal = try .testInit(alloc, .{ .cols = 10, .rows = 10 });
     defer t.deinit(alloc);
 
     var failing = testing.FailingAllocator.init(alloc, .{});
