@@ -68,9 +68,8 @@ fn dir(
         });
     }
 
-    // First check the env var. On Windows we have to allocate so this tracks
-    // both whether we have the env var and whether we own it.
-    // on Windows we treat `LOCALAPPDATA` as a fallback for `XDG_CONFIG_HOME`
+    // First check the env var. On Windows we treat `LOCALAPPDATA` as a
+    // fallback for `XDG_CONFIG_HOME`.
     const env_var_ = v: {
         if (env.get(internal_opts.env)) |v| {
             if (v.len > 0) break :v v;
@@ -83,8 +82,6 @@ fn dir(
         }
         break :v null;
     };
-    defer if (env_var_) |v| alloc.free(v);
-
     if (env_var_) |env_var| {
         // If we have a subdir, then we use the env as-is to avoid a copy.
         if (opts.subdir) |subdir| {

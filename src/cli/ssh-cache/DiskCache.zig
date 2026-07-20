@@ -437,6 +437,10 @@ test "disk cache default path" {
 
     var env: std.process.Environ.Map = .init(alloc);
     defer env.deinit();
+    try env.put(
+        "XDG_STATE_HOME",
+        if (builtin.os.tag == .windows) "C:\\Users\\test\\AppData\\Local" else "/tmp",
+    );
 
     const path = try DiskCache.defaultPath(
         alloc,

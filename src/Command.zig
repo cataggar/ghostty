@@ -274,10 +274,7 @@ fn startWindows(self: *Command, arena: Allocator, io: std.Io) !void {
     const env_w = if (self.env) |env_map| try createWindowsEnvBlock(arena, env_map) else null;
 
     const any_null_fd = self.stdin == null or self.stdout == null or self.stderr == null;
-    const null_file = if (any_null_fd)
-        try std.Io.Dir.cwd().openFile(io, "NUL", .{ .mode = .read_write })
-    else
-        null;
+    const null_file = if (any_null_fd) try openWindowsNullFile() else null;
     defer if (null_file) |file| file.close(io);
     const null_fd = if (null_file) |file| file.handle else null;
 
@@ -362,6 +359,28 @@ fn startWindows(self: *Command, arena: Allocator, io: std.Io) !void {
     ) == .FALSE) return windows.unexpectedError(windows.GetLastError());
 
     self.pid = process_information.hProcess;
+}
+
+fn openWindowsNullFile() !File {
+    const handle = windows.exp.kernel32.CreateFileW(
+        std.unicode.utf8ToUtf16LeStringLiteral("NUL"),
+        windows.GENERIC_READ | windows.GENERIC_WRITE,
+        windows.FILE_SHARE_READ | windows.FILE_SHARE_WRITE,
+        null,
+        windows.OPEN_EXISTING,
+        windows.FILE_ATTRIBUTE_NORMAL,
+        null,
+    );
+    if (handle == windows.INVALID_HANDLE_VALUE) {
+        return windows.unexpectedError(windows.GetLastError());
+    }
+    errdefer _ = windows.CloseHandle(handle);
+    try windows.SetHandleInformation(
+        handle,
+        windows.HANDLE_FLAG_INHERIT,
+        windows.HANDLE_FLAG_INHERIT,
+    );
+    return .{ .handle = handle, .flags = .{ .nonblocking = false } };
 }
 
 fn setupFd(src: File.Handle, target: i32) !void {

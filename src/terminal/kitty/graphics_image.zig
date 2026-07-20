@@ -786,7 +786,9 @@ test "image load: temporary file without correct path" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var tmp_dir = try temp_dir.TempDir.init(std.testing.io, &test_env);
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
+    var tmp_dir = try temp_dir.TempDir.init(std.testing.io, &env);
     defer tmp_dir.deinit(std.testing.io);
     const data = @embedFile("testdata/image-rgb-none-20x15-2147483647-raw.data");
     try tmp_dir.dir.writeFile(std.testing.io, .{
@@ -809,7 +811,7 @@ test "image load: temporary file without correct path" {
         .data = try alloc.dupe(u8, path),
     };
     defer cmd.deinit(alloc);
-    try testing.expectError(error.TemporaryFileNotNamedCorrectly, LoadingImage.init(alloc, std.testing.io, &test_env, &cmd, .all));
+    try testing.expectError(error.TemporaryFileNotNamedCorrectly, LoadingImage.init(alloc, std.testing.io, &env, &cmd, .all));
 
     // Temporary file should still be there
     try tmp_dir.dir.access(std.testing.io, path, .{});
@@ -819,7 +821,9 @@ test "image load: rgb, not compressed, temporary file" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var tmp_dir = try temp_dir.TempDir.init(std.testing.io, &test_env);
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
+    var tmp_dir = try temp_dir.TempDir.init(std.testing.io, &env);
     defer tmp_dir.deinit(std.testing.io);
     const data = @embedFile("testdata/image-rgb-none-20x15-2147483647-raw.data");
     try tmp_dir.dir.writeFile(std.testing.io, .{
@@ -842,7 +846,7 @@ test "image load: rgb, not compressed, temporary file" {
         .data = try alloc.dupe(u8, path),
     };
     defer cmd.deinit(alloc);
-    var loading = try LoadingImage.init(alloc, std.testing.io, &test_env, &cmd, .all);
+    var loading = try LoadingImage.init(alloc, std.testing.io, &env, &cmd, .all);
     defer loading.deinit(alloc);
     var img = try loading.complete(alloc, std.testing.io);
     defer img.deinit(alloc);
@@ -1052,7 +1056,9 @@ test "limits: temporary file medium allowed by limits" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var tmp_dir = try temp_dir.TempDir.init(std.testing.io, &test_env);
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
+    var tmp_dir = try temp_dir.TempDir.init(std.testing.io, &env);
     defer tmp_dir.deinit(std.testing.io);
     const data = @embedFile("testdata/image-rgb-none-20x15-2147483647-raw.data");
     try tmp_dir.dir.writeFile(std.testing.io, .{
@@ -1075,7 +1081,7 @@ test "limits: temporary file medium allowed by limits" {
         .data = try alloc.dupe(u8, path),
     };
     defer cmd.deinit(alloc);
-    var loading = try LoadingImage.init(alloc, std.testing.io, &test_env, &cmd, .{
+    var loading = try LoadingImage.init(alloc, std.testing.io, &env, &cmd, .{
         .file = false,
         .temporary_file = true,
         .shared_memory = false,

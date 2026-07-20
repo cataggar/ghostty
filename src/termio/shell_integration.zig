@@ -533,6 +533,12 @@ test "bash: HISTFILE" {
     {
         var env = EnvMap.init(alloc);
         defer env.deinit();
+        if (builtin.os.tag == .windows) {
+            try env.put("HOMEDRIVE", "C:");
+            try env.put("HOMEPATH", "\\Users\\test");
+        } else {
+            try env.put("HOME", "/home/test");
+        }
 
         _ = try setupBash(std.testing.io, alloc, .{ .shell = "bash" }, res.path, &env);
         try testing.expect(std.mem.endsWith(u8, env.get("HISTFILE").?, ".bash_history"));
