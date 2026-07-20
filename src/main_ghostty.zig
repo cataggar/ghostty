@@ -23,12 +23,14 @@ const MainReturn = switch (build_config.artifact) {
     else => void,
 };
 
-pub fn main(init: std.process.Init.Minimal) !MainReturn {
+pub fn main(init: std.process.Init) !MainReturn {
+    const init_minimal = init.minimal;
+
     // We first start by initializing our global state. This will setup
     // process-level state we need to run the terminal. The reason we use
     // a global is because the C API needs to be able to access this state;
     // no other Zig code should EVER access the global state.
-    state.init(init) catch |err| {
+    state.init(init_minimal) catch |err| {
         var buffer: [1024]u8 = undefined;
         var stderr_writer = std.Io.File.stderr().writer(init.io, &buffer);
         const stderr = &stderr_writer.interface;
@@ -65,7 +67,7 @@ pub fn main(init: std.process.Init.Minimal) !MainReturn {
     // Execute our action if we have one
     if (state.action) |action| {
         std.log.info("executing CLI action={}", .{action});
-        std.process.exit(action.run(alloc, init.io, &state.environ_map, init.args) catch |err| err: {
+        std.process.exit(action.run(alloc, io, &state.environ_map, init_minimal.args) catch |err| err: {
             std.log.err("CLI action failed error={}", .{err});
             break :err 1;
         });
@@ -74,7 +76,7 @@ pub fn main(init: std.process.Init.Minimal) !MainReturn {
 
     if (comptime build_config.app_runtime == .none) {
         var buf: [1024]u8 = undefined;
-        const stdout = std.Io.File.stdout().writerStreaming(init.io, &buf);
+        const stdout = std.Io.File.stdout().writerStreaming(io, &buf);
         try stdout.print("Usage: ghostty +<action> [flags]\n\n", .{});
         try stdout.print(
             \\This is the Ghostty helper CLI that accompanies the graphical Ghostty app.
@@ -97,7 +99,12 @@ pub fn main(init: std.process.Init.Minimal) !MainReturn {
     }
 
     // Create our app state
-    const app: *App = try App.create(alloc, io, init.args, init.environ);
+    const app: *App = try App.create(
+        alloc,
+        io,
+        init_minimal.args,
+        init_minimal.environ,
+    );
     defer app.destroy();
 
     // Create our runtime app

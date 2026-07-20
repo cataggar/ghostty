@@ -67,17 +67,14 @@ pub const GlobalState = struct {
         self.* = .{
             .gpa = null,
             .alloc = undefined,
+            .io_threaded = undefined,
             .args = init_minimal.args,
             .environ_map = undefined,
             .action = null,
             .logging = .{},
             .rlimits = .{},
             .resources_dir = .{},
-
-            // TODO: Figure out how to place libxev within all of this.
-            .io_threaded = .init(self.alloc, .{}),
         };
-        errdefer self.deinit();
 
         self.gpa = gpa: {
             // Use the libc allocator if it is available because it is WAY
@@ -103,7 +100,14 @@ pub const GlobalState = struct {
         else
             unreachable;
 
-        self.environ_map = try init_minimal.environ.createMap(self.alloc);
+        // TODO: Figure out how to place libxev within all of this.
+        self.io_threaded = .init(self.alloc, .{});
+        self.environ_map = init_minimal.environ.createMap(self.alloc) catch |err| {
+            self.io_threaded.deinit();
+            if (self.gpa) |*value| _ = value.deinit();
+            return err;
+        };
+        errdefer self.deinit();
 
         // We first try to parse any action that we may be executing.
         self.action = try cli.action.detectArgs(
