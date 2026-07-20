@@ -63,7 +63,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Version checks
     {
-        var blueprint_compiler = std.process.run(alloc, init.io, .{
+        const blueprint_compiler = std.process.run(alloc, init.io, .{
             .argv = &.{ "blueprint-compiler", "--version" },
         }) catch |err| switch (err) {
             error.FileNotFound => {
@@ -99,7 +99,7 @@ pub fn main(init: std.process.Init) !void {
 
     // Compilation
     {
-        var blueprint_compiler = std.process.run(alloc, init.io, .{
+        const blueprint_compiler = std.process.run(alloc, init.io, .{
             .argv = &.{
                 "blueprint-compiler",
                 "compile",
