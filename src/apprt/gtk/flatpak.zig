@@ -4,7 +4,11 @@ const build_config = @import("../../build_config.zig");
 const internal_os = @import("../../os/main.zig");
 const glib = @import("glib");
 
-pub fn resourcesDir(alloc: Allocator) !internal_os.ResourcesDir {
+pub fn resourcesDir(
+    alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+) !internal_os.ResourcesDir {
     if (comptime build_config.flatpak) {
         // Only consult Flatpak runtime data for host case.
         if (internal_os.isFlatpak()) {
@@ -25,5 +29,5 @@ pub fn resourcesDir(alloc: Allocator) !internal_os.ResourcesDir {
         }
     }
 
-    return try internal_os.resourcesDir(alloc);
+    return try internal_os.resourcesDir(alloc, io, env);
 }
