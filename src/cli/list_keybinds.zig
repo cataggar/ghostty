@@ -57,17 +57,19 @@ pub fn run(
     env: *const std.process.Environ.Map,
     proc_args: std.process.Args,
 ) !u8 {
-    _ = env;
     var opts: Options = .{};
     defer opts.deinit();
 
     {
         var iter = try args.argsIterator(proc_args, alloc);
         defer iter.deinit();
-        try args.parse(Options, alloc, &opts, &iter);
+        try args.parse(Options, alloc, io, env, &opts, &iter);
     }
 
-    var config = if (opts.default) try Config.default(alloc) else try Config.load(alloc);
+    var config = if (opts.default)
+        try Config.default(alloc)
+    else
+        try Config.load(alloc, io, proc_args, env);
     defer config.deinit();
 
     var buffer: [1024]u8 = undefined;
@@ -75,10 +77,10 @@ pub fn run(
     var stdout_writer = stdout.writer(io, &buffer);
     const writer = &stdout_writer.interface;
 
-    if (tui.can_pretty_print and !opts.plain and stdout.isTty()) {
+    if (tui.can_pretty_print and !opts.plain and try stdout.isTty(io)) {
         var arena = std.heap.ArenaAllocator.init(alloc);
         defer arena.deinit();
-        return prettyPrint(arena.allocator(), config.keybind);
+        return prettyPrint(arena.allocator(), io, env, config.keybind);
     } else {
         try config.keybind.formatEntryDocs(
             configpkg.entryFormatter("keybind", writer),
@@ -223,12 +225,19 @@ const ChordBinding = struct {
     }
 };
 
-fn prettyPrint(alloc: Allocator, keybinds: Config.Keybinds) !u8 {
+fn prettyPrint(
+    alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    keybinds: Config.Keybinds,
+) !u8 {
     // Set up vaxis
     var buf: [1024]u8 = undefined;
-    var tty = try vaxis.Tty.init(&buf);
+    var tty = try vaxis.Tty.init(io, &buf);
     defer tty.deinit();
-    var vx = try vaxis.init(alloc, .{});
+    var env_map = try env.clone(alloc);
+    defer env_map.deinit();
+    var vx = try vaxis.init(io, alloc, &env_map, .{});
     const writer = tty.writer();
     defer vx.deinit(alloc, writer);
 
@@ -248,7 +257,7 @@ fn prettyPrint(alloc: Allocator, keybinds: Config.Keybinds) !u8 {
             .y_pixel = 768,
         },
 
-        else => try vaxis.Tty.getWinsize(tty.fd),
+        else => try tty.getWinsize(),
     };
     try vx.resize(alloc, writer, winsize);
 

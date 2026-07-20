@@ -61,7 +61,7 @@ load_options: ?LoadOptions = null,
 pub fn init() Collection {
     // Initialize our styles array, preallocating some space that is
     // likely to be used.
-    return .{ .faces = .initFill(.{}) };
+    return .{ .faces = .initFill(.empty) };
 }
 
 pub fn deinit(self: *Collection, alloc: Allocator) void {
@@ -226,7 +226,7 @@ fn getFaceFromEntry(
                 return error.DeferredLoadingUnavailable;
 
             // Load the face.
-            var face = try d.load(opts.library, opts.faceOptions());
+            var face = try d.load(opts.io, opts.library, opts.faceOptions());
             errdefer face.deinit();
 
             // Calculate the scale factor for this
@@ -686,6 +686,9 @@ const StyleArray = std.EnumArray(Style, std.ArrayList(EntryOrAlias));
 /// Load options are used to configure all the details a Collection
 /// needs to load deferred faces.
 pub const LoadOptions = struct {
+    /// IO context used by deferred face loading.
+    io: std.Io,
+
     /// The library to use for loading faces. This is not owned by
     /// the collection and can be used by multiple collections. When
     /// deinitializing the collection, the library is not deinitialized.
@@ -949,6 +952,7 @@ test "add full" {
 
     for (0..Index.Special.start - 1) |_| {
         _ = try c.add(alloc, try .init(
+            std.testing.io,
             lib,
             testFont,
             .{ .size = .{ .points = 12 } },
@@ -960,6 +964,7 @@ test "add full" {
     }
 
     var face = try Face.init(
+        testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12 } },
@@ -1008,6 +1013,7 @@ test getFace {
     defer c.deinit(alloc);
 
     const idx = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -1036,6 +1042,7 @@ test getIndex {
     defer c.deinit(alloc);
 
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -1069,9 +1076,10 @@ test completeStyles {
 
     var c = init();
     defer c.deinit(alloc);
-    c.load_options = .{ .library = lib };
+    c.load_options = .{ .io = std.testing.io, .library = lib };
 
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -1100,9 +1108,10 @@ test setSize {
 
     var c = init();
     defer c.deinit(alloc);
-    c.load_options = .{ .library = lib };
+    c.load_options = .{ .io = std.testing.io, .library = lib };
 
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -1127,9 +1136,10 @@ test hasCodepoint {
 
     var c = init();
     defer c.deinit(alloc);
-    c.load_options = .{ .library = lib };
+    c.load_options = .{ .io = std.testing.io, .library = lib };
 
     const idx = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -1155,9 +1165,10 @@ test "hasCodepoint emoji default graphical" {
 
     var c = init();
     defer c.deinit(alloc);
-    c.load_options = .{ .library = lib };
+    c.load_options = .{ .io = std.testing.io, .library = lib };
 
     const idx = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testEmoji,
         .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -1183,9 +1194,10 @@ test "metrics" {
     var c = init();
     defer c.deinit(alloc);
     const size: DesiredSize = .{ .points = 12, .xdpi = 96, .ydpi = 96 };
-    c.load_options = .{ .library = lib, .size = size };
+    c.load_options = .{ .io = std.testing.io, .library = lib, .size = size };
 
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = size },
@@ -1267,10 +1279,11 @@ test "adjusted sizes" {
     var c = init();
     defer c.deinit(alloc);
     const size: DesiredSize = .{ .points = 12, .xdpi = 96, .ydpi = 96 };
-    c.load_options = .{ .library = lib, .size = size };
+    c.load_options = .{ .io = std.testing.io, .library = lib, .size = size };
 
     // Add our primary face.
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = size },
@@ -1285,6 +1298,7 @@ test "adjusted sizes" {
     inline for ([_][]const u8{ "ex_height", "cap_height" }) |metric| {
         // Add the fallback face with the chosen adjustment metric.
         const fallback_idx = try c.add(alloc, try .init(
+            std.testing.io,
             lib,
             fallback,
             .{ .size = size },
@@ -1328,6 +1342,7 @@ test "adjusted sizes" {
     {
         // A reference metric of "none" should leave the size unchanged.
         const fallback_idx = try c.add(alloc, try .init(
+            std.testing.io,
             lib,
             fallback,
             .{ .size = size },
@@ -1356,6 +1371,7 @@ test "adjusted sizes" {
 
     // Add the symbol face.
     const symbol_idx = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         symbol,
         .{ .size = size },
@@ -1394,9 +1410,10 @@ test "face metrics" {
     var c = init();
     defer c.deinit(alloc);
     const size: DesiredSize = .{ .points = 12, .xdpi = 96, .ydpi = 96 };
-    c.load_options = .{ .library = lib, .size = size };
+    c.load_options = .{ .io = std.testing.io, .library = lib, .size = size };
 
     const narrowIndex = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         narrowFont,
         .{ .size = size },
@@ -1406,6 +1423,7 @@ test "face metrics" {
         .size_adjustment = .none,
     });
     const wideIndex = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         wideFont,
         .{ .size = size },

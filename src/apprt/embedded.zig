@@ -491,16 +491,16 @@ pub const Surface = struct {
         if (opts.working_directory) |c_wd| {
             const wd = std.mem.sliceTo(c_wd, 0);
             if (wd.len > 0) wd: {
-                var dir = std.Io.Dir.openDirAbsolute(app.io, wd, .{}) catch |err| {
+                var dir = std.Io.Dir.openDirAbsolute(app.core_app.io, wd, .{}) catch |err| {
                     log.warn(
                         "error opening requested working directory dir={s} err={}",
                         .{ wd, err },
                     );
                     break :wd;
                 };
-                defer dir.close(app.io);
+                defer dir.close(app.core_app.io);
 
-                const stat = dir.stat(app.io) catch |err| {
+                const stat = dir.stat(app.core_app.io) catch |err| {
                     log.warn(
                         "failed to stat requested working directory dir={s} err={}",
                         .{ wd, err },
@@ -517,7 +517,7 @@ pub const Surface = struct {
                 }
 
                 var wd_val: configpkg.WorkingDirectory = .{ .path = wd };
-                if (wd_val.finalize(config.arenaAlloc(), app.io, &global_state.environ_map)) |_| {
+                if (wd_val.finalize(config.arenaAlloc(), app.core_app.io, &global_state.environ_map)) |_| {
                     config.@"working-directory" = wd_val;
                 } else |err| {
                     log.warn(
@@ -953,7 +953,11 @@ pub const Surface = struct {
 
     pub fn defaultTermioEnv(self: *const Surface) !std.process.Environ.Map {
         const alloc = self.app.core_app.alloc;
-        var env = try internal_os.getSurfaceEnvMap(alloc, &global_state.environ_map);
+        var env = try internal_os.getSurfaceEnvMap(
+            alloc,
+            self.app.core_app.io,
+            &global_state.environ_map,
+        );
         errdefer env.deinit();
 
         if (comptime builtin.target.os.tag.isDarwin()) {
@@ -1412,7 +1416,7 @@ pub const CAPI = struct {
         opts: *const apprt.runtime.App.Options,
         config: *const Config,
     ) !*App {
-        const core_app = try CoreApp.create(global.alloc, global.io(), &global.environ_map);
+        const core_app = try CoreApp.create(global.alloc, global.io(), global.args, &global.environ_map);
         errdefer core_app.destroy();
 
         // Create our runtime app
@@ -1478,7 +1482,7 @@ pub const CAPI = struct {
             return false;
         };
 
-        return app.core_app.keyEventIsBinding(app, core_event);
+        return app.config.keyEventIsBinding(core_event);
     }
 
     /// Notify the app that the keyboard was changed. This causes the

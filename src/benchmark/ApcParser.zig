@@ -16,10 +16,11 @@ const options = @import("options.zig");
 const log = std.log.scoped(.@"apc-parser-bench");
 
 opts: Options,
+io: std.Io,
 stream: Stream,
 
 /// The file, opened in the setup function.
-data_f: ?std.fs.File = null,
+data_f: ?std.Io.File = null,
 
 pub const Options = struct {
     /// The data to read as a filepath. If this is "-" then
@@ -64,12 +65,16 @@ const Handler = struct {
 /// Create a new APC parser benchmark for the given arguments.
 pub fn create(
     alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     opts: Options,
 ) !*ApcParser {
+    _ = env;
     const ptr = try alloc.create(ApcParser);
     errdefer alloc.destroy(ptr);
     ptr.* = .{
         .opts = opts,
+        .io = io,
         .stream = .init(.{ .alloc = alloc }),
     };
     return ptr;
@@ -94,7 +99,7 @@ fn setup(ptr: *anyopaque) Benchmark.Error!void {
     // Open our data file to prepare for reading. We can do more
     // validation here eventually.
     assert(self.data_f == null);
-    self.data_f = options.dataFile(self.opts.data) catch |err| {
+    self.data_f = options.dataFile(self.io, self.opts.data) catch |err| {
         log.warn("error opening data file err={}", .{err});
         return error.BenchmarkFailed;
     };
@@ -103,7 +108,7 @@ fn setup(ptr: *anyopaque) Benchmark.Error!void {
 fn teardown(ptr: *anyopaque) void {
     const self: *ApcParser = @ptrCast(@alignCast(ptr));
     if (self.data_f) |f| {
-        f.close();
+        f.close(self.io);
         self.data_f = null;
     }
 }
@@ -114,7 +119,7 @@ fn step(ptr: *anyopaque) Benchmark.Error!void {
     const f = self.data_f orelse return;
 
     var read_buf: [64 * 1024]u8 align(std.atomic.cache_line) = undefined;
-    var f_reader = f.reader(&read_buf);
+    var f_reader = f.reader(self.io, &read_buf);
     const r = &f_reader.interface;
 
     // This buffer size matches the read buffer size used by the
@@ -134,10 +139,12 @@ fn step(ptr: *anyopaque) Benchmark.Error!void {
 test ApcParser {
     const testing = std.testing;
     const alloc = testing.allocator;
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
-    const impl: *ApcParser = try .create(alloc, .{});
+    const impl: *ApcParser = try .create(alloc, testing.io, &env, .{});
     defer impl.destroy(alloc);
 
     const bench = impl.benchmark();
-    _ = try bench.run(.once);
+    _ = try bench.run(std.testing.io, .once);
 }

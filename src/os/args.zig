@@ -124,7 +124,7 @@ test "args" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var iter = try iterator(alloc);
+    var iter = try iterator(.{ .vector = &.{"test"} }, alloc);
     defer iter.deinit();
     try testing.expect(iter.next().?.len > 0);
 }

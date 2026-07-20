@@ -391,7 +391,7 @@ pub const Attachment = struct {
                 else => return error.InvalidFieldType,
             } else null,
 
-            .headers_extra = item.headers.unmanaged,
+            .headers_extra = item.headers,
             .payload = item.payload,
         };
     }
@@ -417,7 +417,7 @@ pub const Attachment = struct {
         }
 
         return .{
-            .headers = self.headers_extra.promote(alloc),
+            .headers = self.headers_extra,
             .type = .attachment,
             .payload = self.payload,
         };

@@ -20,9 +20,9 @@ pub fn pipe() PipeError![2]posix.fd_t {
                 &write,
                 null,
                 0,
-            ) == 0) {
+            ) == .FALSE) {
                 return windows.unexpectedError(
-                    windows.kernel32.GetLastError(),
+                    windows.GetLastError(),
                 );
             }
             return .{ read, write };

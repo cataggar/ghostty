@@ -26,6 +26,7 @@ pub const Options = struct {
 pub fn run(
     alloc_gpa: Allocator,
     io: std.Io,
+    env: *const std.process.Environ.Map,
     proc_args: std.process.Args,
 ) !u8 {
     // Use an arena for the whole command to avoid manual memory management.
@@ -39,7 +40,7 @@ pub fn run(
     {
         var iter = try args.argsIterator(proc_args, alloc_gpa);
         defer iter.deinit();
-        try args.parse(Options, alloc_gpa, &opts, &iter);
+        try args.parse(Options, alloc_gpa, io, env, &opts, &iter);
     }
 
     var buffer: [1024]u8 = undefined;

@@ -6,7 +6,7 @@ const ArenaAllocator = std.heap.ArenaAllocator;
 const assert = @import("../quirks.zig").inlineAssert;
 const testing = std.testing;
 const posix = std.posix;
-const windows = std.os.windows;
+const windows = @import("../os/windows.zig");
 const fastmem = @import("../fastmem.zig");
 const color = @import("color.zig");
 const hyperlink = @import("hyperlink.zig");
@@ -59,12 +59,12 @@ const AllocPosix = struct {
 /// MEM_COMMIT | MEM_RESERVE which guarantees zeroed pages.
 const AllocWindows = struct {
     pub fn alloc(n: usize) error{OutOfMemory}![]align(std.heap.page_size_min) u8 {
-        const addr = windows.VirtualAlloc(
+        const addr = windows.exp.kernel32.VirtualAlloc(
             null,
             n,
-            windows.MEM_COMMIT | windows.MEM_RESERVE,
-            windows.PAGE_READWRITE,
-        ) catch return error.OutOfMemory;
+            windows.exp.MEM_COMMIT | windows.exp.MEM_RESERVE,
+            windows.exp.PAGE_READWRITE,
+        ) orelse return error.OutOfMemory;
 
         return @as(
             [*]align(std.heap.page_size_min) u8,
@@ -73,10 +73,10 @@ const AllocWindows = struct {
     }
 
     pub fn free(mem: []align(std.heap.page_size_min) u8) void {
-        windows.VirtualFree(
+        _ = windows.exp.kernel32.VirtualFree(
             @ptrCast(@alignCast(mem.ptr)),
             0,
-            windows.MEM_RELEASE,
+            windows.exp.MEM_RELEASE,
         );
     }
 };

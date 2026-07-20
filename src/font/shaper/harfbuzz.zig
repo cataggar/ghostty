@@ -87,7 +87,7 @@ pub const Shaper = struct {
         return Shaper{
             .alloc = alloc,
             .hb_buf = try harfbuzz.Buffer.create(),
-            .cell_buf = .{},
+            .cell_buf = .empty,
             .hb_feats = hb_feats,
         };
     }
@@ -127,7 +127,9 @@ pub const Shaper = struct {
     /// The return value is only valid until the next shape call is called.
     ///
     /// If there is not enough space in the cell buffer, an error is returned.
-    pub fn shape(self: *Shaper, io: std.Io, run: font.shape.TextRun) ![]const font.shape.Cell {
+    pub fn shape(self: *Shaper, run: font.shape.TextRun) ![]const font.shape.Cell {
+        const io = run.grid.resolver.collection.load_options.?.io;
+
         // We only do shaping if the font is not a special-case. For special-case
         // fonts, the codepoint == glyph_index so we don't need to run any shaping.
         if (run.font_index.special() == null) {
@@ -805,8 +807,12 @@ test "shape emoji width long" {
     defer testdata.deinit();
 
     // Make a screen and add a long emoji sequence to it.
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
     var t = try terminal.Terminal.init(
         alloc,
+        testing.io,
+        &env,
         .{ .cols = 30, .rows = 3 },
     );
     defer t.deinit(alloc);
@@ -816,7 +822,7 @@ test "shape emoji width long" {
     const cell = &row.cells.ptr(page.memory)[0];
     cell.* = .{
         .content_tag = .codepoint,
-        .content = 0x1F9D4, // Person with beard
+        .content = .{ .codepoint = .{ .data = 0x1F9D4 } }, // Person with beard
     };
     var graphemes = [_]u21{
         0x1F3FB, // Light skin tone (Fitz 1-2)
@@ -942,8 +948,12 @@ test "shape with empty cells in between" {
     defer testdata.deinit();
 
     // Make a screen with some data
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
     var t = try terminal.Terminal.init(
         alloc,
+        testing.io,
+        &env,
         .{ .cols = 30, .rows = 3 },
     );
     defer t.deinit(alloc);
@@ -989,8 +999,12 @@ test "shape Combining characters" {
     buf_idx += try std.unicode.utf8Encode('a', buf[buf_idx..]);
 
     // Make a screen with some data
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
     var t = try terminal.Terminal.init(
         alloc,
+        testing.io,
+        &env,
         .{ .cols = 30, .rows = 3 },
     );
     defer t.deinit(alloc);
@@ -1763,8 +1777,12 @@ test "shape cursor boundary and colored emoji" {
     defer testdata.deinit();
 
     // Make a screen with some data
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
     var t = try terminal.Terminal.init(
         alloc,
+        testing.io,
+        &env,
         .{ .cols = 3, .rows = 10 },
     );
     defer t.deinit(alloc);
@@ -2045,10 +2063,11 @@ fn testShaperWithFont(alloc: Allocator, font_req: TestFont) !TestShaper {
     errdefer lib.deinit();
 
     var c = Collection.init();
-    c.load_options = .{ .library = lib };
+    c.load_options = .{ .io = std.testing.io, .library = lib };
 
     // Setup group
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12 } },
@@ -2061,6 +2080,7 @@ fn testShaperWithFont(alloc: Allocator, font_req: TestFont) !TestShaper {
     if (comptime !font.options.backend.hasCoretext()) {
         // Coretext doesn't support Noto's format
         _ = try c.add(alloc, try .init(
+            std.testing.io,
             lib,
             testEmoji,
             .{ .size = .{ .points = 12 } },
@@ -2088,6 +2108,7 @@ fn testShaperWithFont(alloc: Allocator, font_req: TestFont) !TestShaper {
         });
     }
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testEmojiText,
         .{ .size = .{ .points = 12 } },
@@ -2122,7 +2143,7 @@ fn testShaperWithDiscoveredFont(alloc: Allocator, font_req: [:0]const u8) !TestS
     errdefer lib.deinit();
 
     var c = Collection.init();
-    c.load_options = .{ .library = lib };
+    c.load_options = .{ .io = std.testing.io, .library = lib };
 
     // Discover and add our font to the collection.
     {
@@ -2146,7 +2167,7 @@ fn testShaperWithDiscoveredFont(alloc: Allocator, font_req: [:0]const u8) !TestS
 
         _ = try c.add(
             alloc,
-            try face.load(lib, .{ .size = .{ .points = 12 } }),
+            try face.load(std.testing.io, lib, .{ .size = .{ .points = 12 } }),
             .{
                 .style = .regular,
                 .fallback = false,

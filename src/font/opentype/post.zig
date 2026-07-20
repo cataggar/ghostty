@@ -48,7 +48,10 @@ pub const Post = extern struct {
     /// Parse the table from raw data.
     pub fn init(data: []const u8) error{EndOfStream}!Post {
         var reader: std.Io.Reader = .fixed(data);
-        return try reader.takeStruct(Post, .big);
+        return reader.takeStruct(Post, .big) catch |err| switch (err) {
+            error.ReadFailed => unreachable,
+            error.EndOfStream => return error.EndOfStream,
+        };
     }
 };
 

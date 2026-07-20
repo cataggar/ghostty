@@ -109,7 +109,7 @@ pub const Parser = struct {
             // and then we check to see if that line ended the block.
             .block => if (byte == '\n') {
                 const written = self.buffer.written();
-                const idx = if (std.mem.rfindScalar(
+                const idx = if (std.mem.lastIndexOfScalar(
                     u8,
                     written,
                     '\n',

@@ -1,4 +1,13 @@
 pub const c = @cImport({
+    @cInclude("stdint.h");
+    @cUndef("SIZE_MAX");
+    if (@sizeOf(usize) == 8) {
+        @cDefine("SIZE_MAX", "18446744073709551615ULL");
+    } else {
+        @cDefine("SIZE_MAX", "4294967295U");
+    }
+    @cUndef("UINT64_MAX");
+    @cDefine("UINT64_MAX", "18446744073709551615ULL");
     for (defines) |d| @cDefine(d, "1");
     @cInclude("wuffs-v0.4.c");
 });

@@ -90,9 +90,11 @@ pub const Canvas = struct {
     clip_bottom: u32 = 0,
 
     alloc: Allocator,
+    io: std.Io,
 
     pub fn init(
         alloc: Allocator,
+        io: std.Io,
         width: u32,
         height: u32,
         padding_x: u32,
@@ -113,6 +115,7 @@ pub const Canvas = struct {
             .padding_x = padding_x,
             .padding_y = padding_y,
             .alloc = alloc,
+            .io = io,
         };
     }
 
@@ -255,7 +258,7 @@ pub const Canvas = struct {
 
     /// Acquires a z2d drawing context, caller MUST deinit context.
     pub fn getContext(self: *Canvas) z2d.Context {
-        var ctx = z2d.Context.init(self.alloc, &self.sfc);
+        var ctx = z2d.Context.init(self.io, self.alloc, &self.sfc);
         // Offset by our padding to keep
         // coordinates relative to the cell.
         ctx.setTransformation(self.transformation());

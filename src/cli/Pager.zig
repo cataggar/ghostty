@@ -77,20 +77,21 @@ fn initPager(io: std.Io, env: *const std.process.Environ.Map) ?std.process.Child
 }
 
 test "pager: non-tty" {
+    var env = try std.testing.environ.createMap(std.testing.allocator);
+    defer env.deinit();
     var pager: Pager = .init(
-        std.testing.allocator,
         std.testing.io,
-        std.testing.environ,
+        &env,
     );
-    defer pager.deinit();
+    defer pager.deinit(std.testing.io);
     try std.testing.expect(pager.child == null);
 }
 
 test "pager: default writer" {
     var pager: Pager = .{};
-    defer pager.deinit();
+    defer pager.deinit(std.testing.io);
     try std.testing.expect(pager.child == null);
     var buf: [4096]u8 = undefined;
-    const w = pager.writer(&buf);
+    const w = pager.writer(std.testing.io, &buf);
     try w.writeAll("hello");
 }

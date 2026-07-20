@@ -666,6 +666,8 @@ pub fn parseBool(v: []const u8) !bool {
 
 test "parse: simple" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: []const u8 = "",
@@ -681,7 +683,7 @@ test "parse: simple" {
         "--a=42 --b --b-f=false",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expect(data._arena != null);
     try testing.expectEqualStrings("42", data.a);
     try testing.expect(data.b);
@@ -693,7 +695,7 @@ test "parse: simple" {
         "--a=84",
     );
     defer iter2.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter2);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter2);
     try testing.expect(data._arena != null);
     try testing.expectEqualStrings("84", data.a);
     try testing.expect(data.b);
@@ -702,6 +704,8 @@ test "parse: simple" {
 
 test "parse: quoted value" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: u8 = 0,
@@ -715,13 +719,15 @@ test "parse: quoted value" {
         "--a=\"42\" --b=\"hello!\"",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expectEqual(@as(u8, 42), data.a);
     try testing.expectEqualStrings("hello!", data.b);
 }
 
 test "parse: empty value resets to default" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: u8 = 42,
@@ -735,13 +741,15 @@ test "parse: empty value resets to default" {
         "--a= --b=",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expectEqual(@as(u8, 42), data.a);
     try testing.expect(!data.b);
 }
 
 test "parse: positional arguments are invalid" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: u8 = 42,
@@ -756,13 +764,15 @@ test "parse: positional arguments are invalid" {
     defer iter.deinit();
     try testing.expectError(
         error.InvalidField,
-        parse(@TypeOf(data), testing.allocator, &data, &iter),
+        parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter),
     );
     try testing.expectEqual(@as(u8, 84), data.a);
 }
 
 test "parse: diagnostic tracking" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: []const u8 = "",
@@ -778,7 +788,7 @@ test "parse: diagnostic tracking" {
         "--what --a=42",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expect(data._arena != null);
     try testing.expectEqualStrings("42", data.a);
     try testing.expect(data._diagnostics.items().len == 1);
@@ -792,6 +802,8 @@ test "parse: diagnostic tracking" {
 
 test "parse: diagnostic location" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: []const u8 = "",
@@ -809,7 +821,7 @@ test "parse: diagnostic location" {
     );
 
     var iter: LineIterator = .{ .r = &r, .filepath = "test" };
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expect(data._arena != null);
     try testing.expectEqualStrings("42", data.a);
     try testing.expect(data.b == .two);
@@ -825,6 +837,8 @@ test "parse: diagnostic location" {
 
 test "parse: compatibility handler" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: bool = false,
@@ -862,13 +876,15 @@ test "parse: compatibility handler" {
         "--a=yuh",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expect(data._arena != null);
     try testing.expect(data.a);
 }
 
 test "parse: compatibility renamed" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: bool = false,
@@ -888,7 +904,7 @@ test "parse: compatibility renamed" {
         "--old=true --b=true",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expect(data._arena != null);
     try testing.expect(data.a);
     try testing.expect(data.b);

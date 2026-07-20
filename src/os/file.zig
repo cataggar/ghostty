@@ -57,10 +57,7 @@ pub fn restoreMaxFiles(lim: rlimit) void {
 pub fn getTmpDir(env: *const std.process.Environ.Map) ?[]const u8 {
     if (comptime builtin.os.tag == .windows) {
         // TODO: what is a good fallback path on windows?
-        return env.get("TMP") catch |e| {
-            log.warn("failed to convert temp dir path from windows string: {}", .{e});
-            return null;
-        };
+        return env.get("TMP");
     }
     if (env.get("TMPDIR")) |v| return v;
     if (env.get("TMP")) |v| return v;

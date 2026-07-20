@@ -106,10 +106,14 @@ pub export fn ghostty_init(argc: usize, argv: [*][*:0]u8) c_int {
     assert(builtin.link_libc);
 
     // Construct Zig-friendly globals from C ones.
-    const args: std.process.Args = .{ .vector = argv[0..argc] };
-    const environ: std.process.Environ = .{
-        .block = .{ .slice = std.mem.sliceTo(std.c.environ, null) },
-    };
+    const args: std.process.Args = .{ .vector = switch (builtin.os.tag) {
+        .windows => std.os.windows.peb().ProcessParameters.CommandLine.slice(),
+        else => argv[0..argc],
+    } };
+    const environ: std.process.Environ = .{ .block = switch (builtin.os.tag) {
+        .windows => .global,
+        else => .{ .slice = std.mem.sliceTo(std.c.environ, null) },
+    } };
 
     state.init(.{ .environ = environ, .args = args }) catch |err| {
         std.log.err("failed to initialize ghostty error={}", .{err});
@@ -187,8 +191,8 @@ pub const DllMain = if (builtin.os.tag == .windows) struct {
     const HINSTANCE = std.os.windows.HINSTANCE;
     const DWORD = std.os.windows.DWORD;
     const LPVOID = std.os.windows.LPVOID;
-    const TRUE = std.os.windows.TRUE;
-    const FALSE = std.os.windows.FALSE;
+    const TRUE = BOOL.TRUE;
+    const FALSE = BOOL.FALSE;
 
     const DLL_PROCESS_ATTACH: DWORD = 1;
     const DLL_PROCESS_DETACH: DWORD = 0;

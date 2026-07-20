@@ -14,7 +14,7 @@ const Error = error{
 pub inline fn home(io: std.Io, env: *const std.process.Environ.Map, buf: []u8) !?[]const u8 {
     return switch (builtin.os.tag) {
         .linux, .freebsd, .macos => try homeUnix(buf, io, env),
-        .windows => try homeWindows(buf),
+        .windows => try homeWindows(buf, env),
 
         // iOS doesn't have a user-writable home directory
         .ios => null,
@@ -72,22 +72,13 @@ fn homeUnix(buf: []u8, io: std.Io, env: *const std.process.Environ.Map) !?[]cons
 }
 
 fn homeWindows(buf: []u8, env: *const std.process.Environ.Map) !?[]const u8 {
-    const drive_len = blk: {
-        const drive = env.get("HOMEDRIVE") orelse return null;
-        // could shift the contents if this ever happens
-        if (drive.ptr != buf.ptr) @panic("codebug");
-        break :blk drive.len;
-    };
-
-    const path_len = blk: {
-        const path_buf = buf[drive_len..];
-        const homepath = env.get("HOMEPATH") orelse return null;
-        // could shift the contents if this ever happens
-        if (homepath.ptr != path_buf.ptr) @panic("codebug");
-        break :blk homepath.len;
-    };
-
-    return buf[0 .. drive_len + path_len];
+    const drive = env.get("HOMEDRIVE") orelse return null;
+    const path = env.get("HOMEPATH") orelse return null;
+    const len = drive.len + path.len;
+    if (len > buf.len) return error.BufferTooSmall;
+    @memcpy(buf[0..drive.len], drive);
+    @memcpy(buf[drive.len..len], path);
+    return buf[0..len];
 }
 
 fn trimSpace(input: []const u8) []const u8 {
@@ -138,21 +129,23 @@ test "expandHomeUnix" {
 
     const testing = std.testing;
     const allocator = testing.allocator;
+    var env = try testing.environ.createMap(allocator);
+    defer env.deinit();
     var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    const home_dir = try expandHomeUnix("~/", &buf, testing.io, testing.environ);
+    const home_dir = try expandHomeUnix("~/", &buf, testing.io, &env);
     // Joining the home directory `~` with the path `/`
     // the result should end with a separator here. (e.g. `/home/user/`)
     try testing.expect(home_dir[home_dir.len - 1] == std.Io.Dir.path.sep);
 
-    const downloads = try expandHomeUnix("~/Downloads/shader.glsl", &buf, testing.io, testing.environ);
+    const downloads = try expandHomeUnix("~/Downloads/shader.glsl", &buf, testing.io, &env);
     const expected_downloads = try std.mem.concat(allocator, u8, &[_][]const u8{ home_dir, "Downloads/shader.glsl" });
     defer allocator.free(expected_downloads);
     try testing.expectEqualStrings(expected_downloads, downloads);
 
-    try testing.expectEqualStrings("~", try expandHomeUnix("~", &buf, testing.io, testing.environ));
-    try testing.expectEqualStrings("~abc/", try expandHomeUnix("~abc/", &buf, testing.io, testing.environ));
-    try testing.expectEqualStrings("/home/user", try expandHomeUnix("/home/user", &buf, testing.io, testing.environ, testing.io, testing.environ));
-    try testing.expectEqualStrings("", try expandHomeUnix("", &buf, testing.io, testing.environ));
+    try testing.expectEqualStrings("~", try expandHomeUnix("~", &buf, testing.io, &env));
+    try testing.expectEqualStrings("~abc/", try expandHomeUnix("~abc/", &buf, testing.io, &env));
+    try testing.expectEqualStrings("/home/user", try expandHomeUnix("/home/user", &buf, testing.io, &env));
+    try testing.expectEqualStrings("", try expandHomeUnix("", &buf, testing.io, &env));
 
     // Expect an error if the buffer is large enough to hold the home directory,
     // but not the expanded path
@@ -162,7 +155,7 @@ test "expandHomeUnix" {
         "~/Downloads",
         small_buf[0..],
         testing.io,
-        testing.environ,
+        &env,
     ));
 }
 
@@ -170,7 +163,9 @@ test {
     const testing = std.testing;
 
     var buf: [1024]u8 = undefined;
-    const result = try home(&buf);
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
+    const result = try home(testing.io, &env, &buf);
     try testing.expect(result != null);
     try testing.expect(result.?.len > 0);
 }

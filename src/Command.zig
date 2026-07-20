@@ -128,9 +128,9 @@ pub const Exit = if (builtin.os.tag == .windows) union(enum) {
         return if (posix.W.IFEXITED(status))
             Exit{ .Exited = posix.W.EXITSTATUS(status) }
         else if (posix.W.IFSIGNALED(status))
-            Exit{ .Signal = posix.W.TERMSIG(status) }
+            Exit{ .Signal = @intFromEnum(posix.W.TERMSIG(status)) }
         else if (posix.W.IFSTOPPED(status))
-            Exit{ .Stopped = posix.W.STOPSIG(status) }
+            Exit{ .Stopped = @intFromEnum(posix.W.STOPSIG(status)) }
         else
             Exit{ .Unknown = status };
     }
@@ -158,7 +158,6 @@ pub const RtPostForkInfo = if (@hasDecl(apprt.runtime, "post_fork")) apprt.runti
 ///
 /// After this is successful, self.pid is available.
 pub fn start(self: *Command, alloc: Allocator, io: std.Io) !void {
-    _ = io;
     // Use an arena allocator for the temporary allocations we need in this func.
     // IMPORTANT: do all allocation prior to the fork(). I believe it is undefined
     // behavior if you malloc between fork and exec. The source of the Zig
@@ -168,8 +167,8 @@ pub fn start(self: *Command, alloc: Allocator, io: std.Io) !void {
     const arena = arena_allocator.allocator();
 
     switch (builtin.os.tag) {
-        .windows => try self.startWindows(arena),
-        else => try self.startPosix(arena),
+        .windows => try self.startWindows(arena, io),
+        else => try self.startPosix(arena, io),
     }
 }
 
@@ -266,8 +265,6 @@ fn startPosix(self: *Command, arena: Allocator, io: std.Io) !void {
 }
 
 fn startWindows(self: *Command, arena: Allocator, io: std.Io) !void {
-    _ = io;
-
     const application_w = try std.unicode.utf8ToUtf16LeAllocZ(arena, self.path);
     const cwd_w = if (self.cwd) |cwd| try std.unicode.utf8ToUtf16LeAllocZ(arena, cwd) else null;
     const command_line_w = if (self.args.len > 0) b: {
@@ -277,15 +274,12 @@ fn startWindows(self: *Command, arena: Allocator, io: std.Io) !void {
     const env_w = if (self.env) |env_map| try createWindowsEnvBlock(arena, env_map) else null;
 
     const any_null_fd = self.stdin == null or self.stdout == null or self.stderr == null;
-    const null_fd = if (any_null_fd) try windows.OpenFile(
-        &[_]u16{ '\\', 'D', 'e', 'v', 'i', 'c', 'e', '\\', 'N', 'u', 'l', 'l' },
-        .{
-            .access_mask = windows.GENERIC_READ | windows.SYNCHRONIZE,
-            .share_access = windows.FILE_SHARE_READ,
-            .creation = windows.OPEN_EXISTING,
-        },
-    ) else null;
-    defer if (null_fd) |fd| windows.CloseHandle(fd);
+    const null_file = if (any_null_fd)
+        try std.Io.Dir.cwd().openFile(io, "NUL", .{ .mode = .read_write })
+    else
+        null;
+    defer if (null_file) |file| file.close(io);
+    const null_fd = if (null_file) |file| file.handle else null;
 
     // TODO: In the case of having FDs instead of pty, need to set up
     // attributes such that the child process only inherits these handles,
@@ -306,7 +300,7 @@ fn startWindows(self: *Command, arena: Allocator, io: std.Io) !void {
             1,
             0,
             &attribute_list_size,
-        ) == 0) return windows.unexpectedError(windows.kernel32.GetLastError());
+        ) == .FALSE) return windows.unexpectedError(windows.GetLastError());
 
         if (windows.exp.kernel32.UpdateProcThreadAttribute(
             attribute_list_buf.ptr,
@@ -316,7 +310,7 @@ fn startWindows(self: *Command, arena: Allocator, io: std.Io) !void {
             @sizeOf(windows.exp.HPCON),
             null,
             null,
-        ) == 0) return windows.unexpectedError(windows.kernel32.GetLastError());
+        ) == .FALSE) return windows.unexpectedError(windows.GetLastError());
 
         break :b .{ attribute_list_buf.ptr, null, null, null };
     } else b: {
@@ -365,7 +359,7 @@ fn startWindows(self: *Command, arena: Allocator, io: std.Io) !void {
         if (cwd_w) |w| w.ptr else null,
         @ptrCast(&startup_info_ex.StartupInfo),
         &process_information,
-    ) == 0) return windows.unexpectedError(windows.kernel32.GetLastError());
+    ) == .FALSE) return windows.unexpectedError(windows.GetLastError());
 
     self.pid = process_information.hProcess;
 }
@@ -460,35 +454,42 @@ pub fn wait(self: Command, block: bool) !Exit {
     if (comptime builtin.os.tag == .windows) {
         // Block until the process exits. This returns immediately if the
         // process already exited.
-        const result = windows.kernel32.WaitForSingleObject(self.pid.?, windows.INFINITE);
-        if (result == windows.WAIT_FAILED) {
-            return windows.unexpectedError(windows.kernel32.GetLastError());
+        const timeout: std.os.windows.LARGE_INTEGER =
+            std.math.minInt(std.os.windows.LARGE_INTEGER);
+        const result = windows.ntdll.NtWaitForSingleObject(
+            self.pid.?,
+            .FALSE,
+            &timeout,
+        );
+        if (result != .SUCCESS) {
+            return windows.unexpectedStatus(result);
         }
 
         var exit_code: windows.DWORD = undefined;
-        const has_code = windows.kernel32.GetExitCodeProcess(self.pid.?, &exit_code) != 0;
+        const has_code = windows.exp.kernel32.GetExitCodeProcess(self.pid.?, &exit_code).toBool();
         if (!has_code) {
-            return windows.unexpectedError(windows.kernel32.GetLastError());
+            return windows.unexpectedError(windows.GetLastError());
         }
 
         return .{ .Exited = exit_code };
     }
 
-    const res = if (block) posix.waitpid(self.pid.?, 0) else res: {
-        // We specify NOHANG because its not our fault if the process we launch
-        // for the tty doesn't properly waitpid its children. We don't want
-        // to hang the terminal over it.
-        // When NOHANG is specified, waitpid will return a pid of 0 if the process
-        // doesn't have a status to report. When that happens, it is as though the
-        // wait call has not been performed, so we need to keep trying until we get
-        // a non-zero pid back, otherwise we end up with zombie processes.
-        while (true) {
-            const res = posix.waitpid(self.pid.?, std.c.W.NOHANG);
-            if (res.pid != 0) break :res res;
+    var status: if (builtin.link_libc) c_int else u32 = undefined;
+    const flags: if (builtin.link_libc) c_int else u32 =
+        if (block) 0 else posix.W.NOHANG;
+    while (true) {
+        const rc = posix.system.waitpid(self.pid.?, &status, flags);
+        switch (posix.errno(rc)) {
+            .SUCCESS => {
+                // NOHANG returns zero while the child is still running.
+                if (rc == 0) continue;
+                return .init(@bitCast(status));
+            },
+            .INTR => continue,
+            .CHILD => return error.ProcessNotFound,
+            else => |err| return posix.unexpectedErrno(err),
         }
-    };
-
-    return .init(res.status);
+    }
 }
 
 /// Sets command->data to data.
@@ -643,7 +644,7 @@ test "Command: os pre exec 1" {
             fn do(_: *Command) ?u8 {
                 // This runs in the child, so we can exit and it won't
                 // kill the test runner.
-                posix.exit(42);
+                std.process.exit(42);
             }
         }).do,
         .rt_pre_exec = null,
@@ -694,7 +695,7 @@ test "Command: rt pre exec 1" {
             fn do(_: *Command) ?u8 {
                 // This runs in the child, so we can exit and it won't
                 // kill the test runner.
-                posix.exit(42);
+                std.process.exit(42);
             }
         }).do,
         .rt_post_fork = null,
@@ -754,7 +755,7 @@ test "Command: rt post fork 1" {
 }
 
 fn createTestStdout(dir: std.Io.Dir) !File {
-    const file = try dir.createFile("stdout.txt", .{ .read = true });
+    const file = try dir.createFile(testing.io, "stdout.txt", .{ .read = true });
     if (builtin.os.tag == .windows) {
         try windows.SetHandleInformation(
             file.handle,
@@ -767,7 +768,7 @@ fn createTestStdout(dir: std.Io.Dir) !File {
 }
 
 fn createTestStderr(dir: std.Io.Dir) !File {
-    const file = try dir.createFile("stderr.txt", .{ .read = true });
+    const file = try dir.createFile(testing.io, "stderr.txt", .{ .read = true });
     if (builtin.os.tag == .windows) {
         try windows.SetHandleInformation(
             file.handle,
@@ -779,11 +780,17 @@ fn createTestStderr(dir: std.Io.Dir) !File {
     return file;
 }
 
+fn createTestTempDir() !TempDir {
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
+    return TempDir.init(testing.io, &env);
+}
+
 test "Command: redirect stdout to file" {
-    var td = try TempDir.init();
-    defer td.deinit();
+    var td = try createTestTempDir();
+    defer td.deinit(testing.io);
     var stdout = try createTestStdout(td.dir);
-    defer stdout.close();
+    defer stdout.close(testing.io);
 
     var cmd: Command = if (builtin.os.tag == .windows) .{
         .path = "C:\\Windows\\System32\\whoami.exe",
@@ -811,18 +818,22 @@ test "Command: redirect stdout to file" {
     try testing.expect(exit == .Exited);
     try testing.expectEqual(@as(u32, 0), @as(u32, exit.Exited));
 
-    // Read our stdout
-    try stdout.seekTo(0);
-    const contents = try stdout.readToEndAlloc(testing.allocator, 1024 * 128);
+    var read_buf: [4096]u8 = undefined;
+    var reader = stdout.reader(testing.io, &read_buf);
+    try reader.seekTo(0);
+    const contents = try reader.interface.allocRemaining(
+        testing.allocator,
+        .limited(1024 * 128),
+    );
     defer testing.allocator.free(contents);
     try testing.expect(contents.len > 0);
 }
 
 test "Command: custom env vars" {
-    var td = try TempDir.init();
-    defer td.deinit();
+    var td = try createTestTempDir();
+    defer td.deinit(testing.io);
     var stdout = try createTestStdout(td.dir);
-    defer stdout.close();
+    defer stdout.close(testing.io);
 
     var env = EnvMap.init(testing.allocator);
     defer env.deinit();
@@ -856,9 +867,13 @@ test "Command: custom env vars" {
     try testing.expect(exit == .Exited);
     try testing.expect(exit.Exited == 0);
 
-    // Read our stdout
-    try stdout.seekTo(0);
-    const contents = try stdout.readToEndAlloc(testing.allocator, 4096);
+    var read_buf: [4096]u8 = undefined;
+    var reader = stdout.reader(testing.io, &read_buf);
+    try reader.seekTo(0);
+    const contents = try reader.interface.allocRemaining(
+        testing.allocator,
+        .limited(4096),
+    );
     defer testing.allocator.free(contents);
 
     if (builtin.os.tag == .windows) {
@@ -869,10 +884,10 @@ test "Command: custom env vars" {
 }
 
 test "Command: custom working directory" {
-    var td = try TempDir.init();
-    defer td.deinit();
+    var td = try createTestTempDir();
+    defer td.deinit(testing.io);
     var stdout = try createTestStdout(td.dir);
-    defer stdout.close();
+    defer stdout.close(testing.io);
 
     var cmd: Command = if (builtin.os.tag == .windows) .{
         .path = "C:\\Windows\\System32\\cmd.exe",
@@ -902,9 +917,13 @@ test "Command: custom working directory" {
     try testing.expect(exit == .Exited);
     try testing.expect(exit.Exited == 0);
 
-    // Read our stdout
-    try stdout.seekTo(0);
-    const contents = try stdout.readToEndAlloc(testing.allocator, 4096);
+    var read_buf: [4096]u8 = undefined;
+    var reader = stdout.reader(testing.io, &read_buf);
+    try reader.seekTo(0);
+    const contents = try reader.interface.allocRemaining(
+        testing.allocator,
+        .limited(4096),
+    );
     defer testing.allocator.free(contents);
 
     if (builtin.os.tag == .windows) {
@@ -926,12 +945,12 @@ test "Command: posix fork handles execveZ failure" {
     if (builtin.os.tag == .windows) {
         return error.SkipZigTest;
     }
-    var td = try TempDir.init();
-    defer td.deinit();
+    var td = try createTestTempDir();
+    defer td.deinit(testing.io);
     var stdout = try createTestStdout(td.dir);
-    defer stdout.close();
+    defer stdout.close(testing.io);
     var stderr = try createTestStderr(td.dir);
-    defer stderr.close();
+    defer stderr.close(testing.io);
 
     var cmd: Command = .{
         .path = "/not/a/binary",
@@ -957,10 +976,10 @@ test "Command: posix fork handles execveZ failure" {
 // terminate in response to that error both the parent and child will continue as if they _are_ the test suite
 // process.
 fn testingStart(self: *Command) !void {
-    self.start(testing.allocator) catch |err| {
+    self.start(testing.allocator, testing.io) catch |err| {
         if (err == error.ExecFailedInChild) {
             // I am a child process, I must not get confused and continue running the rest of the test suite.
-            posix.exit(1);
+            std.process.exit(1);
         }
         return err;
     };

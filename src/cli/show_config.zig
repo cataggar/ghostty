@@ -73,7 +73,7 @@ pub fn run(
     {
         var iter = try args.argsIterator(proc_args, alloc);
         defer iter.deinit();
-        try args.parse(Options, alloc, &opts, &iter);
+        try args.parse(Options, alloc, io, env, &opts, &iter);
     }
 
     var config = if (opts.default)

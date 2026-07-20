@@ -23,7 +23,7 @@ pub const release_channel = std.meta.stringToEnum(ReleaseChannel, @tagName(optio
 /// The optimization mode as a string.
 pub const mode_string = mode: {
     const m = @tagName(builtin.mode);
-    if (std.mem.rfindScalar(u8, m, '.')) |i| break :mode m[i..];
+    if (std.mem.lastIndexOfScalar(u8, m, '.')) |i| break :mode m[i..];
     break :mode m;
 };
 

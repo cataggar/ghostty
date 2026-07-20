@@ -125,8 +125,8 @@ pub fn deinit(self: *Thread) void {
     self.mailbox.destroy(self.alloc);
 
     if (self.search) |*s| {
-        self.opts.mutex.lock();
-        defer self.opts.mutex.unlock();
+        self.opts.mutex.lockUncancelable(self.io);
+        defer self.opts.mutex.unlock(self.io);
         s.deinit(self.opts.terminal);
     }
 }
@@ -320,8 +320,8 @@ fn changeNeedle(self: *Thread, needle: []const u8) !void {
         if (std.ascii.eqlIgnoreCase(s.viewport.needle(), needle)) return;
 
         {
-            self.opts.mutex.lock();
-            defer self.opts.mutex.unlock();
+            self.opts.mutex.lockUncancelable(self.io);
+            defer self.opts.mutex.unlock(self.io);
             s.deinit(self.opts.terminal);
         }
         self.search = null;
@@ -854,7 +854,7 @@ const Search = struct {
 
 const TestUserData = struct {
     const Self = @This();
-    reset: std.Io.Event = .{},
+    reset: std.Io.Event = .unset,
     total: usize = 0,
     selected: ?Event.SelectedMatch = null,
     viewport: []FlattenedHighlight = &.{},
@@ -868,7 +868,7 @@ const TestUserData = struct {
         const ud: *Self = @ptrCast(@alignCast(userdata.?));
         switch (event) {
             .quit => {},
-            .complete => ud.reset.set(),
+            .complete => ud.reset.set(testing.io),
             .total_matches => |v| ud.total = v,
             .selected_match => |v| ud.selected = v,
             .viewport_matches => |v| {
@@ -889,8 +889,10 @@ const TestUserData = struct {
 
 test {
     const alloc = testing.allocator;
-    var mutex: std.Thread.Mutex = .{};
-    var t: Terminal = try .init(alloc, .{ .cols = 20, .rows = 2 });
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
+    var mutex: std.Io.Mutex = .init;
+    var t: Terminal = try .init(alloc, testing.io, &env, .{ .cols = 20, .rows = 2 });
     defer t.deinit(alloc);
 
     var stream = t.vtStream();
@@ -899,7 +901,7 @@ test {
 
     var ud: TestUserData = .{};
     defer ud.deinit();
-    var thread: Thread = try .init(alloc, .{
+    var thread: Thread = try .init(alloc, testing.io, .{
         .mutex = &mutex,
         .terminal = &t,
         .event_cb = &TestUserData.callback,
@@ -920,11 +922,15 @@ test {
             @as([]const u8, "world"),
         ) },
         .forever,
+        testing.io,
     );
     try thread.wakeup.notify();
 
     // Wait for completion
-    try ud.reset.timedWait(100 * std.time.ns_per_ms);
+    try ud.reset.waitTimeout(testing.io, .{ .duration = .{
+        .clock = .awake,
+        .raw = .fromNanoseconds(100 * std.time.ns_per_ms),
+    } });
 
     // Stop the thread
     try thread.stop.notify();
@@ -948,8 +954,10 @@ test {
 
 test "select after active screen removal" {
     const alloc = testing.allocator;
-    var mutex: std.Thread.Mutex = .{};
-    var t: Terminal = try .init(alloc, .{ .cols = 20, .rows = 2 });
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
+    var mutex: std.Io.Mutex = .init;
+    var t: Terminal = try .init(alloc, testing.io, &env, .{ .cols = 20, .rows = 2 });
     defer t.deinit(alloc);
 
     _ = try t.switchScreen(.alternate);
@@ -960,6 +968,7 @@ test "select after active screen removal" {
     try testing.expect(search.screens.contains(.alternate));
 
     var thread: Thread = undefined;
+    thread.io = testing.io;
     thread.search = search;
     thread.opts = .{
         .mutex = &mutex,

@@ -62,21 +62,23 @@ pub const Options = struct {
 pub fn run(
     alloc: Allocator,
     io: std.Io,
+    env: *const std.process.Environ.Map,
     proc_args: std.process.Args,
 ) !u8 {
     var iter = try args.argsIterator(proc_args, alloc);
     defer iter.deinit();
-    return try runArgs(alloc, io, &iter);
+    return try runArgs(alloc, io, env, &iter);
 }
 
 fn runArgs(
     alloc_gpa: Allocator,
     io: std.Io,
+    env: *const std.process.Environ.Map,
     argsIter: anytype,
 ) !u8 {
     var config: Options = .{};
     defer config.deinit();
-    try args.parse(Options, alloc_gpa, &config, argsIter);
+    try args.parse(Options, alloc_gpa, io, env, &config, argsIter);
 
     // Use an arena for all our memory allocs
     var arena = ArenaAllocator.init(alloc_gpa);
@@ -113,7 +115,7 @@ fn runArgs(
     // FreeType); other backends ignore it.
     var font_lib = try font.Library.init(alloc);
     defer font_lib.deinit();
-    var disco = font.Discover.init(font_lib);
+    var disco = font.Discover.init(font_lib, io, env);
     defer disco.deinit();
     var disco_it = try disco.discover(alloc, .{
         .family = config.family,
@@ -141,7 +143,7 @@ fn runArgs(
         const gop = try map.getOrPut(family);
         if (!gop.found_existing) {
             try families.append(alloc, family);
-            gop.value_ptr.* = .{};
+            gop.value_ptr.* = .empty;
         }
         try gop.value_ptr.append(alloc, full_name);
     }

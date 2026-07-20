@@ -21,6 +21,7 @@ const log = std.log.scoped(.app);
 const SurfaceList = std.ArrayList(*apprt.Surface);
 
 io: std.Io,
+args: std.process.Args,
 
 /// General purpose allocator
 alloc: Allocator,
@@ -77,10 +78,15 @@ pub const CreateError = Allocator.Error || font.SharedGridSet.InitError;
 
 /// Create a new app instance. This returns a stable pointer to the app
 /// instance which is required for callbacks.
-pub fn create(alloc: Allocator, io: std.Io, env: *const std.process.Environ.Map) CreateError!*App {
+pub fn create(
+    alloc: Allocator,
+    io: std.Io,
+    args: std.process.Args,
+    env: *const std.process.Environ.Map,
+) CreateError!*App {
     var app = try alloc.create(App);
     errdefer alloc.destroy(app);
-    try app.init(alloc, io, env);
+    try app.init(alloc, io, args, env);
     return app;
 }
 
@@ -94,16 +100,18 @@ pub fn init(
     self: *App,
     alloc: Allocator,
     io: std.Io,
+    args: std.process.Args,
     env: *const std.process.Environ.Map,
 ) CreateError!void {
-    var font_grid_set = try font.SharedGridSet.init(alloc);
+    var font_grid_set = try font.SharedGridSet.init(alloc, io, env);
     errdefer font_grid_set.deinit();
 
     self.* = .{
         .alloc = alloc,
         .io = io,
+        .args = args,
         .environ = env,
-        .surfaces = .{},
+        .surfaces = .empty,
         .mailbox = .{},
         .font_grid_set = font_grid_set,
         .config_conditional_state = .{},
@@ -119,7 +127,7 @@ pub fn deinit(self: *App) void {
     // We should have zero items in the grid set at this point because
     // destroy only gets called when the app is shutting down and this
     // should gracefully close all surfaces.
-    assert(self.font_grid_set.count() == 0);
+    assert(self.font_grid_set.count(self.io) == 0);
     self.font_grid_set.deinit();
 }
 
@@ -155,6 +163,7 @@ pub fn updateConfig(self: *App, rt_app: *apprt.App, config: *const Config) !void
     var applied_: ?configpkg.Config = config.changeConditionalState(
         self.config_conditional_state,
         self.io,
+        self.args,
         self.environ,
     ) catch |err| err: {
         log.warn("failed to apply conditional state to config err={}", .{err});

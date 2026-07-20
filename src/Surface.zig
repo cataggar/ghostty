@@ -470,6 +470,7 @@ pub fn init(
     var config_: ?configpkg.Config = config_original.changeConditionalState(
         app.config_conditional_state,
         app.io,
+        app.args,
         app.environ,
     ) catch |err| err: {
         log.warn("failed to apply conditional state to config err={}", .{err});
@@ -516,6 +517,7 @@ pub fn init(
     // Setup our font group. This will reuse an existing font group if
     // it was already loaded.
     const font_grid_key, const font_grid = try app.font_grid_set.ref(
+        app.io,
         &derived_config.font,
         font_size,
     );
@@ -550,7 +552,7 @@ pub fn init(
 
     // Create our terminal grid with the initial size
     const app_mailbox: App.Mailbox = .{ .rt_app = rt_app, .mailbox = &app.mailbox, .io = app.io };
-    var renderer_impl = try Renderer.init(alloc, .{
+    var renderer_impl = try Renderer.init(alloc, app.io, .{
         .config = try .init(alloc, config),
         .font_grid = font_grid,
         .size = size,
@@ -558,7 +560,7 @@ pub fn init(
         .rt_surface = rt_surface,
         .thread = &self.renderer_thread,
     });
-    errdefer renderer_impl.deinit();
+    errdefer renderer_impl.deinit(app.io);
 
     // The mutex used to protect our renderer state.
     const mutex = try alloc.create(std.Io.Mutex);
@@ -631,7 +633,7 @@ pub fn init(
         var env: std.process.Environ.Map = rt_surface.defaultTermioEnv() catch |err| env: {
             // If an error occurs, we don't want to block surface startup.
             log.warn("error getting env map for surface err={}", .{err});
-            break :env internal_os.getSurfaceEnvMap(alloc, app.environ) catch
+            break :env internal_os.getSurfaceEnvMap(alloc, app.io, app.environ) catch
                 .init(alloc);
         };
         errdefer env.deinit();
@@ -646,7 +648,7 @@ pub fn init(
         );
 
         // Initialize our IO backend
-        var io_exec = try termio.Exec.init(alloc, .{
+        var io_exec = try termio.Exec.init(alloc, app.io, .{
             .command = command,
             .env = env,
             .env_override = config.env,
@@ -665,7 +667,7 @@ pub fn init(
         var io_mailbox = try termio.Mailbox.initSPSC(alloc);
         errdefer io_mailbox.deinit(alloc);
 
-        try termio.Termio.init(&self.io, alloc, .{
+        try termio.Termio.init(&self.io, alloc, app.io, &env, .{
             .size = size,
             .full_config = config,
             .config = try termio.Termio.DerivedConfig.init(alloc, config),
@@ -723,7 +725,7 @@ pub fn init(
     self.io_thr = try std.Thread.spawn(
         .{},
         termio.Thread.threadMain,
-        .{ &self.io_thread, &self.io },
+        .{ &self.io_thread, self.app.io, &self.io },
     );
     self.io_thr.setName(self.app.io, "io") catch {};
 
@@ -811,7 +813,7 @@ pub fn deinit(self: *Surface) void {
     // We need to deinit AFTER everything is stopped, since there are
     // shared values between the two threads.
     self.renderer_thread.deinit();
-    self.renderer.deinit();
+    self.renderer.deinit(self.app.io);
     self.io_thread.deinit();
     self.mouse.selection_gesture.deinit(&self.io.terminal);
     self.io.deinit();
@@ -827,7 +829,7 @@ pub fn deinit(self: *Surface) void {
     self.keyboard.table_stack.deinit(self.alloc);
 
     // Clean up our font grid
-    self.app.font_grid_set.deref(self.font_grid_key);
+    self.app.font_grid_set.deref(self.app.io, self.font_grid_key);
 
     // Clean up our render state
     if (self.renderer_state.preedit) |p| self.alloc.free(p.codepoints);
@@ -872,7 +874,7 @@ fn queueIo(
         }
     }
 
-    self.io.queueMessage(msg, mutex);
+    self.io.queueMessage(self.app.io, msg, mutex);
 }
 
 /// Forces the surface to render. This is useful for when the surface
@@ -881,7 +883,7 @@ fn queueIo(
 pub fn draw(self: *Surface) !void {
     // Renderers are required to support `drawFrame` being called from
     // the main thread, so that they can update contents during resize.
-    try self.renderer.drawFrame(true);
+    try self.renderer.drawFrame(self.app.io, true);
 }
 
 /// Activate the inspector. This will begin collecting inspection data.
@@ -1725,6 +1727,7 @@ pub fn updateConfig(
     var config_: ?configpkg.Config = original.changeConditionalState(
         self.config_conditional_state,
         self.app.io,
+        self.app.args,
         self.app.environ,
     ) catch |err| err: {
         log.warn("failed to apply conditional state to config err={}", .{err});
@@ -2434,6 +2437,7 @@ pub fn setFontSize(self: *Surface, size: font.face.DesiredSize) !void {
 
     // We need to build up a new font stack for this font size.
     const font_grid_key, const font_grid = try self.app.font_grid_set.ref(
+        self.app.io,
         &self.config.font,
         self.font_size,
     );
@@ -3822,8 +3826,8 @@ pub fn mouseButtonCallback(
     }
 
     if (button == .left and action == .release) {
-        self.renderer_state.mutex.lock();
-        defer self.renderer_state.mutex.unlock();
+        self.renderer_state.mutex.lockUncancelable(self.app.io);
+        defer self.renderer_state.mutex.unlock(self.app.io);
 
         // The selection gesture tracks whether a press became a drag by
         // comparing the release cell to the original press cell. Resolve the
@@ -3970,7 +3974,7 @@ pub fn mouseButtonCallback(
             .xpos = pos.x,
             .ypos = pos.y,
             .max_distance = @floatFromInt(self.size.cell.width),
-            .repeat_interval = self.config.mouse_interval,
+            .repeat_interval = @intCast(self.config.mouse_interval),
             .word_boundary_codepoints = self.config.selection_word_chars,
             .behaviors = &.{
                 .cell,
@@ -4427,7 +4431,7 @@ fn openUrl(
     log.warn("apprt did not handle open URL action, falling back to default opener", .{});
     try internal_os.open(
         self.app.io,
-        self.app.environ,
+        self.app.environ.*,
         action.kind,
         action.url,
     );
@@ -4938,7 +4942,7 @@ pub fn performBindingAction(self: *Surface, action: input.Binding.Action) !bool 
                 // We need to assign directly to self.search because we need
                 // a stable pointer back to the thread state.
                 self.search = .{
-                    .state = try .init(self.alloc, .{
+                    .state = try .init(self.alloc, self.app.io, .{
                         .mutex = self.renderer_state.mutex,
                         .terminal = self.renderer_state.terminal,
                         .event_cb = &searchCallback,

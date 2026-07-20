@@ -34,6 +34,10 @@ const log = std.log.scoped(.font_shared_grid_set);
 /// The allocator to use for all heap allocations.
 alloc: Allocator,
 
+io: std.Io,
+
+env: *const std.process.Environ.Map,
+
 /// The map of font configurations to SharedGrid instances.
 map: Map = .{},
 
@@ -49,12 +53,18 @@ lock: std.Io.Mutex = .init,
 pub const InitError = Library.InitError;
 
 /// Initialize a new SharedGridSet.
-pub fn init(alloc: Allocator) InitError!SharedGridSet {
+pub fn init(
+    alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+) InitError!SharedGridSet {
     var font_lib = try Library.init(alloc);
     errdefer font_lib.deinit();
 
     return .{
         .alloc = alloc,
+        .io = io,
+        .env = env,
         .map = .{},
         .font_lib = font_lib,
     };
@@ -134,7 +144,7 @@ pub fn ref(
         // Build our collection. This is the expensive operation that
         // involves finding fonts, loading them (maybe, some are deferred),
         // etc.
-        var c = try self.collection(&key, font_size, config);
+        var c = try self.collection(io, &key, font_size, config);
         errdefer c.deinit(self.alloc);
 
         // Setup our enabled/disabled styles
@@ -160,6 +170,7 @@ pub fn ref(
 /// initial font size.
 fn collection(
     self: *SharedGridSet,
+    io: std.Io,
     key: *const Key,
     size: DesiredSize,
     config: *const DerivedConfig,
@@ -169,6 +180,7 @@ fn collection(
     // - metric_modifiers is owned by the key which is freed only when
     //   the ref count for this grid reaches zero.
     const load_options: Collection.LoadOptions = .{
+        .io = io,
         .library = self.font_lib,
         .size = size,
         .freetype_load_flags = key.freetype_load_flags,
@@ -264,6 +276,7 @@ fn collection(
     _ = try c.add(
         self.alloc,
         try .init(
+            load_options.io,
             self.font_lib,
             font.embedded.variable,
             load_options.faceOptions(),
@@ -277,6 +290,7 @@ fn collection(
     try (try c.getFace(try c.add(
         self.alloc,
         try .init(
+            load_options.io,
             self.font_lib,
             font.embedded.variable,
             load_options.faceOptions(),
@@ -293,6 +307,7 @@ fn collection(
     _ = try c.add(
         self.alloc,
         try .init(
+            load_options.io,
             self.font_lib,
             font.embedded.variable_italic,
             load_options.faceOptions(),
@@ -306,6 +321,7 @@ fn collection(
     try (try c.getFace(try c.add(
         self.alloc,
         try .init(
+            load_options.io,
             self.font_lib,
             font.embedded.variable_italic,
             load_options.faceOptions(),
@@ -324,6 +340,7 @@ fn collection(
     _ = try c.add(
         self.alloc,
         try .init(
+            load_options.io,
             self.font_lib,
             font.embedded.symbols_nerd_font,
             load_options.faceOptions(),
@@ -363,6 +380,7 @@ fn collection(
         _ = try c.add(
             self.alloc,
             try .init(
+                load_options.io,
                 self.font_lib,
                 font.embedded.emoji,
                 load_options.faceOptions(),
@@ -377,6 +395,7 @@ fn collection(
         _ = try c.add(
             self.alloc,
             try .init(
+                load_options.io,
                 self.font_lib,
                 font.embedded.emoji_text,
                 load_options.faceOptions(),
@@ -446,7 +465,7 @@ fn discover(self: *SharedGridSet) !?*Discover {
     // If we initialized, use it
     if (self.font_discover) |*v| return v;
 
-    self.font_discover = .init(self.font_lib);
+    self.font_discover = .init(self.font_lib, self.io, self.env);
     return &self.font_discover.?;
 }
 
@@ -808,7 +827,10 @@ test SharedGridSet {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var set = try SharedGridSet.init(alloc);
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
+
+    var set = try SharedGridSet.init(alloc, testing.io, &env);
     defer set.deinit();
 
     var cfg = try Config.default(alloc);
@@ -818,21 +840,21 @@ test SharedGridSet {
     defer keycfg.deinit();
 
     // Get a grid for the given config
-    const key1, const grid1 = try set.ref(&keycfg, .{ .points = 12 });
-    try testing.expectEqual(@as(usize, 1), set.count());
+    const key1, const grid1 = try set.ref(testing.io, &keycfg, .{ .points = 12 });
+    try testing.expectEqual(@as(usize, 1), set.count(testing.io));
 
     // Get another
-    const key2, const grid2 = try set.ref(&keycfg, .{ .points = 12 });
-    try testing.expectEqual(@as(usize, 1), set.count());
+    const key2, const grid2 = try set.ref(testing.io, &keycfg, .{ .points = 12 });
+    try testing.expectEqual(@as(usize, 1), set.count(testing.io));
 
     // They should be pointer equivalent
     try testing.expectEqual(@intFromPtr(grid1), @intFromPtr(grid2));
 
     // If I deref grid2 then we should still have a count of 1
-    set.deref(key2);
-    try testing.expectEqual(@as(usize, 1), set.count());
+    set.deref(testing.io, key2);
+    try testing.expectEqual(@as(usize, 1), set.count(testing.io));
 
     // If I deref grid1 then we should have a count of 0
-    set.deref(key1);
-    try testing.expectEqual(@as(usize, 0), set.count());
+    set.deref(testing.io, key1);
+    try testing.expectEqual(@as(usize, 0), set.count(testing.io));
 }

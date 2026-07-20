@@ -2559,10 +2559,11 @@ fn testShaperWithFont(alloc: Allocator, font_req: TestFont) !TestShaper {
     errdefer lib.deinit();
 
     var c = Collection.init();
-    c.load_options = .{ .library = lib };
+    c.load_options = .{ .io = std.testing.io, .library = lib };
 
     // Setup group
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12 } },
@@ -2575,6 +2576,7 @@ fn testShaperWithFont(alloc: Allocator, font_req: TestFont) !TestShaper {
     if (font.options.backend != .coretext) {
         // Coretext doesn't support Noto's format
         _ = try c.add(alloc, try .init(
+            std.testing.io,
             lib,
             testEmoji,
             .{ .size = .{ .points = 12 } },
@@ -2602,6 +2604,7 @@ fn testShaperWithFont(alloc: Allocator, font_req: TestFont) !TestShaper {
         });
     }
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testEmojiText,
         .{ .size = .{ .points = 12 } },
@@ -2636,7 +2639,7 @@ fn testShaperWithDiscoveredFont(alloc: Allocator, font_req: [:0]const u8) !TestS
     errdefer lib.deinit();
 
     var c = Collection.init();
-    c.load_options = .{ .library = lib };
+    c.load_options = .{ .io = std.testing.io, .library = lib };
 
     // Discover and add our font to the collection.
     {
@@ -2652,7 +2655,7 @@ fn testShaperWithDiscoveredFont(alloc: Allocator, font_req: [:0]const u8) !TestS
         errdefer face.deinit();
         _ = try c.add(
             alloc,
-            try face.load(lib, .{ .size = .{ .points = 12 } }),
+            try face.load(std.testing.io, lib, .{ .size = .{ .points = 12 } }),
             .{
                 .style = .regular,
                 .fallback = false,

@@ -18,7 +18,8 @@ pub const Feature = struct {
     value: u32,
 
     pub fn fromString(str: []const u8) ?Feature {
-        return .fromReader(.fixed(str));
+        var reader: std.Io.Reader = .fixed(str);
+        return .fromReader(&reader);
     }
 
     /// Parse a single font feature setting from a std.io.Reader, with a version
@@ -64,9 +65,9 @@ pub const Feature = struct {
             // If we're fast-forwarding from an error we just wanna
             // stop at the first boundary and ignore all other bytes.
             .err => {
-                reader.discardDelimiterExclusive(',') catch {};
+                _ = reader.discardDelimiterExclusive(',') catch {};
                 // Discard the delimiter too
-                reader.takeByte(1) catch {};
+                _ = reader.takeByte() catch {};
                 return null;
             },
 
@@ -241,12 +242,12 @@ pub const FeatureList = struct {
     ) !void {
         var reader: std.Io.Reader = .fixed(str);
         while (reader.seek < reader.end) {
-            const i = reader.pos;
+            const i = reader.seek;
             if (Feature.fromReader(&reader)) |feature| {
                 try self.features.append(alloc, feature);
             } else log.warn(
                 "failed to parse font feature setting: \"{s}\"",
-                .{reader.data[i..reader.seek]},
+                .{str[i..reader.seek]},
             );
         }
     }

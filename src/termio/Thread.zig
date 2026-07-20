@@ -135,7 +135,7 @@ pub fn deinit(self: *Thread) void {
 /// The main entrypoint for the thread.
 pub fn threadMain(self: *Thread, io: std.Io, tio: *termio.Termio) void {
     // Call child function so we can use errors...
-    self.threadMain_(tio) catch |err| {
+    self.threadMain_(io, tio) catch |err| {
         log.warn("error in io thread err={}", .{err});
 
         // Use an arena to simplify memory management below
@@ -234,7 +234,7 @@ pub fn threadMain(self: *Thread, io: std.Io, tio: *termio.Termio) void {
     }
 }
 
-fn threadMain_(self: *Thread, io: *termio.Termio) !void {
+fn threadMain_(self: *Thread, stdio: std.Io, io: *termio.Termio) !void {
     defer log.debug("IO thread exited", .{});
 
     // Right now, on Darwin, `std.Thread.setName` can only name the current
@@ -259,13 +259,13 @@ fn threadMain_(self: *Thread, io: *termio.Termio) !void {
 
     // This is the data sent to xev callbacks. We want a pointer to both
     // ourselves and the thread data so we can thread that through (pun intended).
-    var cb: CallbackData = .{ .self = self, .io = io };
+    var cb: CallbackData = .{ .self = self, .io = stdio, .tio = io };
 
     // Run our thread start/end callbacks. This allows the implementation
     // to hook into the event loop as needed. The thread data is created
     // on the stack here so that it has a stable pointer throughout the
     // lifetime of the thread.
-    try io.threadEnter(self, &cb.data);
+    try io.threadEnter(stdio, self, &cb.data);
     defer cb.data.deinit();
     defer io.threadExit(&cb.data);
 
@@ -293,7 +293,7 @@ fn drainMailbox(
     cb: *CallbackData,
 ) !void {
     // We assert when starting the thread that this is the state
-    const mailbox = cb.io.mailbox.spsc.queue;
+    const mailbox = cb.tio.mailbox.spsc.queue;
     const tio = cb.tio;
     const data = &cb.data;
 
@@ -313,17 +313,17 @@ fn drainMailbox(
 
         log.debug("mailbox message={s}", .{@tagName(message)});
         switch (message) {
-            .color_scheme_report => |v| try tio.colorSchemeReport(data, v.force),
+            .color_scheme_report => |v| try tio.colorSchemeReport(cb.io, data, v.force),
             .crash => @panic("crash request, crashing intentionally"),
             .change_config => |config| {
                 defer config.alloc.destroy(config.ptr);
-                try tio.changeConfig(data, config.ptr);
+                try tio.changeConfig(cb.io, data, config.ptr);
             },
             .inspector => |v| self.flags.has_inspector = v,
             .resize => |v| self.handleResize(cb, v),
-            .size_report => |v| try tio.sizeReport(data, v),
-            .clear_screen => |v| try tio.clearScreen(data, v.history),
-            .scroll_viewport => |v| tio.scrollViewport(v),
+            .size_report => |v| try tio.sizeReport(cb.io, data, v),
+            .clear_screen => |v| try tio.clearScreen(cb.io, data, v.history),
+            .scroll_viewport => |v| tio.scrollViewport(cb.io, v),
             .selection_scroll => |v| {
                 if (v) {
                     self.startScrollTimer(cb);
@@ -331,10 +331,10 @@ fn drainMailbox(
                     self.stopScrollTimer();
                 }
             },
-            .jump_to_prompt => |v| try tio.jumpToPrompt(v),
+            .jump_to_prompt => |v| try tio.jumpToPrompt(cb.io, v),
             .start_synchronized_output => self.startSynchronizedOutput(cb),
             .linefeed_mode => |v| self.flags.linefeed_mode = v,
-            .focused => |v| try tio.focusGained(data, v),
+            .focused => |v| try tio.focusGained(cb.io, data, v),
             .write_small => |v| try tio.queueWrite(
                 data,
                 v.data[0..v.len],
@@ -409,7 +409,7 @@ fn syncResetCallback(
     };
 
     const cb = cb_ orelse return .disarm;
-    cb.io.resetSynchronizedOutput();
+    cb.tio.resetSynchronizedOutput(cb.io);
     return .disarm;
 }
 
@@ -431,7 +431,7 @@ fn coalesceCallback(
 
     if (cb.self.coalesce_data.resize) |v| {
         cb.self.coalesce_data.resize = null;
-        cb.io.resize(&cb.data, v) catch |err| {
+        cb.tio.resize(cb.io, &cb.data, v) catch |err| {
             log.warn("error during resize err={}", .{err});
         };
     }
@@ -515,7 +515,7 @@ fn selectionScrollCallback(
     const self = cb.self;
 
     // Send the tick to the main surface
-    _ = cb.io.surface_mailbox.push(
+    _ = cb.tio.surface_mailbox.push(
         .{ .selection_scroll_tick = self.scroll_active },
         .{ .instant = {} },
     );

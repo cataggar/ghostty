@@ -448,7 +448,16 @@ pub fn add(
         .target = target,
         .optimize = optimize,
     })) |dep| {
-        const vaxis = dep.module("vaxis");
+        const vaxis = b.createModule(.{
+            .root_source_file = dep.path("src/main.zig"),
+            .target = target,
+            .optimize = optimize,
+        });
+        const zigimg = dep.builder.dependency("zigimg", .{
+            .target = target,
+            .optimize = optimize,
+        });
+        vaxis.addImport("zigimg", zigimg.module("zigimg"));
         if (uucode) |mod| vaxis.addImport("uucode", mod);
         step.root_module.addImport("vaxis", vaxis);
     }

@@ -171,7 +171,7 @@ test Benchmark {
 
     var s: Simple = .{};
     const b = s.benchmark();
-    const result = try b.run(.once);
+    const result = try b.run(testing.io, .once);
     try testing.expectEqual(1, s.setup_i);
     try testing.expectEqual(1, s.step_i);
     try testing.expectEqual(1, result.iterations);

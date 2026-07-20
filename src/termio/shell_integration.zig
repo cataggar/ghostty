@@ -105,6 +105,7 @@ test "force shell" {
         defer res.deinit();
 
         const result = try setup(
+            testing.io,
             alloc,
             res.path,
             .{ .shell = "sh" },
@@ -126,6 +127,7 @@ test "shell integration failure" {
     defer env.deinit();
 
     const result = try setup(
+        testing.io,
         alloc,
         "/nonexistent",
         .{ .shell = "sh" },
@@ -608,7 +610,7 @@ test "bash: missing resources" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    const resources_dir = try tmp_dir.dir.realPathFileAlloc(alloc, ".");
+    const resources_dir = try tmp_dir.dir.realPathFileAlloc(testing.io, ".", alloc);
     defer alloc.free(resources_dir);
 
     var env = EnvMap.init(alloc);
@@ -742,7 +744,7 @@ test "xdg: missing resources" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    const resources_dir = try tmp_dir.dir.realPathFileAlloc(alloc, ".");
+    const resources_dir = try tmp_dir.dir.realPathFileAlloc(testing.io, ".", alloc);
     defer alloc.free(resources_dir);
 
     var env = EnvMap.init(alloc);
@@ -837,7 +839,7 @@ test "nushell" {
     var env = EnvMap.init(alloc);
     defer env.deinit();
 
-    const command = try setupNushell(alloc, .{ .shell = "nu" }, res.path, &env);
+    const command = try setupNushell(std.testing.io, alloc, .{ .shell = "nu" }, res.path, &env);
     try testing.expectEqualStrings("nu --execute 'use ghostty *'", command.?.shell);
 
     var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
@@ -871,7 +873,7 @@ test "nushell: unsupported options" {
         var env = EnvMap.init(alloc);
         defer env.deinit();
 
-        try testing.expect(try setupNushell(alloc, .{ .shell = cmdline }, res.path, &env) == null);
+        try testing.expect(try setupNushell(std.testing.io, alloc, .{ .shell = cmdline }, res.path, &env) == null);
         try testing.expect(env.get("XDG_DATA_DIRS") != null);
         try testing.expect(env.get("GHOSTTY_SHELL_INTEGRATION_XDG_DIR") != null);
     }
@@ -886,13 +888,13 @@ test "nushell: missing resources" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    const resources_dir = try tmp_dir.dir.realPathFileAlloc(alloc, ".");
+    const resources_dir = try tmp_dir.dir.realPathFileAlloc(testing.io, ".", alloc);
     defer alloc.free(resources_dir);
 
     var env = EnvMap.init(alloc);
     defer env.deinit();
 
-    try testing.expect(try setupNushell(alloc, .{ .shell = "nu" }, resources_dir, &env) == null);
+    try testing.expect(try setupNushell(testing.io, alloc, .{ .shell = "nu" }, resources_dir, &env) == null);
     try testing.expectEqual(0, env.count());
 }
 
@@ -977,7 +979,7 @@ test "zsh: missing resources" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    const resources_dir = try tmp_dir.dir.realPathFileAlloc(alloc, ".");
+    const resources_dir = try tmp_dir.dir.realPathFileAlloc(testing.io, ".", alloc);
     defer alloc.free(resources_dir);
 
     var env = EnvMap.init(alloc);
@@ -991,7 +993,7 @@ test "zsh: missing resources" {
 const TmpResourcesDir = struct {
     allocator: Allocator,
     tmp_dir: std.testing.TmpDir,
-    path: []const u8,
+    path: [:0]const u8,
     shell_path: []const u8,
 
     fn init(allocator: Allocator, shell: Shell) !TmpResourcesDir {
@@ -1004,9 +1006,9 @@ const TmpResourcesDir = struct {
             "shell-integration/{s}",
             .{@tagName(shell)},
         );
-        try tmp_dir.dir.createDirPath(relative_shell_path);
+        try tmp_dir.dir.createDirPath(std.testing.io, relative_shell_path);
 
-        const path = try tmp_dir.dir.realPathFileAlloc(allocator, ".");
+        const path = try tmp_dir.dir.realPathFileAlloc(std.testing.io, ".", allocator);
         errdefer allocator.free(path);
 
         const shell_path = try std.fmt.allocPrint(
@@ -1017,7 +1019,7 @@ const TmpResourcesDir = struct {
         errdefer allocator.free(shell_path);
 
         switch (shell) {
-            .bash => try tmp_dir.dir.writeFile(.{
+            .bash => try tmp_dir.dir.writeFile(std.testing.io, .{
                 .sub_path = "shell-integration/bash/ghostty.bash",
                 .data = "",
             }),

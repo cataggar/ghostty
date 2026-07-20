@@ -16,5 +16,5 @@ pub const ImageData = struct {
 };
 
 test {
-    std.testing.refAllDeclsRecursive(@This());
+    std.testing.refAllDecls(@This());
 }

@@ -354,14 +354,20 @@ pub const OS2 = struct {
     }!OS2 {
         var reader: std.Io.Reader = .fixed(data);
 
-        const version = try reader.takeInt(sfnt.uint16, .big);
+        const version = reader.takeInt(sfnt.uint16, .big) catch |err| switch (err) {
+            error.ReadFailed => unreachable,
+            error.EndOfStream => return error.EndOfStream,
+        };
 
         // Return to the start, cause the version is part of the struct.
         reader.seek = 0;
 
         switch (version) {
             5 => {
-                const table = try reader.takeStruct(OS2v5, .big);
+                const table = reader.takeStruct(OS2v5, .big) catch |err| switch (err) {
+                    error.ReadFailed => unreachable,
+                    error.EndOfStream => return error.EndOfStream,
+                };
                 return .{
                     .version = table.version,
                     .xAvgCharWidth = table.xAvgCharWidth,
@@ -405,7 +411,10 @@ pub const OS2 = struct {
                 };
             },
             4, 3, 2 => {
-                const table = try reader.takeStruct(OS2v4_3_2, .big);
+                const table = reader.takeStruct(OS2v4_3_2, .big) catch |err| switch (err) {
+                    error.ReadFailed => unreachable,
+                    error.EndOfStream => return error.EndOfStream,
+                };
                 return .{
                     .version = table.version,
                     .xAvgCharWidth = table.xAvgCharWidth,
@@ -447,7 +456,10 @@ pub const OS2 = struct {
                 };
             },
             1 => {
-                const table = try reader.takeStruct(OS2v1, .big);
+                const table = reader.takeStruct(OS2v1, .big) catch |err| switch (err) {
+                    error.ReadFailed => unreachable,
+                    error.EndOfStream => return error.EndOfStream,
+                };
                 return .{
                     .version = table.version,
                     .xAvgCharWidth = table.xAvgCharWidth,
@@ -484,7 +496,10 @@ pub const OS2 = struct {
                 };
             },
             0 => {
-                const table = try reader.takeStruct(OS2v0, .big);
+                const table = reader.takeStruct(OS2v0, .big) catch |err| switch (err) {
+                    error.ReadFailed => unreachable,
+                    error.EndOfStream => return error.EndOfStream,
+                };
                 return .{
                     .version = table.version,
                     .xAvgCharWidth = table.xAvgCharWidth,

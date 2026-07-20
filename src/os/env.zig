@@ -26,10 +26,20 @@ pub fn getSurfaceEnvMap(
 /// `std.c.environ` fails.
 pub fn getEnvMapC(alloc: Allocator) std.process.Environ.Map {
     var env: std.process.Environ.Map = .init(alloc);
-    const posix_block: std.process.Environ.PosixBlock = .{
-        .slice = std.mem.sliceTo(std.c.environ, null),
-    };
-    env.putPosixBlock(posix_block.view()) catch {};
+    if (comptime builtin.os.tag == .windows) {
+        const windows = std.os.windows;
+        const peb = windows.peb();
+        std.debug.assert(windows.ntdll.RtlEnterCriticalSection(peb.FastPebLock) == .SUCCESS);
+        defer std.debug.assert(windows.ntdll.RtlLeaveCriticalSection(peb.FastPebLock) == .SUCCESS);
+        env.putWindowsBlock(.{
+            .ptr = peb.ProcessParameters.Environment,
+        }) catch {};
+    } else {
+        const posix_block: std.process.Environ.PosixBlock = .{
+            .slice = std.mem.sliceTo(std.c.environ, null),
+        };
+        env.putPosixBlock(posix_block.view()) catch {};
+    }
     return env;
 }
 

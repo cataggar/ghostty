@@ -47,9 +47,10 @@ subprocess: Subprocess,
 /// up the internal state necessary to start it later.
 pub fn init(
     alloc: Allocator,
+    io: std.Io,
     cfg: Config,
 ) !Exec {
-    var subprocess = try Subprocess.init(alloc, cfg);
+    var subprocess = try Subprocess.init(alloc, io, cfg);
     errdefer subprocess.deinit();
 
     return .{ .subprocess = subprocess };
@@ -90,7 +91,7 @@ pub fn threadEnter(
     td: *termio.Termio.ThreadData,
 ) !void {
     // Start our subprocess
-    const pty_fds = self.subprocess.start(alloc) catch |err| {
+    const pty_fds = self.subprocess.start(alloc, io) catch |err| {
         // If we specifically got this error then we are in the forked
         // process and our child failed to execute. If we DIDN'T
         // get this specific error then we're in the parent and
@@ -140,7 +141,7 @@ pub fn threadEnter(
     const read_thread = try std.Thread.spawn(
         .{},
         if (builtin.os.tag == .windows) ReadThread.threadMainWindows else ReadThread.threadMainPosix,
-        .{ pty_fds.read, tio, pipe[0] },
+        .{ pty_fds.read, io, tio, pipe[0] },
     );
     read_thread.setName(
         tio.terminal.io,
@@ -222,8 +223,8 @@ pub fn threadExit(self: *Exec, td: *termio.Termio.ThreadData) void {
 
     if (comptime builtin.os.tag == .windows) {
         // Interrupt the blocking read so the thread can see the quit message
-        if (windows.kernel32.CancelIoEx(exec.read_thread_fd, null) == 0) {
-            switch (windows.kernel32.GetLastError()) {
+        if (windows.exp.kernel32.CancelIoEx(exec.read_thread_fd, null) == .FALSE) {
+            switch (windows.GetLastError()) {
                 .NOT_FOUND => {},
                 else => |err| log.warn("error interrupting read thread err={}", .{err}),
             }
@@ -326,8 +327,6 @@ fn termiosTimer(
     _: *xev.Completion,
     r: xev.Timer.RunError!void,
 ) xev.CallbackAction {
-    // FIXME(apk2/ghostty-zig016): see Subprocess.init for context.
-    const io: std.Io = undefined;
     // log.debug("termios timer fired", .{});
 
     // This should never happen because we guard starting our
@@ -349,6 +348,7 @@ fn termiosTimer(
     };
 
     const td = td_.?;
+    const io = td.io;
     assert(td.backend == .exec);
     const exec = &td.backend.exec;
 
@@ -621,13 +621,7 @@ const Subprocess = struct {
 
     /// Initialize the subprocess. This will NOT start it, this only sets
     /// up the internal state necessary to start it later.
-    pub fn init(gpa: Allocator, cfg: Config) !Subprocess {
-        // FIXME(apk2/ghostty-zig016): the WIP zig-0.16 port of ghostty
-        // references `io` and `global_state` here without plumbing them
-        // through. Stub both so the file analyzes; this function is not
-        // yet exercised from apk2's lib_vt.zig consumption path.
-        const io: std.Io = undefined;
-        const global_state: struct { environ_map: std.process.Environ.Map } = undefined;
+    pub fn init(gpa: Allocator, io: std.Io, cfg: Config) !Subprocess {
         // We have a lot of maybe-allocations that all share the same lifetime
         // so use an arena so we don't end up in an accounting nightmare.
         var arena = std.heap.ArenaAllocator.init(gpa);
@@ -676,7 +670,7 @@ const Subprocess = struct {
         ghostty_path: {
             // Skip this for flatpak since host cannot reach them
             if ((comptime build_config.flatpak) and
-                internal_os.isFlatpak())
+                internal_os.isFlatpak(io))
             {
                 break :ghostty_path;
             }
@@ -835,7 +829,7 @@ const Subprocess = struct {
             alloc,
             shell_command,
             io,
-            &global_state.environ_map,
+            &env,
             internal_os.passwd,
         ) catch |err| switch (err) {
             // If we fail to allocate space for the command we want to
@@ -900,14 +894,10 @@ const Subprocess = struct {
 
     /// Start the subprocess. If the subprocess is already started this
     /// will crash.
-    pub fn start(self: *Subprocess, alloc: Allocator) !struct {
+    pub fn start(self: *Subprocess, alloc: Allocator, io: std.Io) !struct {
         read: Pty.Fd,
         write: Pty.Fd,
     } {
-        // FIXME(apk2/ghostty-zig016): WIP zig-0.16 port references `io`
-        // and `global_state` here without plumbing. Stub both; this code
-        // path is not exercised from apk2's lib_vt.zig consumption.
-        const io: std.Io = undefined;
         assert(self.pty == null and self.process == null);
 
         // This function is funny because on POSIX systems it can
@@ -956,7 +946,7 @@ const Subprocess = struct {
         // This is important because our cwd can be set by the shell (OSC 7)
         // and we don't want to break new windows.
         const cwd: ?[:0]const u8 = if (self.cwd) |proposed| cwd: {
-            if ((comptime build_config.flatpak) and internal_os.isFlatpak()) {
+            if ((comptime build_config.flatpak) and internal_os.isFlatpak(io)) {
                 // Flatpak sandboxing prevents access to certain reserved paths
                 // regardless of configured permissions. Perform a test spawn
                 // to get around this problem
@@ -1057,7 +1047,7 @@ const Subprocess = struct {
             .data = self,
         };
 
-        cmd.start(alloc) catch |err| {
+        cmd.start(alloc, io) catch |err| {
             // We have to do this because start on Windows can't
             // ever return ExecFailedInChild
             const StartError = error{ExecFailedInChild} || @TypeOf(err);
@@ -1159,8 +1149,9 @@ const Subprocess = struct {
         if (command.pid) |pid| {
             switch (builtin.os.tag) {
                 .windows => {
-                    if (windows.kernel32.TerminateProcess(pid, 0) == 0) {
-                        return windows.unexpectedError(windows.kernel32.GetLastError());
+                    switch (windows.ntdll.NtTerminateProcess(pid, .SUCCESS)) {
+                        .SUCCESS, .PROCESS_IS_TERMINATING => {},
+                        else => |status| return windows.unexpectedStatus(status),
                     }
 
                     _ = try command.wait(false);
@@ -1402,7 +1393,7 @@ pub const ReadThread = struct {
         bufs: [buffer_count][buffer_capacity]u8 = undefined,
     };
 
-    fn threadMainPosix(fd: posix.fd_t, io: *termio.Termio, quit: posix.fd_t) void {
+    fn threadMainPosix(fd: posix.fd_t, stdio: std.Io, io: *termio.Termio, quit: posix.fd_t) void {
         // Always close our end of the pipe when we exit.
         defer _ = std.c.close(quit);
 
@@ -1485,7 +1476,7 @@ pub const ReadThread = struct {
 
             // The batch buffer is owned by this stage until we advance
             // the tail below, so it is safe to read outside the lock.
-            io.processOutput(batch);
+            io.processOutput(stdio, batch);
 
             {
                 pipeline.mutex.lock();
@@ -1508,7 +1499,7 @@ pub const ReadThread = struct {
 
             // Batch boundary: hand the renderer state mutex off if
             // the renderer is waiting. See renderer.State.lockDemand.
-            io.renderer_state.yieldToDemand();
+            io.renderer_state.yieldToDemand(stdio);
         }
     }
 
@@ -1770,7 +1761,7 @@ pub const ReadThread = struct {
         return true;
     }
 
-    fn threadMainWindows(fd: posix.fd_t, io: *termio.Termio, quit: posix.fd_t) void {
+    fn threadMainWindows(fd: posix.fd_t, stdio: std.Io, io: *termio.Termio, quit: posix.fd_t) void {
         // Always close our end of the pipe when we exit.
         defer _ = std.c.close(quit);
 
@@ -1785,8 +1776,8 @@ pub const ReadThread = struct {
         while (true) {
             while (true) {
                 var n: windows.DWORD = 0;
-                if (windows.kernel32.ReadFile(fd, &buf, buf.len, &n, null) == 0) {
-                    const err = windows.kernel32.GetLastError();
+                if (windows.exp.kernel32.ReadFile(fd, &buf, buf.len, &n, null) == .FALSE) {
+                    const err = windows.GetLastError();
                     switch (err) {
                         // Check for a quit signal
                         .OPERATION_ABORTED => break,
@@ -1798,17 +1789,17 @@ pub const ReadThread = struct {
                     }
                 }
 
-                @call(.always_inline, termio.Termio.processOutput, .{ io, buf[0..n] });
+                @call(.always_inline, termio.Termio.processOutput, .{ io, stdio, buf[0..n] });
 
                 // See threadMainPosix: hand the renderer state mutex
                 // off if the renderer is waiting, since this loop
                 // would otherwise starve it under heavy output.
-                io.renderer_state.yieldToDemand();
+                io.renderer_state.yieldToDemand(stdio);
             }
 
             var quit_bytes: windows.DWORD = 0;
-            if (windows.exp.kernel32.PeekNamedPipe(quit, null, 0, null, &quit_bytes, null) == 0) {
-                const err = windows.kernel32.GetLastError();
+            if (windows.exp.kernel32.PeekNamedPipe(quit, null, 0, null, &quit_bytes, null) == .FALSE) {
+                const err = windows.GetLastError();
                 log.err("quit pipe reader error err={}", .{err});
                 unreachable;
             }
@@ -1847,7 +1838,7 @@ fn execCommand(
     // the proper environment variables set, a login shell, and proper
     // hushlogin behavior.
     if (comptime builtin.target.os.tag.isDarwin()) darwin: {
-        const passwd = passwdpkg.get(alloc) catch |err| {
+        const passwd = passwdpkg.get(alloc, io) catch |err| {
             log.warn("failed to read passwd, not using a login shell err={}", .{err});
             break :darwin;
         };
@@ -2021,9 +2012,11 @@ test "execCommand darwin: shell command" {
     var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
-    const result = try execCommand(alloc, .{ .shell = "foo bar baz" }, struct {
-        fn get(_: Allocator) !PasswdEntry {
+    const result = try execCommand(alloc, .{ .shell = "foo bar baz" }, testing.io, &env, struct {
+        fn get(_: Allocator, _: std.Io) !PasswdEntry {
             return .{
                 .name = "testuser",
             };
@@ -2048,12 +2041,14 @@ test "execCommand darwin: direct command" {
     var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
     const result = try execCommand(alloc, .{ .direct = &.{
         "foo",
         "bar baz",
-    } }, struct {
-        fn get(_: Allocator) !PasswdEntry {
+    } }, testing.io, &env, struct {
+        fn get(_: Allocator, _: std.Io) !PasswdEntry {
             return .{
                 .name = "testuser",
             };
@@ -2075,12 +2070,16 @@ test "execCommand: shell command, empty passwd" {
     var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
     const result = try execCommand(
         alloc,
         .{ .shell = "foo bar baz" },
+        testing.io,
+        &env,
         struct {
-            fn get(_: Allocator) !PasswdEntry {
+            fn get(_: Allocator, _: std.Io) !PasswdEntry {
                 // Empty passwd entry means we can't construct a macOS
                 // login command and falls back to POSIX behavior.
                 return .{};
@@ -2101,12 +2100,16 @@ test "execCommand: shell command, error passwd" {
     var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
     const result = try execCommand(
         alloc,
         .{ .shell = "foo bar baz" },
+        testing.io,
+        &env,
         struct {
-            fn get(_: Allocator) !PasswdEntry {
+            fn get(_: Allocator, _: std.Io) !PasswdEntry {
                 // Failed passwd entry means we can't construct a macOS
                 // login command and falls back to POSIX behavior.
                 return error.Fail;
@@ -2127,14 +2130,16 @@ test "execCommand: direct command, error passwd" {
     var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
     const result = try execCommand(alloc, .{
         .direct = &.{
             "foo",
             "bar baz",
         },
-    }, struct {
-        fn get(_: Allocator) !PasswdEntry {
+    }, testing.io, &env, struct {
+        fn get(_: Allocator, _: std.Io) !PasswdEntry {
             // Failed passwd entry means we can't construct a macOS
             // login command and falls back to POSIX behavior.
             return error.Fail;
@@ -2153,6 +2158,8 @@ test "execCommand: direct command, config freed" {
     var arena = ArenaAllocator.init(testing.allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
     var command_arena = ArenaAllocator.init(testing.allocator);
     const command_alloc = command_arena.allocator();
@@ -2163,8 +2170,8 @@ test "execCommand: direct command, config freed" {
         },
     }).clone(command_alloc);
 
-    const result = try execCommand(alloc, command, struct {
-        fn get(_: Allocator) !PasswdEntry {
+    const result = try execCommand(alloc, command, testing.io, &env, struct {
+        fn get(_: Allocator, _: std.Io) !PasswdEntry {
             // Failed passwd entry means we can't construct a macOS
             // login command and falls back to POSIX behavior.
             return error.Fail;

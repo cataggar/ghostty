@@ -230,6 +230,7 @@ pub const RunIterator = struct {
                 // official replacement character.
                 if (try self.opts.grid.getIndex(
                     alloc,
+                    self.opts.grid.resolver.collection.load_options.?.io,
                     0xFFFD, // replacement char
                     font_style,
                     presentation,
@@ -238,6 +239,7 @@ pub const RunIterator = struct {
                 // Fallback to space
                 if (try self.opts.grid.getIndex(
                     alloc,
+                    self.opts.grid.resolver.collection.load_options.?.io,
                     ' ',
                     font_style,
                     presentation,
@@ -323,12 +325,15 @@ pub const RunIterator = struct {
         style: font.Style,
         presentation: ?font.Presentation,
     ) !?font.Collection.Index {
+        const io = self.opts.grid.resolver.collection.load_options.?.io;
+
         if (cell.isEmpty() or
             cell.codepoint() == 0 or
             cell.codepoint() == terminal.kitty.graphics.unicode.placeholder)
         {
             return try self.opts.grid.getIndex(
                 alloc,
+                io,
                 ' ',
                 style,
                 presentation,
@@ -339,6 +344,7 @@ pub const RunIterator = struct {
         const primary_cp: u32 = cell.codepoint();
         const primary = try self.opts.grid.getIndex(
             alloc,
+            io,
             primary_cp,
             style,
             presentation,
@@ -370,6 +376,7 @@ pub const RunIterator = struct {
             // certain ZWJ-combined characters like the male and female signs.
             const idx = try self.opts.grid.getIndex(
                 alloc,
+                io,
                 cp,
                 style,
                 null,
@@ -379,11 +386,11 @@ pub const RunIterator = struct {
 
         // We need to find a candidate that has ALL of our codepoints
         for (candidates.items) |idx| {
-            if (!self.opts.grid.hasCodepoint(idx, primary_cp, presentation)) continue;
+            if (!self.opts.grid.hasCodepoint(io, idx, primary_cp, presentation)) continue;
             for (graphemes) |cp| {
                 // Ignore Emoji ZWJs
                 if (cp == 0xFE0E or cp == 0xFE0F or cp == 0x200D) continue;
-                if (!self.opts.grid.hasCodepoint(idx, cp, null)) break;
+                if (!self.opts.grid.hasCodepoint(io, idx, cp, null)) break;
             } else {
                 // If the while completed, then we have a candidate that
                 // supports all of our codepoints.

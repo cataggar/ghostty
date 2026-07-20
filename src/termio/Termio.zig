@@ -277,6 +277,7 @@ pub fn init(self: *Termio, alloc: Allocator, io: std.Io, env: *const std.process
     // isn't safe to use until self.* is set.
     const handler: StreamHandler = .{
         .alloc = alloc,
+        .io = io,
         .termio_mailbox = &self.mailbox,
         .surface_mailbox = opts.surface_mailbox,
         .renderer_state = opts.renderer_state,
@@ -325,6 +326,7 @@ pub fn deinit(self: *Termio) void {
 
 pub fn threadEnter(
     self: *Termio,
+    io: std.Io,
     thread: *termio.Thread,
     data: *ThreadData,
 ) !void {
@@ -338,12 +340,13 @@ pub fn threadEnter(
     // and set that all up now so that we can error before we actually
     // start the command and pty.
     const inputs: ?[]const ThreadEnterState.Input = if (self.thread_enter_state) |v|
-        try v.prepareInput()
+        try v.prepareInput(io)
     else
         null;
 
     data.* = .{
         .alloc = self.alloc,
+        .io = io,
         .loop = &thread.loop,
         .renderer_state = self.renderer_state,
         .surface_mailbox = self.surface_mailbox,
@@ -352,7 +355,7 @@ pub fn threadEnter(
     };
 
     // Setup our backend
-    try self.backend.threadEnter(self.alloc, self, data);
+    try self.backend.threadEnter(self.alloc, io, self, data);
     errdefer self.backend.threadExit(data);
 
     // If we have inputs, then queue them all up.
@@ -656,7 +659,7 @@ pub fn processOutput(self: *Termio, io: std.Io, buf: []const u8) void {
     // the lock to grab our read data.
     self.renderer_state.mutex.lockUncancelable(io);
     defer self.renderer_state.mutex.unlock(io);
-    self.processOutputLocked(buf);
+    self.processOutputLocked(io, buf);
 }
 
 /// Process output from readdata but the lock is already held.

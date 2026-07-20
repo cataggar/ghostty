@@ -202,10 +202,12 @@ fn stepSimd(ptr: *anyopaque) Benchmark.Error!void {
 test CodepointWidth {
     const testing = std.testing;
     const alloc = testing.allocator;
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
-    const impl: *CodepointWidth = try .create(alloc, .{});
+    const impl: *CodepointWidth = try .create(alloc, testing.io, &env, .{});
     defer impl.destroy(alloc);
 
     const bench = impl.benchmark();
-    _ = try bench.run(.once);
+    _ = try bench.run(std.testing.io, .once);
 }

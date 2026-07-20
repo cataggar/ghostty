@@ -97,7 +97,7 @@ pub fn main(init: std.process.Init.Minimal) !MainReturn {
     }
 
     // Create our app state
-    const app: *App = try App.create(alloc, io, init.environ);
+    const app: *App = try App.create(alloc, io, init.args, init.environ);
     defer app.destroy();
 
     // Create our runtime app

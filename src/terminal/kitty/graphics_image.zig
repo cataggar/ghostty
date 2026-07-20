@@ -577,14 +577,11 @@ pub const Rect = struct {
 // documents that this should work.
 var test_env: std.process.Environ.Map = .init(std.testing.allocator);
 
-/// Test helper: get absolute path of a file in a Dir via /proc/self/fd.
+/// Test helper: get absolute path of a file in a Dir.
 fn testDirPath(dir: std.Io.Dir, sub_path: []const u8, buf: []u8) ![]u8 {
-    // Read the absolute path of the directory from /proc/self/fd/<handle>
     var link_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
-    var proc_path_buf: [64]u8 = undefined;
-    const proc_path = std.fmt.bufPrint(&proc_path_buf, "/proc/self/fd/{d}", .{dir.handle}) catch unreachable;
     const io = std.testing.io;
-    const dir_path_len = try std.Io.Dir.cwd().readLink(io, proc_path, &link_buf);
+    const dir_path_len = try dir.realPath(io, &link_buf);
     const dir_path = link_buf[0..dir_path_len];
     // Join with sub_path
     const total_len = dir_path.len + 1 + sub_path.len;

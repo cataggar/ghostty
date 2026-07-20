@@ -204,14 +204,15 @@ pub fn name(self: DeferredFace, buf: []u8) ![]const u8 {
 /// Load the deferred font face. This does nothing if the face is loaded.
 pub fn load(
     self: *DeferredFace,
+    io: std.Io,
     lib: Library,
     opts: font.face.Options,
 ) !Face {
     return switch (options.backend) {
-        .fontconfig_freetype => try self.loadFontconfig(lib, opts),
-        .freetype_windows => try self.loadWindows(lib, opts),
+        .fontconfig_freetype => try self.loadFontconfig(io, lib, opts),
+        .freetype_windows => try self.loadWindows(io, lib, opts),
         .coretext, .coretext_harfbuzz, .coretext_noshape => try self.loadCoreText(lib, opts),
-        .coretext_freetype => try self.loadCoreTextFreetype(lib, opts),
+        .coretext_freetype => try self.loadCoreTextFreetype(io, lib, opts),
         .web_canvas => try self.loadWebCanvas(opts),
 
         // Unreachable because we must be already loaded or have the
@@ -222,6 +223,7 @@ pub fn load(
 
 fn loadFontconfig(
     self: *DeferredFace,
+    io: std.Io,
     lib: Library,
     opts: font.face.Options,
 ) !Face {
@@ -231,7 +233,7 @@ fn loadFontconfig(
     const filename = (try fc.pattern.get(.file, 0)).string;
     const face_index = (try fc.pattern.get(.index, 0)).integer;
 
-    var face = try Face.initFile(lib, filename, face_index, opts);
+    var face = try Face.initFile(io, lib, filename, face_index, opts);
     errdefer face.deinit();
     try face.setVariations(fc.variations, opts);
     return face;
@@ -239,12 +241,13 @@ fn loadFontconfig(
 
 fn loadWindows(
     self: *DeferredFace,
+    io: std.Io,
     lib: Library,
     opts: font.face.Options,
 ) !Face {
     const w = self.win.?;
 
-    var face = try Face.initFile(lib, w.path, w.face_index, opts);
+    var face = try Face.initFile(io, lib, w.path, w.face_index, opts);
     errdefer face.deinit();
     try face.setVariations(w.variations, opts);
     return face;
@@ -265,6 +268,7 @@ fn loadCoreText(
 
 fn loadCoreTextFreetype(
     self: *DeferredFace,
+    io: std.Io,
     lib: Library,
     opts: font.face.Options,
 ) !Face {
@@ -300,7 +304,7 @@ fn loadCoreTextFreetype(
     // Face index 0 is not always correct. We don't ship this configuration
     // in a release build. Users should use the pure CoreText builds.
     //std.log.warn("path={s}", .{path_slice});
-    var face = try Face.initFile(lib, buf[0..path_slice.len :0], 0, opts);
+    var face = try Face.initFile(io, lib, buf[0..path_slice.len :0], 0, opts);
     errdefer face.deinit();
     try face.setVariations(ct.variations, opts);
 
@@ -492,7 +496,7 @@ test "fontconfig" {
     try testing.expect(n.len > 0);
 
     // Load it and verify it works
-    var face = try def.load(lib, .{ .size = .{ .points = 12 } });
+    var face = try def.load(testing.io, lib, .{ .size = .{ .points = 12 } });
     defer face.deinit();
     try testing.expect(face.glyphIndex(' ') != null);
 }
@@ -524,7 +528,7 @@ test "coretext" {
     try testing.expect(n.len > 0);
 
     // Load it and verify it works
-    var face = try def.load(lib, .{ .size = .{ .points = 12 } });
+    var face = try def.load(testing.io, lib, .{ .size = .{ .points = 12 } });
     defer face.deinit();
     try testing.expect(face.glyphIndex(' ') != null);
 }

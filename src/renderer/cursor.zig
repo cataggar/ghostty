@@ -70,7 +70,9 @@ pub fn style(
 test "cursor: default uses configured style" {
     const testing = std.testing;
     const alloc = testing.allocator;
-    var term: terminal.Terminal = try .init(alloc, .{ .cols = 10, .rows = 10 });
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
+    var term: terminal.Terminal = try .init(alloc, testing.io, &env, .{ .cols = 10, .rows = 10 });
     defer term.deinit(alloc);
 
     term.screens.active.cursor.cursor_style = .bar;

@@ -174,6 +174,7 @@ pub fn hasCodepoint(self: Face, cp: u32, p: ?font.Presentation) bool {
 pub fn renderGlyph(
     self: Face,
     alloc: Allocator,
+    io: std.Io,
     atlas: *font.Atlas,
     cp: u32,
     opts: font.Glyph.RenderOptions,
@@ -220,7 +221,7 @@ pub fn renderGlyph(
     const padding_y = height / 4;
 
     // Make a canvas of the desired size
-    var canvas = try font.sprite.Canvas.init(alloc, width, height, padding_x, padding_y);
+    var canvas = try font.sprite.Canvas.init(alloc, io, width, height, padding_x, padding_y);
     defer canvas.deinit();
 
     try draw(cp, &canvas, width, height, metrics);
@@ -276,13 +277,12 @@ fn testDiffAtlas(
     // data in to the reference PNGs.
     const test_file = try std.Io.Dir.openFileAbsolute(io, path, .{ .mode = .read_only });
     defer test_file.close(io);
-    const test_bytes = try test_file.readToEndAlloc(
-        alloc,
-        std.math.maxInt(usize),
-    );
+    var test_read_buf: [4096]u8 = undefined;
+    var test_reader = test_file.reader(io, &test_read_buf);
+    const test_bytes = try test_reader.interface.allocRemaining(alloc, .unlimited);
     defer alloc.free(test_bytes);
 
-    const cwd_absolute = try std.Io.Dir.cwd().realPathFileAlloc(alloc, ".");
+    const cwd_absolute = try std.Io.Dir.cwd().realPathFileAlloc(io, ".", alloc);
     defer alloc.free(cwd_absolute);
 
     // Get the reference file contents to compare.
@@ -307,15 +307,14 @@ fn testDiffAtlas(
                 .{ cwd_absolute, i, i + 0xFF, width, height, thickness },
             );
             defer alloc.free(test_path);
-            try std.Io.Dir.copyFileAbsolute(io, path, std.Io.Dir.cwd(), test_path, .{});
+            try std.Io.Dir.copyFileAbsolute(path, test_path, io, .{});
 
             return true;
         };
-    defer ref_file.close();
-    const ref_bytes = try ref_file.readToEndAlloc(
-        alloc,
-        std.math.maxInt(usize),
-    );
+    defer ref_file.close(io);
+    var ref_read_buf: [4096]u8 = undefined;
+    var ref_reader = ref_file.reader(io, &ref_read_buf);
+    const ref_bytes = try ref_reader.interface.allocRemaining(alloc, .unlimited);
     defer alloc.free(ref_bytes);
 
     // Do our PNG bytes comparison, if it's the same then we can
@@ -331,7 +330,7 @@ fn testDiffAtlas(
         .{ cwd_absolute, i, i + 0xFF, width, height, thickness },
     );
     defer alloc.free(test_path);
-    try std.Io.Dir.copyFileAbsolute(io, path, test_path, .{});
+    try std.Io.Dir.copyFileAbsolute(path, test_path, io, .{});
 
     // Use wuffs to decode the reference PNG to raw pixels.
     // These will be RGBA, so when diffing we can just compare
@@ -395,7 +394,7 @@ fn testDiffAtlas(
         .{ i, i + 0xFF, width, height, thickness },
     );
     defer alloc.free(diff_path);
-    try z2d.png_exporter.writeToPNGFile(diff, diff_path, .{});
+    try z2d.png_exporter.writeToPNGFile(io, diff, diff_path, .{});
     log.err(
         "One or more glyphs differ from reference file in range U+{X}...U+{X}! " ++
             "test={s}, reference={s}, diff={s}",
@@ -440,6 +439,7 @@ fn testDrawRanges(
     // Canvas to draw glyphs on, we'll reuse this for all glyphs.
     var canvas = try font.sprite.Canvas.init(
         alloc,
+        io,
         width,
         height,
         padding_x,
@@ -464,7 +464,7 @@ fn testDrawRanges(
     // Try to make the sprite_face_test folder if it doesn't already exist.
     var dir = testing.tmpDir(.{});
     defer dir.cleanup();
-    const tmp_dir = try dir.dir.realPathFileAlloc(io, alloc, ".");
+    const tmp_dir = try dir.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(tmp_dir);
 
     // We set this to true if we have any fails so we can
@@ -483,7 +483,7 @@ fn testDrawRanges(
                     .{ tmp_dir, i, i + 0xFF, width, height, thickness },
                 );
                 defer alloc.free(path);
-                try z2d.png_exporter.writeToPNGFile(atlas, path, .{});
+                try z2d.png_exporter.writeToPNGFile(io, atlas, path, .{});
 
                 if (try testDiffAtlas(
                     io,
@@ -529,7 +529,7 @@ fn testDrawRanges(
         .{ tmp_dir, i, i + 0xFF, width, height, thickness },
     );
     defer alloc.free(path);
-    try z2d.png_exporter.writeToPNGFile(atlas, path, .{});
+    try z2d.png_exporter.writeToPNGFile(io, atlas, path, .{});
     if (try testDiffAtlas(
         io,
         alloc,
@@ -595,19 +595,19 @@ test "full height cursor sprites respect cursor height metric" {
     face.metrics.cursor_height = 12;
     // bar
     {
-        const glyph = try face.renderGlyph(alloc, &atlas, @intFromEnum(Sprite.cursor_bar), .{ .grid_metrics = face.metrics });
+        const glyph = try face.renderGlyph(alloc, testing.io, &atlas, @intFromEnum(Sprite.cursor_bar), .{ .grid_metrics = face.metrics });
         try testing.expectEqual(12, glyph.height);
         try testing.expectEqual(14, glyph.offset_y);
     }
     // rect
     {
-        const glyph = try face.renderGlyph(alloc, &atlas, @intFromEnum(Sprite.cursor_rect), .{ .grid_metrics = face.metrics });
+        const glyph = try face.renderGlyph(alloc, testing.io, &atlas, @intFromEnum(Sprite.cursor_rect), .{ .grid_metrics = face.metrics });
         try testing.expectEqual(12, glyph.height);
         try testing.expectEqual(14, glyph.offset_y);
     }
     // hollow rect
     {
-        const glyph = try face.renderGlyph(alloc, &atlas, @intFromEnum(Sprite.cursor_hollow_rect), .{ .grid_metrics = face.metrics });
+        const glyph = try face.renderGlyph(alloc, testing.io, &atlas, @intFromEnum(Sprite.cursor_hollow_rect), .{ .grid_metrics = face.metrics });
         try testing.expectEqual(12, glyph.height);
         try testing.expectEqual(14, glyph.offset_y);
     }
@@ -616,19 +616,19 @@ test "full height cursor sprites respect cursor height metric" {
     face.metrics.cursor_height = 16;
     // bar
     {
-        const glyph = try face.renderGlyph(alloc, &atlas, @intFromEnum(Sprite.cursor_bar), .{ .grid_metrics = face.metrics });
+        const glyph = try face.renderGlyph(alloc, testing.io, &atlas, @intFromEnum(Sprite.cursor_bar), .{ .grid_metrics = face.metrics });
         try testing.expectEqual(16, glyph.height);
         try testing.expectEqual(16, glyph.offset_y);
     }
     // rect
     {
-        const glyph = try face.renderGlyph(alloc, &atlas, @intFromEnum(Sprite.cursor_rect), .{ .grid_metrics = face.metrics });
+        const glyph = try face.renderGlyph(alloc, testing.io, &atlas, @intFromEnum(Sprite.cursor_rect), .{ .grid_metrics = face.metrics });
         try testing.expectEqual(16, glyph.height);
         try testing.expectEqual(16, glyph.offset_y);
     }
     // hollow rect
     {
-        const glyph = try face.renderGlyph(alloc, &atlas, @intFromEnum(Sprite.cursor_hollow_rect), .{ .grid_metrics = face.metrics });
+        const glyph = try face.renderGlyph(alloc, testing.io, &atlas, @intFromEnum(Sprite.cursor_hollow_rect), .{ .grid_metrics = face.metrics });
         try testing.expectEqual(16, glyph.height);
         try testing.expectEqual(16, glyph.offset_y);
     }
@@ -637,19 +637,19 @@ test "full height cursor sprites respect cursor height metric" {
     face.metrics.cursor_height = 20;
     // bar
     {
-        const glyph = try face.renderGlyph(alloc, &atlas, @intFromEnum(Sprite.cursor_bar), .{ .grid_metrics = face.metrics });
+        const glyph = try face.renderGlyph(alloc, testing.io, &atlas, @intFromEnum(Sprite.cursor_bar), .{ .grid_metrics = face.metrics });
         try testing.expectEqual(20, glyph.height);
         try testing.expectEqual(18, glyph.offset_y);
     }
     // rect
     {
-        const glyph = try face.renderGlyph(alloc, &atlas, @intFromEnum(Sprite.cursor_rect), .{ .grid_metrics = face.metrics });
+        const glyph = try face.renderGlyph(alloc, testing.io, &atlas, @intFromEnum(Sprite.cursor_rect), .{ .grid_metrics = face.metrics });
         try testing.expectEqual(20, glyph.height);
         try testing.expectEqual(18, glyph.offset_y);
     }
     // hollow rect
     {
-        const glyph = try face.renderGlyph(alloc, &atlas, @intFromEnum(Sprite.cursor_hollow_rect), .{ .grid_metrics = face.metrics });
+        const glyph = try face.renderGlyph(alloc, testing.io, &atlas, @intFromEnum(Sprite.cursor_hollow_rect), .{ .grid_metrics = face.metrics });
         try testing.expectEqual(20, glyph.height);
         try testing.expectEqual(18, glyph.offset_y);
     }

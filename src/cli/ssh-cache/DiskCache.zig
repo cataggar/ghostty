@@ -265,7 +265,10 @@ fn writeCacheFile(
 
     var buf: [1024]u8 = undefined;
     var atomic_file = try dir.createFileAtomic(self.io, cache_basename, .{
-        .permissions = .fromMode(0o600),
+        .permissions = if (builtin.os.tag == .windows)
+            .default_file
+        else
+            .fromMode(0o600),
         .make_path = true,
         .replace = true,
     });
@@ -460,7 +463,7 @@ test "disk cache clear" {
         var file_writer = file.writer(io, &buf);
         try file_writer.interface.writeAll("HELLO!");
     }
-    const path = try tmp.dir.realPathFileAlloc(io, alloc, "cache");
+    const path = try tmp.dir.realPathFileAlloc(io, "cache", alloc);
     defer alloc.free(path);
 
     // Setup our cache
@@ -491,7 +494,7 @@ test "disk cache operations" {
         try writer.writeAll("HELLO!");
         try writer.flush();
     }
-    const path = try tmp.dir.realPathFileAlloc(io, alloc, "cache");
+    const path = try tmp.dir.realPathFileAlloc(io, "cache", alloc);
     defer alloc.free(path);
 
     // Setup our cache. Adding the same key twice exercises both the new
@@ -522,7 +525,7 @@ test "disk cache cleans up temp files" {
     var tmp = testing.tmpDir(.{ .iterate = true });
     defer tmp.cleanup();
 
-    const tmp_path = try tmp.dir.realPathFileAlloc(io, alloc, ".");
+    const tmp_path = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(tmp_path);
     const cache_path = try std.Io.Dir.path.join(alloc, &.{ tmp_path, "cache" });
     defer alloc.free(cache_path);
@@ -549,7 +552,7 @@ test "disk cache prune" {
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    const tmp_path = try tmp.dir.realPathFileAlloc(io, alloc, ".");
+    const tmp_path = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(tmp_path);
     const cache_path = try std.Io.Dir.path.join(alloc, &.{ tmp_path, "cache" });
     defer alloc.free(cache_path);
@@ -584,7 +587,7 @@ test "disk cache prune missing file" {
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
 
-    const tmp_path = try tmp.dir.realPathFileAlloc(io, alloc, ".");
+    const tmp_path = try tmp.dir.realPathFileAlloc(io, ".", alloc);
     defer alloc.free(tmp_path);
     const cache_path = try std.Io.Dir.path.join(alloc, &.{ tmp_path, "cache" });
     defer alloc.free(cache_path);
@@ -614,7 +617,7 @@ test "disk cache reads duplicate keys" {
         );
         try file_writer.interface.flush();
     }
-    const path = try tmp.dir.realPathFileAlloc(io, alloc, "cache");
+    const path = try tmp.dir.realPathFileAlloc(io, "cache", alloc);
     defer alloc.free(path);
 
     const cache: DiskCache = .{ .io = io, .path = path };
@@ -649,7 +652,7 @@ test "disk cache reads survive allocation failure" {
         );
         try file_writer.interface.flush();
     }
-    const path = try tmp.dir.realPathFileAlloc(io, testing.allocator, "cache");
+    const path = try tmp.dir.realPathFileAlloc(io, "cache", testing.allocator);
     defer testing.allocator.free(path);
 
     const cache: DiskCache = .{ .io = io, .path = path };
@@ -683,7 +686,7 @@ test "disk cache add survives allocation failure" {
 
     var tmp = testing.tmpDir(.{});
     defer tmp.cleanup();
-    const tmp_path = try tmp.dir.realPathFileAlloc(io, testing.allocator, ".");
+    const tmp_path = try tmp.dir.realPathFileAlloc(io, ".", testing.allocator);
     defer testing.allocator.free(tmp_path);
     const path = try std.Io.Dir.path.join(testing.allocator, &.{ tmp_path, "cache" });
     defer testing.allocator.free(path);

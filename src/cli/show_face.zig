@@ -122,7 +122,7 @@ fn runArgs(
     var opts: Options = .{};
     defer opts.deinit();
 
-    args.parse(Options, alloc_gpa, &opts, argsIter) catch |err| switch (err) {
+    args.parse(Options, alloc_gpa, io, env, &opts, argsIter) catch |err| switch (err) {
         error.ActionHelpRequested => return err,
         else => {
             try stderr.print("Error parsing args: {}\n", .{err});
@@ -181,7 +181,7 @@ fn runArgs(
         }
     }
 
-    var font_grid_set = font.SharedGridSet.init(alloc) catch |err| {
+    var font_grid_set = font.SharedGridSet.init(alloc, io, env) catch |err| {
         try stderr.print("Unable to initialize font grid set: {}", .{err});
         return 1;
     };
@@ -199,13 +199,14 @@ fn runArgs(
     };
 
     const font_grid_key, const font_grid = font_grid_set.ref(
+        io,
         &font_config,
         font_size,
     ) catch |err| {
         try stderr.print("Unable to get font grid: {}", .{err});
         return 1;
     };
-    defer font_grid_set.deref(font_grid_key);
+    defer font_grid_set.deref(io, font_grid_key);
 
     if (opts.cp) |cp| {
         if (try lookup(alloc, stdout, stderr, font_grid, opts.style, opts.presentation, cp)) |rc| return rc;

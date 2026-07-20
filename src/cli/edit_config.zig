@@ -65,7 +65,7 @@ pub fn run(
             alloc,
         );
         defer iter.deinit();
-        try args.parse(Options, alloc, &opts, &iter);
+        try args.parse(Options, alloc, io, env, &opts, &iter);
     }
 
     const result = runInner(

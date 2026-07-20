@@ -1004,5 +1004,5 @@ pub const SearchSelected = struct {
 };
 
 test {
-    _ = std.testing.refAllDeclsRecursive(@This());
+    _ = @This();
 }

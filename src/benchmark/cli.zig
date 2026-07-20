@@ -90,7 +90,7 @@ fn mainActionImpl(
         .cli => |a| {
             var iter = try cli.args.argsIterator(a, alloc);
             defer iter.deinit();
-            try cli.args.parse(Options, alloc, &opts, &iter);
+            try cli.args.parse(Options, alloc, io, env, &opts, &iter);
         },
         .string => |str| {
             var iter = try std.process.Args.IteratorGeneral(.{}).init(
@@ -98,7 +98,7 @@ fn mainActionImpl(
                 str,
             );
             defer iter.deinit();
-            try cli.args.parse(Options, alloc, &opts, &iter);
+            try cli.args.parse(Options, alloc, io, env, &opts, &iter);
         },
     }
 

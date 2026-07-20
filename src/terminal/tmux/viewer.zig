@@ -15,6 +15,13 @@ const output = @import("output.zig");
 
 const log = std.log.scoped(.terminal_tmux_viewer);
 
+fn testEnv() *std.process.Environ.Map {
+    const Env = struct {
+        var map: std.process.Environ.Map = .init(std.testing.allocator);
+    };
+    return &Env.map;
+}
+
 // TODO: A list of TODOs as I think about them.
 // - We need to make startup more robust so session and block can happen
 //   out of order.
@@ -1524,7 +1531,7 @@ fn testViewer(viewer: *Viewer, steps: []const TestStep) !void {
 }
 
 test "immediate exit" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -1544,7 +1551,7 @@ test "immediate exit" {
 }
 
 test "session changed resets state" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -1635,7 +1642,7 @@ test "session changed resets state" {
 }
 
 test "initial flow" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -1816,7 +1823,7 @@ test "initial flow" {
 }
 
 test "layout change" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -1887,7 +1894,7 @@ test "layout change" {
 }
 
 test "layout_change does not return command when queue not empty" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -1948,7 +1955,7 @@ test "layout_change does not return command when queue not empty" {
 }
 
 test "layout_change returns command when queue was empty" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -2015,7 +2022,7 @@ test "layout_change returns command when queue was empty" {
 }
 
 test "window_add queues list_windows when queue empty" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -2076,7 +2083,7 @@ test "window_add queues list_windows when queue empty" {
 }
 
 test "window_add queues list_windows when queue not empty" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -2132,7 +2139,7 @@ test "window_add queues list_windows when queue not empty" {
 }
 
 test "two pane flow with pane state" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{

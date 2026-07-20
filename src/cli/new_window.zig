@@ -166,7 +166,6 @@ pub fn run(
     env: *const std.process.Environ.Map,
     proc_args: std.process.Args,
 ) !u8 {
-    _ = env;
     var iter = try args.argsIterator(
         proc_args,
         alloc,
@@ -178,7 +177,7 @@ pub fn run(
         .stderr().writer(io, &buffer);
     const stderr = &stderr_writer.interface;
 
-    const result = runArgs(alloc, io, &iter, stderr);
+    const result = runArgs(alloc, io, env, &iter, stderr);
     stderr.flush() catch {};
     return result;
 }
@@ -186,13 +185,14 @@ pub fn run(
 fn runArgs(
     alloc_gpa: Allocator,
     io: std.Io,
+    env: *const std.process.Environ.Map,
     argsIter: anytype,
     stderr: *std.Io.Writer,
 ) !u8 {
     var opts: Options = .{};
     defer opts.deinit();
 
-    args.parse(Options, alloc_gpa, &opts, argsIter) catch |err| switch (err) {
+    args.parse(Options, alloc_gpa, io, env, &opts, argsIter) catch |err| switch (err) {
         error.ActionHelpRequested => return err,
         else => {
             try stderr.print("Error parsing args: {}\n", .{err});

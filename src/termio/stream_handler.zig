@@ -22,6 +22,7 @@ const log = std.log.scoped(.io_handler);
 /// unless all of the member fields are copied.
 pub const StreamHandler = struct {
     alloc: Allocator,
+    io: std.Io,
     size: *renderer.Size,
     terminal: *terminal.Terminal,
 
@@ -116,23 +117,17 @@ pub const StreamHandler = struct {
         self: *StreamHandler,
         msg: apprt.surface.Message,
     ) void {
-        // FIXME(apk2/ghostty-zig016): WIP zig-0.16 port references `io`
-        // here without it being a field of StreamHandler. Stub to allow
-        // analysis; this function isn't exercised from apk2 today.
-        const io: std.Io = undefined;
         // See messageWriter which has similar logic and explains why
         // we may have to do this.
         if (self.surface_mailbox.push(msg, .{ .instant = {} }) == 0) {
-            self.renderer_state.mutex.unlock(io);
-            defer self.renderer_state.mutex.lockUncancelable(io);
+            self.renderer_state.mutex.unlock(self.io);
+            defer self.renderer_state.mutex.lockUncancelable(self.io);
             _ = self.surface_mailbox.push(msg, .{ .forever = {} });
         }
     }
 
     inline fn messageWriter(self: *StreamHandler, msg: termio.Message) void {
-        // FIXME(apk2/ghostty-zig016): see surfaceMessageWriter.
-        const io: std.Io = undefined;
-        self.termio_mailbox.send(msg, self.renderer_state.mutex, io);
+        self.termio_mailbox.send(msg, self.renderer_state.mutex, self.io);
         self.termio_messaged = true;
     }
 
@@ -144,20 +139,18 @@ pub const StreamHandler = struct {
         self: *StreamHandler,
         msg: renderer.Message,
     ) void {
-        // FIXME(apk2/ghostty-zig016): see surfaceMessageWriter.
-        const io: std.Io = undefined;
         // See termio.Mailbox.send for more details on how this works.
 
         // Try instant first. If it works then we can return.
-        if (self.renderer_mailbox.push(msg, .{ .instant = {} }, io) > 0) {
+        if (self.renderer_mailbox.push(msg, .{ .instant = {} }, self.io) > 0) {
             return;
         }
 
         // Instant would have blocked. Release the renderer mutex,
         // wake up the renderer to allow it to process the message,
         // and then try again.
-        self.renderer_state.mutex.unlock(io);
-        defer self.renderer_state.mutex.lockUncancelable(io);
+        self.renderer_state.mutex.unlock(self.io);
+        defer self.renderer_state.mutex.lockUncancelable(self.io);
         self.renderer_wakeup.notify() catch |err| {
             // This is an EXTREMELY unlikely case. We still don't return
             // and attempt to send the message because its most likely
@@ -167,7 +160,7 @@ pub const StreamHandler = struct {
                 .{err},
             );
         };
-        _ = self.renderer_mailbox.push(msg, .{ .forever = {} }, io);
+        _ = self.renderer_mailbox.push(msg, .{ .forever = {} }, self.io);
     }
 
     pub fn vt(

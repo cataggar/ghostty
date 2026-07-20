@@ -151,7 +151,7 @@ test {
     const alloc = arena.allocator();
 
     // We should be able to get an entry
-    const entry = try get(alloc);
+    const entry = try get(alloc, testing.io);
     try testing.expect(entry.shell != null);
     try testing.expect(entry.home != null);
 }

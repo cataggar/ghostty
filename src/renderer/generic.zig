@@ -669,7 +669,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 api,
                 has_custom_shaders,
             );
-            errdefer swap_chain.deinit();
+            errdefer swap_chain.deinit(io);
 
             // Create the font shaper.
             var font_shaper = try font.Shaper.init(alloc, .{
@@ -786,7 +786,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 .display_link = display_link,
             };
 
-            try result.initShaders();
+            try result.initShaders(io);
 
             // Ensure our undefined values above are correctly initialized.
             result.updateFontGridUniforms();
@@ -797,12 +797,12 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             return result;
         }
 
-        pub fn deinit(self: *Self) void {
+        pub fn deinit(self: *Self, io: std.Io) void {
             if (self.overlay) |*overlay| overlay.deinit(self.alloc);
             self.terminal_state.deinit(self.alloc);
             if (self.search_selected_match) |*m| m.arena.deinit();
             if (self.search_matches) |*m| m.arena.deinit();
-            self.swap_chain.deinit();
+            self.swap_chain.deinit(io);
 
             if (DisplayLink != void) {
                 if (self.display_link) |display_link| {
@@ -953,7 +953,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             assert(self.swap_chain.defunct);
 
             // We reinitialize our shaders and our swap chain.
-            try self.initShaders();
+            try self.initShaders(io);
             self.swap_chain = try SwapChain.init(
                 self.api,
                 self.has_custom_shaders,
@@ -1174,8 +1174,8 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
                 // Lock while signaling demand so the IO parse thread
                 // can't starve us. See renderer.State.lockDemand.
-                state.lockDemand();
-                defer state.unlockDemand();
+                state.lockDemand(io);
+                defer state.unlockDemand(io);
 
                 // If we're in a synchronized output state, we pause all rendering.
                 if (state.terminal.modes.get(.synchronized_output)) {
@@ -1363,6 +1363,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             // Rebuild the overlay image if we have one. We can do this
             // outside of any critical areas.
             self.rebuildOverlay(
+                io,
                 critical.overlay_features,
             ) catch |err| {
                 log.warn(
@@ -1378,6 +1379,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
                 // Build our GPU cells
                 self.rebuildCells(
+                    io,
                     critical.preedit,
                     renderer.cursorStyle(&self.terminal_state, .{
                         .preedit = critical.preedit != null,
@@ -1508,15 +1510,15 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             self.cells_rebuilt = false;
 
             // Wait for a frame to be available.
-            const frame = try self.swap_chain.nextFrame();
-            errdefer self.swap_chain.releaseFrame();
+            const frame = try self.swap_chain.nextFrame(io);
+            errdefer self.swap_chain.releaseFrame(io);
             // log.debug("drawing frame index={}", .{self.swap_chain.frame_index});
 
             // If we need to reinitialize our shaders, do so.
             if (self.reinitialize_shaders) {
                 self.reinitialize_shaders = false;
                 self.shaders.deinit(self.alloc);
-                try self.initShaders();
+                try self.initShaders(io);
             }
 
             // Our shaders should not be defunct at this point.
@@ -1571,7 +1573,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             try self.uploadBackgroundImage();
 
             // Update per-frame custom shader uniforms.
-            try self.updateCustomShaderUniformsForFrame();
+            try self.updateCustomShaderUniformsForFrame(io);
 
             // Setup our frame data
             try frame.uniforms.sync(&.{self.uniforms});
@@ -1756,7 +1758,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             }
 
             // Always release our semaphore
-            self.swap_chain.releaseFrame();
+            self.swap_chain.releaseFrame(self.surface_mailbox.app.io);
         }
 
         /// Call this any time the background image path changes.
@@ -2246,6 +2248,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         /// overlay currently configured.
         fn rebuildOverlay(
             self: *Self,
+            io: std.Io,
             features: []const Overlay.Feature,
         ) Overlay.InitError!void {
             // const start = std.Io.Timestamp.now() catch unreachable;
@@ -2307,6 +2310,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             };
             overlay.applyFeatures(
                 alloc,
+                io,
                 &self.terminal_state,
                 features,
             );
@@ -2327,6 +2331,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         /// Dirty state on terminal state won't be reset by this.
         fn rebuildCells(
             self: *Self,
+            io: std.Io,
             preedit: ?renderer.State.Preedit,
             cursor_style_: ?renderer.CursorStyle,
             links: *const terminal.RenderState.CellSet,
@@ -2446,6 +2451,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 dirty.* = false;
 
                 self.rebuildRow(
+                    io,
                     y,
                     row,
                     cells,
@@ -2532,6 +2538,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 };
 
                 self.addCursor(
+                    io,
                     &state.cursor,
                     style,
                     cursor_color,
@@ -2604,6 +2611,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 var x = range.x[0];
                 for (preedit_v.codepoints[range.cp_offset..]) |cp| {
                     self.addPreeditCell(
+                        io,
                         cp,
                         .{ .x = x, .y = range.y },
                         state.colors.foreground,
@@ -2630,6 +2638,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
         fn rebuildRow(
             self: *Self,
+            io: std.Io,
             y: terminal.size.CellCountInt,
             row: terminal.page.Row,
             cells: *std.MultiArrayList(terminal.RenderState.Cell),
@@ -2968,6 +2977,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 // This improves readability when a colored underline is used
                 // which intersects parts of the text (descenders).
                 if (underline != .none) self.addUnderline(
+                    io,
                     @intCast(x),
                     @intCast(y),
                     underline,
@@ -2980,7 +2990,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                     );
                 };
 
-                if (style.flags.overline) self.addOverline(@intCast(x), @intCast(y), fg, alpha) catch |err| {
+                if (style.flags.overline) self.addOverline(io, @intCast(x), @intCast(y), fg, alpha) catch |err| {
                     log.warn(
                         "error adding overline to cell, will be invalid x={} y={}, err={}",
                         .{ x, y, err },
@@ -3044,6 +3054,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                         shaper_cells_i += 1;
                     }) {
                         self.addGlyph(
+                            io,
                             @intCast(x),
                             @intCast(y),
                             state.cols,
@@ -3063,6 +3074,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
                 // Finally, draw a strikethrough if necessary.
                 if (style.flags.strikethrough) self.addStrikethrough(
+                    io,
                     @intCast(x),
                     @intCast(y),
                     fg,
@@ -3079,6 +3091,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         /// Add an underline decoration to the specified cell
         fn addUnderline(
             self: *Self,
+            io: std.Io,
             x: terminal.size.CellCountInt,
             y: terminal.size.CellCountInt,
             style: terminal.Attribute.Underline,
@@ -3096,6 +3109,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
             const render = try self.font_grid.renderGlyph(
                 self.alloc,
+                io,
                 font.sprite_index,
                 @intFromEnum(sprite),
                 .{
@@ -3120,6 +3134,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         /// Add a overline decoration to the specified cell
         fn addOverline(
             self: *Self,
+            io: std.Io,
             x: terminal.size.CellCountInt,
             y: terminal.size.CellCountInt,
             color: terminal.color.RGB,
@@ -3127,6 +3142,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         ) !void {
             const render = try self.font_grid.renderGlyph(
                 self.alloc,
+                io,
                 font.sprite_index,
                 @intFromEnum(font.Sprite.overline),
                 .{
@@ -3151,6 +3167,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         /// Add a strikethrough decoration to the specified cell
         fn addStrikethrough(
             self: *Self,
+            io: std.Io,
             x: terminal.size.CellCountInt,
             y: terminal.size.CellCountInt,
             color: terminal.color.RGB,
@@ -3158,6 +3175,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         ) !void {
             const render = try self.font_grid.renderGlyph(
                 self.alloc,
+                io,
                 font.sprite_index,
                 @intFromEnum(font.Sprite.strikethrough),
                 .{
@@ -3182,6 +3200,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
         // Add a glyph to the specified cell.
         fn addGlyph(
             self: *Self,
+            io: std.Io,
             x: terminal.size.CellCountInt,
             y: terminal.size.CellCountInt,
             cols: usize,
@@ -3197,6 +3216,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             // Render
             const render = try self.font_grid.renderGlyph(
                 self.alloc,
+                io,
                 shaper_run.font_index,
                 shaper_cell.glyph_index,
                 .{
@@ -3244,6 +3264,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
         fn addCursor(
             self: *Self,
+            io: std.Io,
             cursor_state: *const terminal.RenderState.Cursor,
             cursor_style: renderer.CursorStyle,
             cursor_color: terminal.color.RGB,
@@ -3285,6 +3306,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
                     break :render self.font_grid.renderGlyph(
                         self.alloc,
+                        io,
                         font.sprite_index,
                         @intFromEnum(sprite),
                         .{
@@ -3299,6 +3321,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
                 .lock => self.font_grid.renderCodepoint(
                     self.alloc,
+                    io,
                     0xF023, // lock symbol
                     .regular,
                     .text,
@@ -3333,6 +3356,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
 
         fn addPreeditCell(
             self: *Self,
+            io: std.Io,
             cp: renderer.State.Preedit.Codepoint,
             coord: terminal.Coordinate,
             screen_fg: terminal.color.RGB,
@@ -3340,6 +3364,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             // Render the glyph for our preedit text
             const render_ = self.font_grid.renderCodepoint(
                 self.alloc,
+                io,
                 @intCast(cp.codepoint),
                 .regular,
                 .text,
@@ -3367,9 +3392,9 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             });
 
             // Add underline
-            try self.addUnderline(@intCast(coord.x), @intCast(coord.y), .single, screen_fg, 255);
+            try self.addUnderline(io, @intCast(coord.x), @intCast(coord.y), .single, screen_fg, 255);
             if (cp.wide and coord.x < self.cells.size.columns - 1) {
-                try self.addUnderline(@intCast(coord.x + 1), @intCast(coord.y), .single, screen_fg, 255);
+                try self.addUnderline(io, @intCast(coord.x + 1), @intCast(coord.y), .single, screen_fg, 255);
             }
         }
 

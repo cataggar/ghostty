@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const global_state = &@import("../global.zig").state;
 const internal_os = @import("../os/main.zig");
@@ -38,17 +37,8 @@ pub const Location = enum {
                     env,
                     .{ .subdir = subdir },
                 ) catch |err| {
-                    // We need to do some comptime tricks to get the right
-                    // error set since some platforms don't support some
-                    // error types.
-                    const Error = @TypeOf(err) || switch (builtin.os.tag) {
-                        .ios => error{WriteFailed},
-                        else => error{},
-                    };
-
-                    switch (@as(Error, err)) {
+                    switch (err) {
                         error.OutOfMemory => return error.OutOfMemory,
-                        error.WriteFailed => return error.OutOfMemory,
 
                         // Any other error we treat as the XDG directory not
                         // existing. Windows in particularly can return a LOT

@@ -30,6 +30,7 @@ pub const Options = struct {
 pub fn run(
     alloc: Allocator,
     io: std.Io,
+    env: *const std.process.Environ.Map,
     proc_args: std.process.Args,
 ) !u8 {
     var opts: Options = .{};
@@ -38,7 +39,7 @@ pub fn run(
     {
         var iter = try args.argsIterator(proc_args, alloc);
         defer iter.deinit();
-        try args.parse(Options, alloc, &opts, &iter);
+        try args.parse(Options, alloc, io, env, &opts, &iter);
     }
 
     var stdout: std.Io.File = .stdout();
