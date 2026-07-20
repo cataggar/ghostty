@@ -17,8 +17,7 @@ extern "C" {
 #include <stdint.h>
 
 #ifdef _MSC_VER
-#include <BaseTsd.h>
-typedef SSIZE_T ssize_t;
+typedef intptr_t ssize_t;
 #else
 #include <sys/types.h>
 #endif

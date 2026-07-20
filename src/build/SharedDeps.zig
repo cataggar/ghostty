@@ -443,8 +443,14 @@ pub fn add(
     if (b.lazyDependency("opengl", .{})) |dep| {
         step.root_module.addImport("opengl", dep.module("opengl"));
     }
-    if (b.lazyDependency("vaxis", .{})) |dep| {
-        step.root_module.addImport("vaxis", dep.module("vaxis"));
+    const uucode = self.uucodeModule(b, target, optimize);
+    if (b.lazyDependency("vaxis", .{
+        .target = target,
+        .optimize = optimize,
+    })) |dep| {
+        const vaxis = dep.module("vaxis");
+        if (uucode) |mod| vaxis.addImport("uucode", mod);
+        step.root_module.addImport("vaxis", vaxis);
     }
     if (b.lazyDependency("wuffs", .{
         .target = target,
@@ -464,7 +470,7 @@ pub fn add(
     })) |dep| {
         step.root_module.addImport("z2d", dep.module("z2d"));
     }
-    self.addUucode(b, step.root_module, target, optimize);
+    if (uucode) |mod| step.root_module.addImport("uucode", mod);
     if (b.lazyDependency("zf", .{
         .target = target,
         .optimize = optimize,
@@ -964,14 +970,26 @@ pub fn addUucode(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
+    if (self.uucodeModule(b, target, optimize)) |mod| {
+        module.addImport("uucode", mod);
+    }
+}
+
+fn uucodeModule(
+    self: *const SharedDeps,
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) ?*std.Build.Module {
     if (b.lazyDependency("uucode", .{
         .target = target,
         .optimize = optimize,
         .tables_path = self.uucode_tables,
         .build_config_path = b.path("src/build/uucode_config.zig"),
     })) |dep| {
-        module.addImport("uucode", dep.module("uucode"));
+        return dep.module("uucode");
     }
+    return null;
 }
 
 // For dynamic linking, we prefer dynamic linking and to search by

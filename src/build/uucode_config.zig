@@ -32,8 +32,11 @@ pub const tables = [_]config.Table{
     .{
         .name = "runtime",
         .fields = &.{
-            "is_emoji_presentation",
             "case_folding_full",
+            "east_asian_width",
+            "general_category",
+            "grapheme_break",
+            "is_emoji_presentation",
         },
     },
     .{
