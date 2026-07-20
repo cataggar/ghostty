@@ -4,7 +4,6 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
-const posix = std.posix;
 const build_config = @import("build_config.zig");
 const macos = @import("macos");
 const cli = @import("cli.zig");
@@ -34,7 +33,7 @@ pub fn main(init: std.process.Init) !MainReturn {
         var buffer: [1024]u8 = undefined;
         var stderr_writer = std.Io.File.stderr().writer(init.io, &buffer);
         const stderr = &stderr_writer.interface;
-        defer posix.exit(1);
+        defer std.process.exit(1);
         const ErrSet = @TypeOf(err) || error{Unknown};
         switch (@as(ErrSet, @errorCast(err))) {
             error.MultipleActions => try stderr.print(
@@ -95,7 +94,7 @@ pub fn main(init: std.process.Init) !MainReturn {
         );
         try stdout.flush();
 
-        posix.exit(0);
+        std.process.exit(0);
     }
 
     // Create our app state
