@@ -714,7 +714,7 @@ jobs:
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
       - name: Test release NixOS package build
-        run: nix build .#ghostty-releasefast
+        run: nix build -L .#ghostty-releasefast
 
       - name: Check version
         run: result/bin/ghostty +version | grep -q '.ReleaseFast'
@@ -723,7 +723,7 @@ jobs:
         run: nm result/bin/.ghostty-wrapped 2>&1 | grep -q 'no symbols'
 
       - name: Test debug NixOS package build
-        run: nix build .#ghostty-debug
+        run: nix build -L .#ghostty-debug
 
       - name: Check version
         run: result/bin/ghostty +version | grep -q '.Debug'
@@ -1537,6 +1537,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [test, build-dist]
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - name: Install and configure Namespace CLI
         uses: namespacelabs/nscloud-setup@df198f982fcecfb8264bea3f1274b56a61b6dfdc # v0.0.12
