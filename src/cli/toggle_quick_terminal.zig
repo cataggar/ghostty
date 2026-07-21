@@ -1,13 +1,18 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
+const args = @import("args.zig");
 const Action = @import("../cli.zig").ghostty.Action;
 const apprt = @import("../apprt.zig");
 
 pub const Options = struct {
+    /// This is set by the CLI parser for deinit.
+    _arena: ?std.heap.ArenaAllocator = null,
+
     /// If set, connect to a custom instance of Ghostty.
     class: ?[:0]const u8 = null,
 
     pub fn deinit(self: *Options) void {
+        if (self._arena) |arena| arena.deinit();
         self.* = undefined;
     }
 
@@ -37,14 +42,30 @@ pub const Options = struct {
 ///     The class must be a valid GTK application ID.
 ///
 /// Available since: 1.4.0
-pub fn run(alloc: Allocator) !u8 {
+pub fn run(
+    alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    proc_args: std.process.Args,
+) !u8 {
     var buf: [256]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&buf);
+    var stderr_writer = std.Io.File.stderr().writer(io, &buf);
     const stderr = &stderr_writer.interface;
+    defer stderr.flush() catch {};
+
+    var opts: Options = .{};
+    defer opts.deinit();
+
+    {
+        var iter = try args.argsIterator(proc_args, alloc);
+        defer iter.deinit();
+        try args.parse(Options, alloc, io, env, &opts, &iter);
+    }
 
     if (apprt.App.performIpc(
         alloc,
-        .detect,
+        io,
+        if (opts.class) |class| .{ .class = class } else .detect,
         .toggle_quick_terminal,
         {},
     ) catch |err| switch (err) {

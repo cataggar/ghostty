@@ -256,7 +256,7 @@ pub const RemapSet = struct {
         input: []const u8,
     ) ParseError!void {
         // Find the assignment point ('=')
-        const eql_idx = std.mem.indexOfScalar(
+        const eql_idx = std.mem.findScalar(
             u8,
             input,
             '=',
@@ -368,12 +368,11 @@ pub const RemapSet = struct {
             const to = entry.value_ptr.*;
 
             var buf: [64]u8 = undefined;
-            var fbs = std.io.fixedBufferStream(&buf);
-            const writer = fbs.writer();
-            formatMod(writer, from) catch return error.OutOfMemory;
+            var writer: std.Io.Writer = .fixed(&buf);
+            formatMod(&writer, from) catch return error.OutOfMemory;
             writer.writeByte('=') catch return error.OutOfMemory;
-            formatMod(writer, to) catch return error.OutOfMemory;
-            try formatter.formatEntry([]const u8, fbs.getWritten());
+            formatMod(&writer, to) catch return error.OutOfMemory;
+            try formatter.formatEntry([]const u8, writer.buffered());
         }
     }
 
@@ -398,7 +397,7 @@ pub const RemapSet = struct {
     /// Parses a single mode in a single remapping string. E.g.
     /// `ctrl` or `left_shift`.
     fn parseMod(input: []const u8) error{InvalidMod}!struct { Mod, ?Mod.Side } {
-        const side_str, const mod_str = if (std.mem.indexOfScalar(
+        const side_str, const mod_str = if (std.mem.findScalar(
             u8,
             input,
             '_',
@@ -892,8 +891,8 @@ test "RemapSet: formatEntry unsided creates two entries" {
     try set.formatEntry(formatterpkg.entryFormatter("key-remap", &buf.writer));
     // Unsided creates both left and right mappings
     const written = buf.written();
-    try testing.expect(std.mem.indexOf(u8, written, "left_ctrl=left_super") != null);
-    try testing.expect(std.mem.indexOf(u8, written, "right_ctrl=left_super") != null);
+    try testing.expect(std.mem.find(u8, written, "left_ctrl=left_super") != null);
+    try testing.expect(std.mem.find(u8, written, "right_ctrl=left_super") != null);
 }
 
 test "RemapSet: formatEntry right sided" {

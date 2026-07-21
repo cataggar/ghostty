@@ -172,7 +172,12 @@ const Boo = struct {
 };
 
 /// The `boo` command is used to display the animation from the Ghostty website in the terminal
-pub fn run(gpa: Allocator) !u8 {
+pub fn run(
+    gpa: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    proc_args: std.process.Args,
+) !u8 {
     // Disable on non-desktop systems.
     switch (builtin.os.tag) {
         .windows, .macos, .linux, .freebsd => {},
@@ -183,9 +188,9 @@ pub fn run(gpa: Allocator) !u8 {
     defer opts.deinit();
 
     {
-        var iter = try args.argsIterator(gpa);
+        var iter = try args.argsIterator(proc_args, gpa);
         defer iter.deinit();
-        try args.parse(Options, gpa, &opts, &iter);
+        try args.parse(Options, gpa, io, env, &opts, &iter);
     }
 
     try decompressFrames(gpa);
@@ -194,7 +199,10 @@ pub fn run(gpa: Allocator) !u8 {
         gpa.free(decompressed_data);
     }
 
-    var app = try vxfw.App.init(gpa);
+    var env_map = try env.clone(gpa);
+    defer env_map.deinit();
+    var buf: [4096]u8 = undefined;
+    var app = try vxfw.App.init(io, gpa, &env_map, &buf);
     defer app.deinit();
 
     var boo: Boo = undefined;

@@ -706,8 +706,8 @@ pub const Surface = extern struct {
         vadj_signal_group: ?*gobject.SignalGroup = null,
 
         // Key state tracking for key sequences and tables
-        key_sequence: std.ArrayListUnmanaged([:0]const u8) = .empty,
-        key_tables: std.ArrayListUnmanaged([:0]const u8) = .empty,
+        key_sequence: std.ArrayList([:0]const u8) = .empty,
+        key_tables: std.ArrayList([:0]const u8) = .empty,
 
         // Template binds
         child_exited_overlay: *ChildExited,
@@ -1589,32 +1589,32 @@ pub const Surface = extern struct {
         return self.private().cursor_pos;
     }
 
-    pub fn defaultTermioEnv(self: *Self) !std.process.EnvMap {
+    pub fn defaultTermioEnv(self: *Self) !std.process.Environ.Map {
         const app = Application.default();
         const alloc = app.allocator();
-        var env = try internal_os.getEnvMap(alloc);
+        var env = try app.core().environ.clone(alloc);
         errdefer env.deinit();
 
         if (app.savedLanguage()) |language| {
             try env.put("LANG", language);
         } else {
-            env.remove("LANG");
+            _ = env.swapRemove("LANG");
         }
 
         // Don't leak these GTK environment variables to child processes.
-        env.remove("GDK_DEBUG");
-        env.remove("GDK_DISABLE");
-        env.remove("GSK_RENDERER");
+        _ = env.swapRemove("GDK_DEBUG");
+        _ = env.swapRemove("GDK_DISABLE");
+        _ = env.swapRemove("GSK_RENDERER");
 
         // Remove some environment variables that are set when Ghostty is launched
         // from a `.desktop` file, by D-Bus activation, or systemd.
-        env.remove("GIO_LAUNCHED_DESKTOP_FILE");
-        env.remove("GIO_LAUNCHED_DESKTOP_FILE_PID");
-        env.remove("DBUS_STARTER_ADDRESS");
-        env.remove("DBUS_STARTER_BUS_TYPE");
-        env.remove("INVOCATION_ID");
-        env.remove("JOURNAL_STREAM");
-        env.remove("NOTIFY_SOCKET");
+        _ = env.swapRemove("GIO_LAUNCHED_DESKTOP_FILE");
+        _ = env.swapRemove("GIO_LAUNCHED_DESKTOP_FILE_PID");
+        _ = env.swapRemove("DBUS_STARTER_ADDRESS");
+        _ = env.swapRemove("DBUS_STARTER_BUS_TYPE");
+        _ = env.swapRemove("INVOCATION_ID");
+        _ = env.swapRemove("JOURNAL_STREAM");
+        _ = env.swapRemove("NOTIFY_SOCKET");
 
         // Unset environment varies set by snaps if we're running in a snap.
         // This allows Ghostty to further launch additional snaps.
@@ -1641,7 +1641,7 @@ pub const Surface = extern struct {
     }
 
     /// Filter out environment variables that start with forbidden prefixes.
-    fn filterSnapPaths(gpa: std.mem.Allocator, env_map: *std.process.EnvMap) !void {
+    fn filterSnapPaths(gpa: std.mem.Allocator, env_map: *std.process.Environ.Map) !void {
         comptime assert(build_config.snap);
 
         const snap_vars = [_][]const u8{
@@ -1708,7 +1708,7 @@ pub const Surface = extern struct {
             item.key,
             item.value,
         );
-        for (env_to_remove.items) |key| _ = env_map.remove(key);
+        for (env_to_remove.items) |key| _ = env_map.swapRemove(key);
     }
 
     pub fn clipboardRequest(
@@ -2119,10 +2119,11 @@ pub const Surface = extern struct {
         defer derived_config.deinit();
 
         const font_grid_key, const font_grid = app.core().font_grid_set.ref(
+            app.core().io,
             &derived_config,
             font_size,
         ) catch return;
-        defer app.core().font_grid_set.deref(font_grid_key);
+        defer app.core().font_grid_set.deref(app.core().io, font_grid_key);
 
         const cell = font_grid.cellSize();
 
@@ -2503,7 +2504,12 @@ pub const Surface = extern struct {
             // any stale MediaFile and returns the current slot value (possibly
             // null if the path is now inaccessible), so priv.bell_media never
             // dangles.
-            priv.bell_media = media.bellMediaFile(priv.bell_media, path, required);
+            priv.bell_media = media.bellMediaFile(
+                Application.default().core().io,
+                priv.bell_media,
+                path,
+                required,
+            );
             const media_file = priv.bell_media orelse break :audio;
             media.playBell(media_file, volume);
         }
@@ -3267,7 +3273,7 @@ pub const Surface = extern struct {
         // If we don't, we'll initialize it on the first resize so we have
         // our proper initial dimensions.
         if (priv.core_surface) |v| realize: {
-            v.renderer.displayRealized() catch |err| {
+            v.renderer.displayRealized(Application.default().core().io) catch |err| {
                 log.warn("core displayRealized failed err={}", .{err});
                 break :realize;
             };
@@ -3308,7 +3314,7 @@ pub const Surface = extern struct {
                 return;
             }
 
-            surface.renderer.displayUnrealized();
+            surface.renderer.displayUnrealized(Application.default().core().io);
         }
 
         // Unset our input method
@@ -3354,7 +3360,7 @@ pub const Surface = extern struct {
         const priv = self.private();
         const surface = priv.core_surface orelse return 1;
 
-        surface.renderer.drawFrame(true) catch |err| {
+        surface.renderer.drawFrame(Application.default().core().io, true) catch |err| {
             log.warn("failed to draw frame err={}", .{err});
             return 0;
         };
@@ -3467,7 +3473,7 @@ pub const Surface = extern struct {
         if (priv.overrides.working_directory) |wd| {
             const config_alloc = config.arenaAlloc();
             var wd_val: configpkg.WorkingDirectory = .{ .path = try config_alloc.dupe(u8, wd) };
-            try wd_val.finalize(config_alloc);
+            try wd_val.finalize(config_alloc, app.core().io, app.core().environ);
             config.@"working-directory" = wd_val;
         }
 
@@ -3476,7 +3482,7 @@ pub const Surface = extern struct {
         if (priv.pwd) |pwd| {
             const config_alloc = config.arenaAlloc();
             var wd_val: configpkg.WorkingDirectory = .{ .path = try config_alloc.dupe(u8, pwd) };
-            try wd_val.finalize(config_alloc);
+            try wd_val.finalize(config_alloc, app.core().io, app.core().environ);
             config.@"working-directory" = wd_val;
         }
 

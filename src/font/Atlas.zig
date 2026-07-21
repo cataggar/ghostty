@@ -32,7 +32,7 @@ data: []u8,
 size: u32 = 0,
 
 /// The nodes (rectangles) of available space.
-nodes: std.ArrayListUnmanaged(Node) = .{},
+nodes: std.ArrayList(Node) = .empty,
 
 /// The format of the texture data being written into the Atlas. This must be
 /// uniform for all textures in the Atlas. If you have some textures with
@@ -104,7 +104,7 @@ pub fn init(alloc: Allocator, size: u32, format: Format) Allocator.Error!Atlas {
     var result = Atlas{
         .data = try alloc.alloc(u8, size * size * format.depth()),
         .size = size,
-        .nodes = .{},
+        .nodes = .empty,
         .format = format,
     };
     errdefer result.deinit(alloc);
@@ -652,7 +652,7 @@ test "writing data from a larger source" {
 
     // None of the `8`s from the source data outside of the
     // specified region should have made it on to the atlas.
-    try testing.expectEqual(null, std.mem.indexOfScalar(u8, atlas.data, 8));
+    try testing.expectEqual(null, std.mem.findScalar(u8, atlas.data, 8));
 }
 
 test "grow" {

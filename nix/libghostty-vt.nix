@@ -11,7 +11,7 @@
   versionCheckHook,
   darwin,
   xcbuild,
-  zig_0_15,
+  zig,
   revision ? "dirty",
   optimize ? "Debug",
   simd ? true,
@@ -44,6 +44,7 @@ stdenv.mkDerivation (finalAttrs: {
   #
   # Workaround: override `linkFarm` with a copy-farm so deps are real directories, not symlinks.
   deps = callPackage ../build.zig.zon.nix {
+    inherit zig;
     name = "${finalAttrs.pname}-cache-${finalAttrs.version}";
     linkFarm = name: entries:
       runCommand name {} ''
@@ -59,7 +60,7 @@ stdenv.mkDerivation (finalAttrs: {
     [
       git
       pkg-config
-      zig_0_15
+      zig
     ]
     ++ lib.optionals stdenv.hostPlatform.isDarwin [
       darwin.cctools
@@ -264,7 +265,7 @@ stdenv.mkDerivation (finalAttrs: {
   meta = {
     homepage = "https://ghostty.org";
     license = lib.licenses.mit;
-    platforms = zig_0_15.meta.platforms;
+    platforms = zig.meta.platforms;
     pkgConfigModules = [
       "libghostty-vt"
       "libghostty-vt-static"

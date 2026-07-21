@@ -105,8 +105,17 @@ pub const String = extern struct {
 pub export fn ghostty_init(argc: usize, argv: [*][*:0]u8) c_int {
     assert(builtin.link_libc);
 
-    std.os.argv = argv[0..argc];
-    state.init() catch |err| {
+    // Construct Zig-friendly globals from C ones.
+    const args: std.process.Args = .{ .vector = switch (builtin.os.tag) {
+        .windows => std.os.windows.peb().ProcessParameters.CommandLine.slice(),
+        else => argv[0..argc],
+    } };
+    const environ: std.process.Environ = .{ .block = switch (builtin.os.tag) {
+        .windows => .global,
+        else => .{ .slice = std.mem.sliceTo(std.c.environ, null) },
+    } };
+
+    state.init(.{ .environ = environ, .args = args }) catch |err| {
         std.log.err("failed to initialize ghostty error={}", .{err});
         return 1;
     };
@@ -119,12 +128,18 @@ pub export fn ghostty_init(argc: usize, argv: [*][*:0]u8) c_int {
 pub export fn ghostty_cli_try_action() void {
     const action = state.action orelse return;
     std.log.info("executing CLI action={}", .{action});
-    posix.exit(action.run(state.alloc) catch |err| {
+
+    std.process.exit(action.run(
+        state.alloc,
+        state.io_threaded.io(),
+        &state.environ_map,
+        state.args,
+    ) catch |err| {
         std.log.err("CLI action failed error={}", .{err});
-        posix.exit(1);
+        std.process.exit(1);
     });
 
-    posix.exit(0);
+    std.process.exit(0);
 }
 
 /// Return metadata about Ghostty, such as version, build mode, etc.
@@ -176,8 +191,8 @@ pub const DllMain = if (builtin.os.tag == .windows) struct {
     const HINSTANCE = std.os.windows.HINSTANCE;
     const DWORD = std.os.windows.DWORD;
     const LPVOID = std.os.windows.LPVOID;
-    const TRUE = std.os.windows.TRUE;
-    const FALSE = std.os.windows.FALSE;
+    const TRUE = BOOL.TRUE;
+    const FALSE = BOOL.FALSE;
 
     const DLL_PROCESS_ATTACH: DWORD = 1;
     const DLL_PROCESS_DETACH: DWORD = 0;

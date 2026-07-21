@@ -29,14 +29,19 @@ pub const Options = struct {
 ///
 ///   * `--plain`: will disable formatting and make the output more
 ///     friendly for Unix tooling. This is default when not printing to a tty.
-pub fn run(alloc: Allocator) !u8 {
+pub fn run(
+    alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    proc_args: std.process.Args,
+) !u8 {
     var opts: Options = .{};
     defer opts.deinit();
 
     {
-        var iter = try args.argsIterator(alloc);
+        var iter = try args.argsIterator(proc_args, alloc);
         defer iter.deinit();
-        try args.parse(Options, alloc, &opts, &iter);
+        try args.parse(Options, alloc, io, env, &opts, &iter);
     }
 
     var keys: std.ArrayList([]const u8) = .empty;
@@ -50,14 +55,14 @@ pub fn run(alloc: Allocator) !u8 {
     }.lessThan);
 
     // Despite being under the posix namespace, this also works on Windows as of zig 0.13.0
-    var stdout: std.fs.File = .stdout();
-    if (tui.can_pretty_print and !opts.plain and std.posix.isatty(stdout.handle)) {
+    var stdout: std.Io.File = .stdout();
+    if (tui.can_pretty_print and !opts.plain and try stdout.isTty(io)) {
         var arena = std.heap.ArenaAllocator.init(alloc);
         defer arena.deinit();
-        return prettyPrint(arena.allocator(), keys.items);
+        return prettyPrint(arena.allocator(), io, env, keys.items);
     } else {
         var buffer: [4096]u8 = undefined;
-        var stdout_writer = stdout.writer(&buffer);
+        var stdout_writer = stdout.writer(io, &buffer);
         const writer = &stdout_writer.interface;
         for (keys.items) |name| {
             const rgb = x11_color.map.get(name).?;
@@ -68,17 +73,25 @@ pub fn run(alloc: Allocator) !u8 {
                 rgb.b,
             });
         }
+        try writer.flush();
     }
 
     return 0;
 }
 
-fn prettyPrint(alloc: Allocator, keys: [][]const u8) !u8 {
+fn prettyPrint(
+    alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    keys: [][]const u8,
+) !u8 {
     // Set up vaxis
     var buf: [1024]u8 = undefined;
-    var tty = try vaxis.Tty.init(&buf);
+    var tty = try vaxis.Tty.init(io, &buf);
     defer tty.deinit();
-    var vx = try vaxis.init(alloc, .{});
+    var env_map = try env.clone(alloc);
+    defer env_map.deinit();
+    var vx = try vaxis.init(io, alloc, &env_map, .{});
     defer vx.deinit(alloc, tty.writer());
 
     // We know we are ghostty, so let's enable mode 2027. Vaxis normally does this but you need an
@@ -97,7 +110,7 @@ fn prettyPrint(alloc: Allocator, keys: [][]const u8) !u8 {
             .y_pixel = 768,
         },
 
-        else => try vaxis.Tty.getWinsize(tty.fd),
+        else => try tty.getWinsize(),
     };
     try vx.resize(alloc, tty.writer(), winsize);
 

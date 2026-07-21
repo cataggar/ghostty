@@ -51,7 +51,7 @@ pub const Command = union(enum) {
         // If we have a `:` then we MIGHT have a prefix to specify what
         // tag we should use.
         const tag: std.meta.Tag(Self), const str: []const u8 = tag: {
-            if (std.mem.indexOfScalar(u8, trimmed, ':')) |idx| {
+            if (std.mem.findScalar(u8, trimmed, ':')) |idx| {
                 const prefix = trimmed[0..idx];
                 if (std.mem.eql(u8, prefix, "direct")) {
                     break :tag .{ .direct, trimmed[idx + 1 ..] };
@@ -73,7 +73,7 @@ pub const Command = union(enum) {
             .direct => {
                 // We're not shell expanding, so the arguments are naively
                 // split on spaces.
-                var builder: std.ArrayListUnmanaged([:0]const u8) = .empty;
+                var builder: std.ArrayList([:0]const u8) = .empty;
                 var args = std.mem.splitScalar(
                     u8,
                     std.mem.trim(u8, str, " "),
@@ -108,7 +108,7 @@ pub const Command = union(enum) {
     /// For direct commands, this is very cheap and just iterates over
     /// the array. There is no allocation.
     ///
-    /// For shell commands, this will use Zig's ArgIteratorGeneral as
+    /// For shell commands, this will use Zig's Args.IteratorGeneral as
     /// a best effort shell string parser. This is not guaranteed to be
     /// 100% accurate, but it works for common cases. This requires allocation.
     pub fn argIterator(
@@ -123,7 +123,7 @@ pub const Command = union(enum) {
 
     /// Iterates over each argument in the command.
     pub const ArgIterator = union(enum) {
-        shell: std.process.ArgIteratorGeneral(.{}),
+        shell: std.process.Args.IteratorGeneral(.{}),
         direct: struct {
             i: usize = 0,
             args: []const [:0]const u8,

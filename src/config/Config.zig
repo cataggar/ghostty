@@ -3848,7 +3848,7 @@ _conditional_set: std.EnumSet(conditional.Key) = .{},
 /// The steps we can use to reload the configuration after it has been loaded
 /// without reopening the files. This is used in very specific cases such
 /// as loadTheme which has more details on why.
-_replay_steps: std.ArrayListUnmanaged(Replay.Step) = .{},
+_replay_steps: std.ArrayList(Replay.Step) = .empty,
 
 /// Set to true if Ghostty was executed as xdg-terminal-exec on Linux.
 @"_xdg-terminal-exec": bool = false,
@@ -3866,19 +3866,24 @@ pub fn deinit(self: *Config) void {
 ///   4. CLI flags
 ///   5. Recursively defined configuration files
 ///
-pub fn load(alloc_gpa: Allocator) !Config {
+pub fn load(
+    alloc_gpa: Allocator,
+    io: std.Io,
+    args: std.process.Args,
+    env: *const std.process.Environ.Map,
+) !Config {
     var result = try default(alloc_gpa);
     errdefer result.deinit();
 
     // If we have a configuration file in our home directory, parse that first.
-    try result.loadDefaultFiles(alloc_gpa);
+    try result.loadDefaultFiles(alloc_gpa, io, env);
 
     // Parse the config from the CLI args.
-    try result.loadCliArgs(alloc_gpa);
+    try result.loadCliArgs(alloc_gpa, io, args, env);
 
     // Parse the config files that were added from our file and CLI args.
-    try result.loadRecursiveFiles(alloc_gpa);
-    try result.finalize();
+    try result.loadRecursiveFiles(alloc_gpa, io, env);
+    try result.finalize(io, args, env);
 
     return result;
 }
@@ -3912,17 +3917,19 @@ pub fn default(alloc_gpa: Allocator) Allocator.Error!Config {
 pub fn loadIter(
     self: *Config,
     alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     iter: anytype,
 ) !void {
-    try cli.args.parse(Config, alloc, self, iter);
+    try cli.args.parse(Config, alloc, io, env, self, iter);
 }
 
 /// Load configuration from the target config file at `path`.
 ///
 /// `path` must be resolved and absolute.
-pub fn loadFile(self: *Config, alloc: Allocator, path: []const u8) !void {
-    assert(std.fs.path.isAbsolute(path));
-    var file = file_load.open(path) catch |err| switch (err) {
+pub fn loadFile(self: *Config, alloc: Allocator, io: std.Io, env: *const std.process.Environ.Map, path: []const u8) !void {
+    assert(std.Io.Dir.path.isAbsolute(path));
+    var file = file_load.open(io, path) catch |err| switch (err) {
         error.NotAFile => {
             log.warn(
                 "config-file {s}: not reading because it is not a file",
@@ -3933,22 +3940,22 @@ pub fn loadFile(self: *Config, alloc: Allocator, path: []const u8) !void {
 
         else => return err,
     };
-    defer file.close();
+    defer file.close(io);
 
-    try self.loadFsFile(alloc, &file, path);
+    try self.loadFsFile(alloc, io, env, &file, path);
 }
 
 /// Load config from the given File.
-fn loadFsFile(self: *Config, alloc: Allocator, file: *std.fs.File, path: []const u8) !void {
+fn loadFsFile(self: *Config, alloc: Allocator, io: std.Io, env: *const std.process.Environ.Map, file: *std.Io.File, path: []const u8) !void {
     std.log.info("reading configuration file path={s}", .{path});
     var buf: [2048]u8 = undefined;
-    var file_reader = file.reader(&buf);
+    var file_reader = file.reader(io, &buf);
     const reader = &file_reader.interface;
-    try self.loadReader(alloc, reader, path);
+    try self.loadReader(alloc, io, env, reader, path);
 }
 
 /// Load config from the given Reader.
-fn loadReader(self: *Config, alloc: Allocator, reader: *std.Io.Reader, path: []const u8) !void {
+fn loadReader(self: *Config, alloc: Allocator, io: std.Io, env: *const std.process.Environ.Map, reader: *std.Io.Reader, path: []const u8) !void {
     bom: {
         // If the file starts with a UTF-8 byte order mark, skip it.
         // https://en.wikipedia.org/wiki/Byte_order_mark#UTF-8
@@ -3960,13 +3967,62 @@ fn loadReader(self: *Config, alloc: Allocator, reader: *std.Io.Reader, path: []c
         }
     }
     var iter: cli.args.LineIterator = .{ .r = reader, .filepath = path };
-    try self.loadIter(alloc, &iter);
-    try self.expandPaths(std.fs.path.dirname(path).?);
+    try self.loadIter(alloc, io, env, &iter);
+    try self.expandPaths(io, env, std.Io.Dir.path.dirname(path).?);
+}
+
+fn loadIterTest(self: *Config, alloc: Allocator, iter: anytype) !void {
+    var env = try std.testing.environ.createMap(alloc);
+    defer env.deinit();
+    try self.loadIter(alloc, std.testing.io, &env, iter);
+}
+
+fn finalizeTest(self: *Config) !void {
+    var env = try std.testing.environ.createMap(std.testing.allocator);
+    defer env.deinit();
+    try self.finalize(std.testing.io, internal_os.args.testingArgs(), &env);
+}
+
+fn tempDirTest() !internal_os.TempDir {
+    var env = try std.testing.environ.createMap(std.testing.allocator);
+    defer env.deinit();
+    return internal_os.TempDir.init(std.testing.io, &env);
+}
+
+fn tempRealPath(
+    dir: std.Io.Dir,
+    sub_path: []const u8,
+    buf: []u8,
+) ![]const u8 {
+    const len = try dir.realPathFile(std.testing.io, sub_path, buf);
+    return buf[0..len];
+}
+
+fn expandHomeTest(path: []const u8, buf: []u8) ![]const u8 {
+    var env = try std.testing.environ.createMap(std.testing.allocator);
+    defer env.deinit();
+    return internal_os.expandHome(path, buf, std.testing.io, &env);
+}
+
+fn changeConditionalStateTest(
+    self: *const Config,
+    new: conditional.State,
+) !?Config {
+    var env = try std.testing.environ.createMap(std.testing.allocator);
+    defer env.deinit();
+    return self.changeConditionalState(
+        new,
+        std.testing.io,
+        internal_os.args.testingArgs(),
+        &env,
+    );
 }
 
 test "handle bom in config files" {
     const testing = std.testing;
     const alloc = testing.allocator;
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
     {
         const data = "\xef\xbb\xbfabnormal-command-exit-runtime = 2500\n";
@@ -3975,10 +4031,12 @@ test "handle bom in config files" {
         defer cfg.deinit();
         try cfg.loadReader(
             alloc,
+            std.testing.io,
+            &env,
             &reader,
             "/home/ghostty/.config/ghostty/config.ghostty",
         );
-        try cfg.finalize();
+        try finalizeTest(&cfg);
 
         try testing.expect(cfg._diagnostics.empty());
         try testing.expectEqual(
@@ -3994,10 +4052,12 @@ test "handle bom in config files" {
         defer cfg.deinit();
         try cfg.loadReader(
             alloc,
+            std.testing.io,
+            &env,
             &reader,
             "/home/ghostty/.config/ghostty/config.ghostty",
         );
-        try cfg.finalize();
+        try finalizeTest(&cfg);
 
         try testing.expect(cfg._diagnostics.empty());
         try testing.expectEqual(
@@ -4015,9 +4075,11 @@ pub const OptionalFileAction = enum { loaded, not_found, @"error" };
 pub fn loadOptionalFile(
     self: *Config,
     alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     path: []const u8,
 ) OptionalFileAction {
-    if (self.loadFile(alloc, path)) {
+    if (self.loadFile(alloc, io, env, path)) {
         return .loaded;
     } else |err| switch (err) {
         error.FileNotFound => return .not_found,
@@ -4032,15 +4094,15 @@ pub fn loadOptionalFile(
     }
 }
 
-fn writeConfigTemplate(path: []const u8) !void {
+fn writeConfigTemplate(io: std.Io, path: []const u8) !void {
     log.info("creating template config file: path={s}", .{path});
-    if (std.fs.path.dirname(path)) |dir_path| {
-        try std.fs.cwd().makePath(dir_path);
+    if (std.Io.Dir.path.dirname(path)) |dir_path| {
+        try std.Io.Dir.cwd().createDirPath(io, dir_path);
     }
-    const file = try std.fs.createFileAbsolute(path, .{});
-    defer file.close();
+    const file = try std.Io.Dir.createFileAbsolute(io, path, .{});
+    defer file.close(io);
     var buf: [4096]u8 = undefined;
-    var file_writer = file.writer(&buf);
+    var file_writer = file.writer(io, &buf);
     const writer = &file_writer.interface;
     try writer.print(
         @embedFile("./config-template"),
@@ -4056,15 +4118,15 @@ fn writeConfigTemplate(path: []const u8) !void {
 ///
 /// The legacy `config` file (without extension) is first loaded,
 /// then `config.ghostty`.
-pub fn loadDefaultFiles(self: *Config, alloc: Allocator) !void {
+pub fn loadDefaultFiles(self: *Config, alloc: Allocator, io: std.Io, env: *const std.process.Environ.Map) !void {
     // Load XDG first
-    const legacy_xdg_path = try file_load.legacyDefaultXdgPath(alloc);
+    const legacy_xdg_path = try file_load.legacyDefaultXdgPath(alloc, io, env);
     defer alloc.free(legacy_xdg_path);
-    const xdg_path = try file_load.defaultXdgPath(alloc);
+    const xdg_path = try file_load.defaultXdgPath(alloc, io, env);
     defer alloc.free(xdg_path);
     const xdg_loaded: bool = xdg_loaded: {
-        const legacy_xdg_action = self.loadOptionalFile(alloc, legacy_xdg_path);
-        const xdg_action = self.loadOptionalFile(alloc, xdg_path);
+        const legacy_xdg_action = self.loadOptionalFile(alloc, io, env, legacy_xdg_path);
+        const xdg_action = self.loadOptionalFile(alloc, io, env, xdg_path);
         if (xdg_action != .not_found and legacy_xdg_action != .not_found) {
             log.warn("both config files `{s}` and `{s}` exist.", .{ legacy_xdg_path, xdg_path });
             log.warn("loading them both in that order", .{});
@@ -4079,11 +4141,13 @@ pub fn loadDefaultFiles(self: *Config, alloc: Allocator) !void {
     if (comptime builtin.os.tag == .macos) {
         const legacy_app_support_path = try file_load.legacyDefaultAppSupportPath(alloc);
         defer alloc.free(legacy_app_support_path);
-        const app_support_path = try file_load.preferredAppSupportPath(alloc);
+        const app_support_path = try file_load.preferredAppSupportPath(alloc, io);
         defer alloc.free(app_support_path);
         const app_support_loaded: bool = loaded: {
             const legacy_app_support_action = self.loadOptionalFile(
                 alloc,
+                io,
+                env,
                 legacy_app_support_path,
             );
 
@@ -4096,6 +4160,8 @@ pub fn loadDefaultFiles(self: *Config, alloc: Allocator) !void {
                 app_support_path,
             )) self.loadOptionalFile(
                 alloc,
+                io,
+                env,
                 app_support_path,
             ) else .not_found;
 
@@ -4115,13 +4181,13 @@ pub fn loadDefaultFiles(self: *Config, alloc: Allocator) !void {
         // If both files are not found, then we create a template file.
         // For macOS, we only create the template file in the app support
         if (!app_support_loaded and !xdg_loaded) {
-            writeConfigTemplate(app_support_path) catch |err| {
+            writeConfigTemplate(io, app_support_path) catch |err| {
                 log.warn("error creating template config file err={}", .{err});
             };
         }
     } else {
         if (!xdg_loaded) {
-            writeConfigTemplate(xdg_path) catch |err| {
+            writeConfigTemplate(io, xdg_path) catch |err| {
                 log.warn("error creating template config file err={}", .{err});
             };
         }
@@ -4129,15 +4195,21 @@ pub fn loadDefaultFiles(self: *Config, alloc: Allocator) !void {
 }
 
 /// Load and parse the CLI args.
-pub fn loadCliArgs(self: *Config, alloc_gpa: Allocator) !void {
+pub fn loadCliArgs(
+    self: *Config,
+    alloc_gpa: Allocator,
+    io: std.Io,
+    raw_args: std.process.Args,
+    env: *const std.process.Environ.Map,
+) !void {
     switch (builtin.os.tag) {
         .windows => {},
 
         // Fast-path if we are Linux/BSD and have no args.
-        .linux, .freebsd => if (std.os.argv.len <= 1) return,
+        .linux, .freebsd => if (raw_args.vector.len <= 1) return,
 
         // Everything else we have to at least try because it may
-        // not use std.os.argv.
+        // not use the passed-in args.
         else => {},
     }
 
@@ -4153,9 +4225,10 @@ pub fn loadCliArgs(self: *Config, alloc_gpa: Allocator) !void {
     //
     // See: https://github.com/Vladimir-csp/xdg-terminal-exec
     if ((comptime builtin.os.tag == .linux) or (comptime builtin.os.tag == .freebsd)) {
-        if (internal_os.xdg.parseTerminalExec(std.os.argv)) |args| {
-            const arena_alloc = self._arena.?.allocator();
+        const arena_alloc = self._arena.?.allocator();
+        const arg_slice = try raw_args.toSlice(arena_alloc);
 
+        if (internal_os.xdg.parseTerminalExec(arg_slice)) |args| {
             // First, we add an artificial "-e" so that if we
             // replay the inputs to rebuild the config (i.e. if
             // a theme is set) then we will get the same behavior.
@@ -4203,9 +4276,9 @@ pub fn loadCliArgs(self: *Config, alloc_gpa: Allocator) !void {
     }
 
     // Initialize our CLI iterator.
-    var iter = try cli.args.argsIterator(alloc_gpa);
+    var iter = try cli.args.argsIterator(raw_args, alloc_gpa);
     defer iter.deinit();
-    try self.loadIter(alloc_gpa, &iter);
+    try self.loadIter(alloc_gpa, io, env, &iter);
 
     // If we are not loading the default files, then we need to
     // replay the steps up to this point so that we can rebuild
@@ -4219,21 +4292,24 @@ pub fn loadCliArgs(self: *Config, alloc_gpa: Allocator) !void {
         errdefer new_config.deinit();
         var it = Replay.iterator(
             self._replay_steps.items[replay_len_start..replay_len_end],
+            io,
+            env,
             &new_config,
         );
-        try new_config.loadIter(alloc_gpa, &it);
+        try new_config.loadIter(alloc_gpa, io, env, &it);
         self.deinit();
         self.* = new_config;
     }
 
     // Any paths referenced from the CLI are relative to the current working
     // directory.
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    try self.expandPaths(try std.fs.cwd().realpath(".", &buf));
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const cwd_len = try std.Io.Dir.cwd().realPath(io, &buf);
+    try self.expandPaths(io, env, buf[0..cwd_len]);
 }
 
 /// Load and parse the config files that were added in the "config-file" key.
-pub fn loadRecursiveFiles(self: *Config, alloc_gpa: Allocator) !void {
+pub fn loadRecursiveFiles(self: *Config, alloc_gpa: Allocator, io: std.Io, env: *const std.process.Environ.Map) !void {
     if (self.@"config-file".value.items.len == 0) return;
     const arena_alloc = self._arena.?.allocator();
 
@@ -4274,7 +4350,7 @@ pub fn loadRecursiveFiles(self: *Config, alloc_gpa: Allocator) !void {
 
         // All paths should already be absolute at this point because
         // they're fixed up after each load.
-        assert(std.fs.path.isAbsolute(path));
+        assert(std.Io.Dir.path.isAbsolute(path));
 
         // We must only load a unique file once
         if (try loaded.fetchPut(path, {}) != null) {
@@ -4292,7 +4368,7 @@ pub fn loadRecursiveFiles(self: *Config, alloc_gpa: Allocator) !void {
             continue;
         }
 
-        var file = std.fs.openFileAbsolute(path, .{}) catch |err| {
+        var file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch |err| {
             if (err != error.FileNotFound or !optional) {
                 const diag: cli.Diagnostic = .{
                     .message = try std.fmt.allocPrintSentinel(
@@ -4308,9 +4384,9 @@ pub fn loadRecursiveFiles(self: *Config, alloc_gpa: Allocator) !void {
             }
             continue;
         };
-        defer file.close();
+        defer file.close(io);
 
-        const stat = try file.stat();
+        const stat = try file.stat(io);
         switch (stat.kind) {
             .file => {},
             else => |kind| {
@@ -4329,7 +4405,7 @@ pub fn loadRecursiveFiles(self: *Config, alloc_gpa: Allocator) !void {
             },
         }
 
-        try self.loadFsFile(arena_alloc, &file, path);
+        try self.loadFsFile(arena_alloc, io, env, &file, path);
     }
 
     // If we have a suffix, add that back.
@@ -4363,6 +4439,9 @@ pub fn arenaAlloc(self: *Config) Allocator {
 pub fn changeConditionalState(
     self: *const Config,
     new: conditional.State,
+    io: std.Io,
+    args: std.process.Args,
+    env: *const std.process.Environ.Map,
 ) !?Config {
     // If the conditional state between the old and new is the same,
     // then we don't need to do anything.
@@ -4396,16 +4475,16 @@ pub fn changeConditionalState(
     new_config._conditional_state = new;
 
     // Replay all of our steps to rebuild the configuration
-    var it = Replay.iterator(self._replay_steps.items, &new_config);
-    try new_config.loadIter(alloc_gpa, &it);
-    try new_config.finalize();
+    var it = Replay.iterator(self._replay_steps.items, io, env, &new_config);
+    try new_config.loadIter(alloc_gpa, io, env, &it);
+    try new_config.finalize(io, args, env);
 
     return new_config;
 }
 
 /// Expand the relative paths in config-files to be absolute paths
 /// relative to the base directory.
-fn expandPaths(self: *Config, base: []const u8) !void {
+fn expandPaths(self: *Config, io: std.Io, env: *const std.process.Environ.Map, base: []const u8) !void {
     const arena_alloc = self._arena.?.allocator();
 
     // Keep track of this step for replays
@@ -4417,17 +4496,41 @@ fn expandPaths(self: *Config, base: []const u8) !void {
     // Expand all of our paths
     inline for (@typeInfo(Config).@"struct".fields) |field| {
         switch (field.type) {
-            RepeatablePath, Path => {
+            RepeatablePath => {
                 try @field(self, field.name).expand(
                     arena_alloc,
+                    io,
+                    env,
                     base,
                     &self._diagnostics,
                 );
             },
-            ?RepeatablePath, ?Path => {
+            Path => {
+                try @field(self, field.name).expand(
+                    arena_alloc,
+                    io,
+                    env,
+                    base,
+                    &self._diagnostics,
+                );
+            },
+            ?RepeatablePath => {
                 if (@field(self, field.name)) |*path| {
                     try path.expand(
                         arena_alloc,
+                        io,
+                        env,
+                        base,
+                        &self._diagnostics,
+                    );
+                }
+            },
+            ?Path => {
+                if (@field(self, field.name)) |*path| {
+                    try path.expand(
+                        arena_alloc,
+                        io,
+                        env,
                         base,
                         &self._diagnostics,
                     );
@@ -4438,7 +4541,12 @@ fn expandPaths(self: *Config, base: []const u8) !void {
     }
 }
 
-fn loadTheme(self: *Config, theme: Theme) !void {
+fn loadTheme(
+    self: *Config,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    theme: Theme,
+) !void {
     // Load the correct theme depending on the conditional state.
     // Dark/light themes were programmed prior to conditional configuration
     // so when we introduce that we probably want to replace this.
@@ -4450,12 +4558,14 @@ fn loadTheme(self: *Config, theme: Theme) !void {
     // Find our theme file and open it. See the open function for details.
     const themefile = (try themepkg.open(
         self._arena.?.allocator(),
+        io,
+        env,
         name,
         &self._diagnostics,
     )) orelse return;
     const path = themefile.path;
     const file = themefile.file;
-    defer file.close();
+    defer file.close(io);
 
     // From this point onwards, we load the theme and do a bit of a dance
     // to achieve two separate goals:
@@ -4477,10 +4587,10 @@ fn loadTheme(self: *Config, theme: Theme) !void {
 
     // Load our theme
     var buf: [2048]u8 = undefined;
-    var file_reader = file.reader(&buf);
+    var file_reader = file.reader(io, &buf);
     const reader = &file_reader.interface;
     var iter: cli.args.LineIterator = .{ .r = reader, .filepath = path };
-    try new_config.loadIter(alloc_gpa, &iter);
+    try new_config.loadIter(alloc_gpa, io, env, &iter);
 
     // Setup our replay to be conditional.
     conditional: for (new_config._replay_steps.items) |*item| {
@@ -4526,8 +4636,8 @@ fn loadTheme(self: *Config, theme: Theme) !void {
 
     // Replay our previous inputs so that we can override values
     // from the theme.
-    var slice_it = Replay.iterator(self._replay_steps.items, &new_config);
-    try new_config.loadIter(alloc_gpa, &slice_it);
+    var slice_it = Replay.iterator(self._replay_steps.items, io, env, &new_config);
+    try new_config.loadIter(alloc_gpa, io, env, &slice_it);
 
     // Success, swap our new config in and free the old.
     self.deinit();
@@ -4536,7 +4646,12 @@ fn loadTheme(self: *Config, theme: Theme) !void {
 
 /// Call this once after you are done setting configuration. This
 /// is idempotent but will waste memory if called multiple times.
-pub fn finalize(self: *Config) !void {
+pub fn finalize(
+    self: *Config,
+    io: std.Io,
+    args: std.process.Args,
+    env: *const std.process.Environ.Map,
+) !void {
     // We always load the theme first because it may set other fields
     // in our config.
     if (self.theme) |theme| {
@@ -4544,7 +4659,7 @@ pub fn finalize(self: *Config) !void {
 
         // Warning: loadTheme will deinit our existing config and replace
         // it so all memory from self prior to this point will be freed.
-        try self.loadTheme(theme);
+        try self.loadTheme(io, env, theme);
 
         // If we have different light vs dark mode themes, disable
         // window-theme = auto since that breaks it.
@@ -4562,7 +4677,7 @@ pub fn finalize(self: *Config) !void {
 
     // Used for a variety of defaults. See the function docs as well the
     // specific variable use sites for more details.
-    const probable_cli = probableCliEnvironment();
+    const probable_cli = probableCliEnvironment(args, env);
 
     // If we have a font-family set and don't set the others, default
     // the others to the font family. This way, if someone does
@@ -4607,14 +4722,14 @@ pub fn finalize(self: *Config) !void {
                 log.info("shell src=config value={}", .{cmd})
             else shell_env: {
                 // Flatpak always gets its shell from outside the sandbox
-                if (internal_os.isFlatpak()) break :shell_env;
+                if (internal_os.isFlatpak(io)) break :shell_env;
 
                 // If we were launched from the desktop, our SHELL env var
                 // will represent our SHELL at login time. We only want to
                 // read from SHELL if we're in a probable CLI environment.
                 if (!probable_cli) break :shell_env;
 
-                if (std.process.getEnvVarOwned(alloc, "SHELL")) |value| {
+                if (env.get("SHELL")) |value| {
                     log.info("default shell source=env value={s}", .{value});
 
                     const copy = try alloc.dupeZ(u8, value);
@@ -4622,7 +4737,7 @@ pub fn finalize(self: *Config) !void {
 
                     // If we don't need the working directory, then we can exit now.
                     if (wd != .home) break :command;
-                } else |_| {}
+                }
             }
 
             switch (builtin.os.tag) {
@@ -4633,8 +4748,8 @@ pub fn finalize(self: *Config) !void {
                     }
 
                     if (wd == .home) {
-                        var buf: [std.fs.max_path_bytes]u8 = undefined;
-                        if (try internal_os.home(&buf)) |home| {
+                        var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+                        if (try internal_os.home(io, env, &buf)) |home| {
                             wd = .{ .path = try alloc.dupe(u8, home) };
                         } else {
                             wd = .inherit;
@@ -4644,7 +4759,7 @@ pub fn finalize(self: *Config) !void {
 
                 else => {
                     // We need the passwd entry for the remainder
-                    const pw = try internal_os.passwd.get(alloc);
+                    const pw = try internal_os.passwd.get(alloc, io);
                     if (self.command == null) {
                         if (pw.shell) |sh| {
                             log.info("default shell src=passwd value={s}", .{sh});
@@ -4668,7 +4783,7 @@ pub fn finalize(self: *Config) !void {
             }
         }
     }
-    try wd.finalize(alloc);
+    try wd.finalize(alloc, io, env);
     self.@"working-directory" = wd;
 
     // Apprt-specific defaults
@@ -4742,9 +4857,14 @@ pub fn finalize(self: *Config) !void {
 pub fn parseManuallyHook(
     self: *Config,
     alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     arg: []const u8,
     iter: anytype,
 ) !bool {
+    _ = io;
+    _ = env;
+
     if (std.mem.eql(u8, arg, "-e")) {
         // Add the special -e marker. This prevents:
         // (1) config-file from adding args to the end (see #2908)
@@ -5107,7 +5227,10 @@ pub const ChangeIterator = struct {
 /// Ghostty in a CLI environment. We need this to change some behaviors.
 /// We should keep the set of behaviors that depend on this as small
 /// as possible because magic sucks, but each place is well documented.
-fn probableCliEnvironment() bool {
+fn probableCliEnvironment(
+    args: std.process.Args,
+    env: *const std.process.Environ.Map,
+) bool {
     switch (builtin.os.tag) {
         // Windows has its own problems, just ignore it for now since
         // its not a real supported target and GTK via WSL2 assuming
@@ -5118,19 +5241,19 @@ fn probableCliEnvironment() bool {
         // Our desktop detection on macOS is very accurate due to how
         // processes are launched on macOS, so if we detect we're launched
         // from the app bundle then we're not in a CLI environment.
-        .macos => if (internal_os.launchedFromDesktop()) return false,
+        .macos => if (internal_os.launchedFromDesktop(env)) return false,
 
         else => {},
     }
 
     // If we have TERM_PROGRAM set to a non-empty value, we assume
     // a graphical terminal environment.
-    if (std.posix.getenv("TERM_PROGRAM")) |v| {
+    if (env.get("TERM_PROGRAM")) |v| {
         if (v.len > 0) return true;
     }
 
     // CLI arguments makes things probable
-    if (std.os.argv.len > 1) return true;
+    if (args.vector.len > 1) return true;
 
     // Unlikely CLI environment
     return false;
@@ -5198,6 +5321,8 @@ const Replay = struct {
         const Self = @This();
 
         config: *Config,
+        io: std.Io,
+        env: *const std.process.Environ.Map,
         slice: []const Replay.Step,
         idx: usize = 0,
 
@@ -5206,7 +5331,7 @@ const Replay = struct {
                 if (self.idx >= self.slice.len) return null;
                 defer self.idx += 1;
                 switch (self.slice[self.idx]) {
-                    .expand => |base| self.config.expandPaths(base) catch |err| {
+                    .expand => |base| self.config.expandPaths(self.io, self.env, base) catch |err| {
                         // This shouldn't happen because to reach this step
                         // means that it succeeded before. Its possible since
                         // expanding paths is a side effect process that the
@@ -5250,8 +5375,8 @@ const Replay = struct {
     /// Construct a Replay iterator from a slice of replay elements.
     /// This can be used with args.parse and handles intermediate
     /// steps such as expanding relative paths.
-    fn iterator(slice: []const Replay.Step, dst: *Config) Iterator {
-        return .{ .slice = slice, .config = dst };
+    fn iterator(slice: []const Replay.Step, io: std.Io, env: *const std.process.Environ.Map, dst: *Config) Iterator {
+        return .{ .slice = slice, .io = io, .env = env, .config = dst };
     }
 };
 
@@ -5349,7 +5474,7 @@ pub const WorkingDirectory = union(enum) {
     }
 
     /// Expand tilde paths in .path values.
-    pub fn finalize(self: *Self, alloc: Allocator) Allocator.Error!void {
+    pub fn finalize(self: *Self, alloc: Allocator, io: std.Io, env: *const std.process.Environ.Map) Allocator.Error!void {
         const path = switch (self.*) {
             .path => |path| path,
             else => return,
@@ -5357,8 +5482,8 @@ pub const WorkingDirectory = union(enum) {
 
         if (!std.mem.startsWith(u8, path, "~/")) return;
 
-        var buf: [std.fs.max_path_bytes]u8 = undefined;
-        const expanded = internal_os.expandHome(path, &buf) catch |err| {
+        var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+        const expanded = internal_os.expandHome(path, &buf, io, env) catch |err| {
             log.warn(
                 "error expanding home directory for working-directory path={s}: {}",
                 .{ path, err },
@@ -5417,15 +5542,20 @@ pub const WorkingDirectory = union(enum) {
         var arena = ArenaAllocator.init(testing.allocator);
         defer arena.deinit();
         const alloc = arena.allocator();
+        var env = try testing.environ.createMap(alloc);
+        defer env.deinit();
 
         {
+            const io = global_state.io();
             var wd: Self = .{ .path = "~/projects/ghostty" };
-            try wd.finalize(alloc);
+            try wd.finalize(alloc, io, &env);
 
-            var buf: [std.fs.max_path_bytes]u8 = undefined;
+            var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const expected = internal_os.expandHome(
                 "~/projects/ghostty",
                 &buf,
+                io,
+                &env,
             ) catch "~/projects/ghostty";
             try testing.expectEqualStrings(expected, wd.value().?);
         }
@@ -5658,8 +5788,8 @@ pub const BoldColor = union(enum) {
 pub const ColorList = struct {
     const Self = @This();
 
-    colors: std.ArrayListUnmanaged(Color) = .{},
-    colors_c: std.ArrayListUnmanaged(Color.C) = .{},
+    colors: std.ArrayList(Color) = .empty,
+    colors_c: std.ArrayList(Color.C) = .empty,
 
     /// ghostty_config_color_list_s
     pub const C = extern struct {
@@ -5972,7 +6102,7 @@ pub const RepeatableString = struct {
     const Self = @This();
 
     // Allocator for the list is the arena for the parent config.
-    list: std.ArrayListUnmanaged([:0]const u8) = .{},
+    list: std.ArrayList([:0]const u8) = .empty,
 
     // If true, then the next value will clear the list and start over
     // rather than append. This is a bit of a hack but is here to make
@@ -6001,7 +6131,7 @@ pub const RepeatableString = struct {
     /// Deep copy of the struct. Required by Config.
     pub fn clone(self: *const Self, alloc: Allocator) Allocator.Error!Self {
         // Copy the list and all the strings in the list.
-        var list = try std.ArrayListUnmanaged([:0]const u8).initCapacity(
+        var list = try std.ArrayList([:0]const u8).initCapacity(
             alloc,
             self.list.items.len,
         );
@@ -6262,11 +6392,11 @@ pub const RepeatableFontVariation = struct {
     const Self = @This();
 
     // Allocator for the list is the arena for the parent config.
-    list: std.ArrayListUnmanaged(fontpkg.face.Variation) = .{},
+    list: std.ArrayList(fontpkg.face.Variation) = .empty,
 
     pub fn parseCLI(self: *Self, alloc: Allocator, input_: ?[]const u8) !void {
         const input = input_ orelse return error.ValueRequired;
-        const eql_idx = std.mem.indexOf(u8, input, "=") orelse return error.InvalidValue;
+        const eql_idx = std.mem.find(u8, input, "=") orelse return error.InvalidValue;
         const whitespace = " \t";
         const key = std.mem.trim(u8, input[0..eql_idx], whitespace);
         const value = std.mem.trim(u8, input[eql_idx + 1 ..], whitespace);
@@ -7182,7 +7312,7 @@ pub const Keybinds = struct {
             const value = input orelse return error.ValueRequired;
 
             // If we don't have a colon, use the value as-is, no copy
-            if (std.mem.indexOf(u8, value, ":") == null)
+            if (std.mem.find(u8, value, ":") == null)
                 break :value value;
 
             // If we have a colon, we copy the whole value for now. We could
@@ -7217,8 +7347,8 @@ pub const Keybinds = struct {
         // Check for table syntax: "name/" or "name/binding"
         // We look for '/' only before the first '=' to avoid matching
         // action arguments like "foo=text:/hello".
-        const eq_idx = std.mem.indexOfScalar(u8, value, '=') orelse value.len;
-        if (std.mem.indexOfScalar(u8, value[0..eq_idx], '/')) |slash_idx| table: {
+        const eq_idx = std.mem.findScalar(u8, value, '=') orelse value.len;
+        if (std.mem.findScalar(u8, value[0..eq_idx], '/')) |slash_idx| table: {
             const table_name = value[0..slash_idx];
 
             // Length zero is valid, so you can set `/=action` for the slash key
@@ -7897,8 +8027,8 @@ pub const Keybinds = struct {
         try keybinds.formatEntry(formatterpkg.entryFormatter("keybind", &buf.writer));
 
         const output = buf.written();
-        try testing.expect(std.mem.indexOf(u8, output, "keybind = shift+b=csi:world\n") != null);
-        try testing.expect(std.mem.indexOf(u8, output, "keybind = foo/shift+a=csi:hello\n") != null);
+        try testing.expect(std.mem.find(u8, output, "keybind = shift+b=csi:world\n") != null);
+        try testing.expect(std.mem.find(u8, output, "keybind = foo/shift+a=csi:hello\n") != null);
     }
 
     test "parseCLI clear clears tables" {
@@ -7956,7 +8086,7 @@ pub const RepeatableCodepointMap = struct {
 
     pub fn parseCLI(self: *Self, alloc: Allocator, input_: ?[]const u8) !void {
         const input = input_ orelse return error.ValueRequired;
-        const eql_idx = std.mem.indexOf(u8, input, "=") orelse return error.InvalidValue;
+        const eql_idx = std.mem.find(u8, input, "=") orelse return error.InvalidValue;
         const whitespace = " \t";
         const key = std.mem.trim(u8, input[0..eql_idx], whitespace);
         const value = std.mem.trim(u8, input[eql_idx + 1 ..], whitespace);
@@ -8226,7 +8356,7 @@ pub const RepeatableClipboardCodepointMap = struct {
 
     pub fn parseCLI(self: *Self, alloc: Allocator, input_: ?[]const u8) !void {
         const input = input_ orelse return error.ValueRequired;
-        const eql_idx = std.mem.indexOf(u8, input, "=") orelse return error.InvalidValue;
+        const eql_idx = std.mem.find(u8, input, "=") orelse return error.InvalidValue;
         const whitespace = " \t";
         const key = std.mem.trim(u8, input[0..eql_idx], whitespace);
         const value = std.mem.trim(u8, input[eql_idx + 1 ..], whitespace);
@@ -8545,7 +8675,7 @@ pub const FontShapingBreak = packed struct {
 pub const RepeatableLink = struct {
     const Self = @This();
 
-    links: std.ArrayListUnmanaged(inputpkg.Link) = .{},
+    links: std.ArrayList(inputpkg.Link) = .empty,
 
     pub fn parseCLI(self: *Self, alloc: Allocator, input_: ?[]const u8) !void {
         _ = self;
@@ -8562,7 +8692,7 @@ pub const RepeatableLink = struct {
         // Note: we don't do any errdefers below since the allocation
         // is expected to be arena allocated.
 
-        var list = try std.ArrayListUnmanaged(inputpkg.Link).initCapacity(
+        var list = try std.ArrayList(inputpkg.Link).initCapacity(
             alloc,
             self.links.items.len,
         );
@@ -8662,8 +8792,8 @@ pub const SplitPreserveZoom = packed struct {
 pub const RepeatableCommand = struct {
     const Self = @This();
 
-    value: std.ArrayListUnmanaged(inputpkg.Command) = .empty,
-    value_c: std.ArrayListUnmanaged(inputpkg.Command.C) = .empty,
+    value: std.ArrayList(inputpkg.Command) = .empty,
+    value_c: std.ArrayList(inputpkg.Command.C) = .empty,
 
     /// ghostty_config_command_list_s
     pub const C = extern struct {
@@ -9838,11 +9968,11 @@ pub const Theme = struct {
         // On Windows, a colon at index 1 is a drive letter (e.g. C:\...)
         // and should not trigger light/dark pair parsing.
         const has_colon = if (comptime builtin.os.tag == .windows)
-            if (std.mem.indexOf(u8, input, ":")) |idx| idx != 1 else false
+            if (std.mem.find(u8, input, ":")) |idx| idx != 1 else false
         else
-            std.mem.indexOf(u8, input, ":") != null;
-        if (std.mem.indexOf(u8, input, ",") != null or
-            std.mem.indexOf(u8, input, "=") != null or
+            std.mem.find(u8, input, ":") != null;
+        if (std.mem.find(u8, input, ",") != null or
+            std.mem.find(u8, input, "=") != null or
             has_colon)
         {
             self.* = try cli.args.parseAutoStruct(
@@ -10098,7 +10228,7 @@ pub const WindowPadding = struct {
         const input = input_ orelse return error.ValueRequired;
         const whitespace = " \t";
 
-        if (std.mem.indexOf(u8, input, ",")) |idx| {
+        if (std.mem.find(u8, input, ",")) |idx| {
             const input_left = std.mem.trim(u8, input[0..idx], whitespace);
             const input_right = std.mem.trim(u8, input[idx + 1 ..], whitespace);
             const left = std.fmt.parseInt(u32, input_left, 10) catch
@@ -10317,23 +10447,39 @@ const TestIterator = struct {
 
 test "parse hook: invalid command" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
     var cfg = try Config.default(testing.allocator);
     defer cfg.deinit();
     const alloc = cfg._arena.?.allocator();
 
     var it: TestIterator = .{ .data = &.{"foo"} };
-    try testing.expect(try cfg.parseManuallyHook(alloc, "--command", &it));
+    try testing.expect(try cfg.parseManuallyHook(
+        alloc,
+        std.testing.io,
+        &env,
+        "--command",
+        &it,
+    ));
     try testing.expect(cfg.command == null);
 }
 
 test "parse e: command only" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
     var cfg = try Config.default(testing.allocator);
     defer cfg.deinit();
     const alloc = cfg._arena.?.allocator();
 
     var it: TestIterator = .{ .data = &.{"foo"} };
-    try testing.expect(!try cfg.parseManuallyHook(alloc, "-e", &it));
+    try testing.expect(!try cfg.parseManuallyHook(
+        alloc,
+        std.testing.io,
+        &env,
+        "-e",
+        &it,
+    ));
 
     const cmd = cfg.@"initial-command".?;
     try testing.expect(cmd == .direct);
@@ -10343,12 +10489,21 @@ test "parse e: command only" {
 
 test "parse e: command and args" {
     const testing = std.testing;
+    var env = try std.testing.environ.createMap(testing.allocator);
+    defer env.deinit();
+
     var cfg = try Config.default(testing.allocator);
     defer cfg.deinit();
     const alloc = cfg._arena.?.allocator();
 
     var it: TestIterator = .{ .data = &.{ "echo", "foo", "bar baz" } };
-    try testing.expect(!try cfg.parseManuallyHook(alloc, "-e", &it));
+    try testing.expect(!try cfg.parseManuallyHook(
+        alloc,
+        std.testing.io,
+        &env,
+        "-e",
+        &it,
+    ));
 
     const cmd = cfg.@"initial-command".?;
     try testing.expect(cmd == .direct);
@@ -10408,27 +10563,27 @@ test "clone can then change conditional state" {
     const alloc_arena = arena.allocator();
 
     // Setup our test theme
-    var td = try internal_os.TempDir.init();
-    defer td.deinit();
+    var td = try tempDirTest();
+    defer td.deinit(testing.io);
     var buf: [4096]u8 = undefined;
     {
-        var file = try td.dir.createFile("theme_light", .{});
-        defer file.close();
-        var writer = file.writer(&buf);
+        var file = try td.dir.createFile(std.testing.io, "theme_light", .{});
+        defer file.close(std.testing.io);
+        var writer = file.writer(std.testing.io, &buf);
         try writer.interface.writeAll(@embedFile("testdata/theme_light"));
         try writer.end();
     }
     {
-        var file = try td.dir.createFile("theme_dark", .{});
-        defer file.close();
-        var writer = file.writer(&buf);
+        var file = try td.dir.createFile(std.testing.io, "theme_dark", .{});
+        defer file.close(std.testing.io);
+        var writer = file.writer(std.testing.io, &buf);
         try writer.interface.writeAll(@embedFile("testdata/theme_dark"));
         try writer.end();
     }
-    var light_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const light = try td.dir.realpath("theme_light", &light_buf);
-    var dark_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dark = try td.dir.realpath("theme_dark", &dark_buf);
+    var light_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const light = try tempRealPath(td.dir, "theme_light", &light_buf);
+    var dark_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const dark = try tempRealPath(td.dir, "theme_dark", &dark_buf);
 
     var cfg_light = try Config.default(alloc);
     defer cfg_light.deinit();
@@ -10439,10 +10594,10 @@ test "clone can then change conditional state" {
             .{ light, dark },
         ),
     } };
-    try cfg_light.loadIter(alloc, &it);
-    try cfg_light.finalize();
+    try loadIterTest(&cfg_light, alloc, &it);
+    try finalizeTest(&cfg_light);
 
-    var cfg_dark = (try cfg_light.changeConditionalState(.{ .theme = .dark })).?;
+    var cfg_dark = (try changeConditionalStateTest(&cfg_light, .{ .theme = .dark })).?;
     defer cfg_dark.deinit();
 
     try testing.expectEqual(Color{
@@ -10459,7 +10614,7 @@ test "clone can then change conditional state" {
         .b = 0xEE,
     }, cfg_clone.background);
 
-    var cfg_light2 = (try cfg_clone.changeConditionalState(.{ .theme = .light })).?;
+    var cfg_light2 = (try changeConditionalStateTest(&cfg_clone, .{ .theme = .light })).?;
     defer cfg_light2.deinit();
     try testing.expectEqual(Color{
         .r = 0xFF,
@@ -10478,8 +10633,8 @@ test "clone preserves conditional set" {
         "--theme=light:foo,dark:bar",
         "--window-theme=auto",
     } };
-    try cfg.loadIter(alloc, &it);
-    try cfg.finalize();
+    try loadIterTest(&cfg, alloc, &it);
+    try finalizeTest(&cfg);
 
     var clone1 = try cfg.clone(alloc);
     defer clone1.deinit();
@@ -10496,14 +10651,11 @@ test "working-directory expands tilde" {
     var it: TestIterator = .{ .data = &.{
         "--working-directory=~/projects/ghostty",
     } };
-    try cfg.loadIter(alloc, &it);
-    try cfg.finalize();
+    try loadIterTest(&cfg, alloc, &it);
+    try finalizeTest(&cfg);
 
-    var buf: [std.fs.max_path_bytes]u8 = undefined;
-    const expected = internal_os.expandHome(
-        "~/projects/ghostty",
-        &buf,
-    ) catch "~/projects/ghostty";
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const expected = expandHomeTest("~/projects/ghostty", &buf) catch "~/projects/ghostty";
     try testing.expectEqualStrings(expected, cfg.@"working-directory".?.value().?);
 }
 
@@ -10531,10 +10683,11 @@ test "changeConditionalState ignores irrelevant changes" {
         var it: TestIterator = .{ .data = &.{
             "--theme=foo",
         } };
-        try cfg.loadIter(alloc, &it);
-        try cfg.finalize();
+        try loadIterTest(&cfg, alloc, &it);
+        try finalizeTest(&cfg);
 
-        try testing.expect(try cfg.changeConditionalState(
+        try testing.expect(try changeConditionalStateTest(
+            &cfg,
             .{ .theme = .dark },
         ) == null);
     }
@@ -10550,10 +10703,10 @@ test "changeConditionalState applies relevant changes" {
         var it: TestIterator = .{ .data = &.{
             "--theme=light:foo,dark:bar",
         } };
-        try cfg.loadIter(alloc, &it);
-        try cfg.finalize();
+        try loadIterTest(&cfg, alloc, &it);
+        try finalizeTest(&cfg);
 
-        var cfg2 = (try cfg.changeConditionalState(.{ .theme = .dark })).?;
+        var cfg2 = (try changeConditionalStateTest(&cfg, .{ .theme = .dark })).?;
         defer cfg2.deinit();
 
         try testing.expect(cfg2._conditional_set.contains(.theme));
@@ -10567,26 +10720,26 @@ test "theme loading" {
     const alloc_arena = arena.allocator();
 
     // Setup our test theme
-    var td = try internal_os.TempDir.init();
-    defer td.deinit();
+    var td = try tempDirTest();
+    defer td.deinit(testing.io);
     var buf: [4096]u8 = undefined;
     {
-        var file = try td.dir.createFile("theme", .{});
-        defer file.close();
-        var writer = file.writer(&buf);
+        var file = try td.dir.createFile(std.testing.io, "theme", .{});
+        defer file.close(std.testing.io);
+        var writer = file.writer(std.testing.io, &buf);
         try writer.interface.writeAll(@embedFile("testdata/theme_simple"));
         try writer.end();
     }
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try td.dir.realpath("theme", &path_buf);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try tempRealPath(td.dir, "theme", &path_buf);
 
     var cfg = try Config.default(alloc);
     defer cfg.deinit();
     var it: TestIterator = .{ .data = &.{
         try std.fmt.allocPrint(alloc_arena, "--theme={s}", .{path}),
     } };
-    try cfg.loadIter(alloc, &it);
-    try cfg.finalize();
+    try loadIterTest(&cfg, alloc, &it);
+    try finalizeTest(&cfg);
 
     try testing.expectEqual(Color{
         .r = 0x12,
@@ -10606,18 +10759,18 @@ test "theme loading preserves conditional state" {
     const alloc_arena = arena.allocator();
 
     // Setup our test theme
-    var td = try internal_os.TempDir.init();
-    defer td.deinit();
+    var td = try tempDirTest();
+    defer td.deinit(testing.io);
     var buf: [4096]u8 = undefined;
     {
-        var file = try td.dir.createFile("theme", .{});
-        defer file.close();
-        var writer = file.writer(&buf);
+        var file = try td.dir.createFile(std.testing.io, "theme", .{});
+        defer file.close(std.testing.io);
+        var writer = file.writer(std.testing.io, &buf);
         try writer.interface.writeAll(@embedFile("testdata/theme_simple"));
         try writer.end();
     }
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try td.dir.realpath("theme", &path_buf);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try tempRealPath(td.dir, "theme", &path_buf);
 
     var cfg = try Config.default(alloc);
     defer cfg.deinit();
@@ -10625,8 +10778,8 @@ test "theme loading preserves conditional state" {
     var it: TestIterator = .{ .data = &.{
         try std.fmt.allocPrint(alloc_arena, "--theme={s}", .{path}),
     } };
-    try cfg.loadIter(alloc, &it);
-    try cfg.finalize();
+    try loadIterTest(&cfg, alloc, &it);
+    try finalizeTest(&cfg);
 
     try testing.expect(cfg._conditional_state.theme == .dark);
 }
@@ -10639,18 +10792,18 @@ test "theme priority is lower than config" {
     const alloc_arena = arena.allocator();
 
     // Setup our test theme
-    var td = try internal_os.TempDir.init();
-    defer td.deinit();
+    var td = try tempDirTest();
+    defer td.deinit(testing.io);
     var buf: [4096]u8 = undefined;
     {
-        var file = try td.dir.createFile("theme", .{});
-        defer file.close();
-        var writer = file.writer(&buf);
+        var file = try td.dir.createFile(std.testing.io, "theme", .{});
+        defer file.close(std.testing.io);
+        var writer = file.writer(std.testing.io, &buf);
         try writer.interface.writeAll(@embedFile("testdata/theme_simple"));
         try writer.end();
     }
-    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const path = try td.dir.realpath("theme", &path_buf);
+    var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const path = try tempRealPath(td.dir, "theme", &path_buf);
 
     var cfg = try Config.default(alloc);
     defer cfg.deinit();
@@ -10658,8 +10811,8 @@ test "theme priority is lower than config" {
         "--background=#ABCDEF",
         try std.fmt.allocPrint(alloc_arena, "--theme={s}", .{path}),
     } };
-    try cfg.loadIter(alloc, &it);
-    try cfg.finalize();
+    try loadIterTest(&cfg, alloc, &it);
+    try finalizeTest(&cfg);
 
     try testing.expectEqual(Color{
         .r = 0xAB,
@@ -10676,27 +10829,27 @@ test "theme loading correct light/dark" {
     const alloc_arena = arena.allocator();
 
     // Setup our test theme
-    var td = try internal_os.TempDir.init();
-    defer td.deinit();
+    var td = try tempDirTest();
+    defer td.deinit(testing.io);
     var buf: [4096]u8 = undefined;
     {
-        var file = try td.dir.createFile("theme_light", .{});
-        defer file.close();
-        var writer = file.writer(&buf);
+        var file = try td.dir.createFile(std.testing.io, "theme_light", .{});
+        defer file.close(std.testing.io);
+        var writer = file.writer(std.testing.io, &buf);
         try writer.interface.writeAll(@embedFile("testdata/theme_light"));
         try writer.end();
     }
     {
-        var file = try td.dir.createFile("theme_dark", .{});
-        defer file.close();
-        var writer = file.writer(&buf);
+        var file = try td.dir.createFile(std.testing.io, "theme_dark", .{});
+        defer file.close(std.testing.io);
+        var writer = file.writer(std.testing.io, &buf);
         try writer.interface.writeAll(@embedFile("testdata/theme_dark"));
         try writer.end();
     }
-    var light_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const light = try td.dir.realpath("theme_light", &light_buf);
-    var dark_buf: [std.fs.max_path_bytes]u8 = undefined;
-    const dark = try td.dir.realpath("theme_dark", &dark_buf);
+    var light_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const light = try tempRealPath(td.dir, "theme_light", &light_buf);
+    var dark_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const dark = try tempRealPath(td.dir, "theme_dark", &dark_buf);
 
     // Light
     {
@@ -10709,8 +10862,8 @@ test "theme loading correct light/dark" {
                 .{ light, dark },
             ),
         } };
-        try cfg.loadIter(alloc, &it);
-        try cfg.finalize();
+        try loadIterTest(&cfg, alloc, &it);
+        try finalizeTest(&cfg);
 
         try testing.expectEqual(Color{
             .r = 0xFF,
@@ -10731,8 +10884,8 @@ test "theme loading correct light/dark" {
                 .{ light, dark },
             ),
         } };
-        try cfg.loadIter(alloc, &it);
-        try cfg.finalize();
+        try loadIterTest(&cfg, alloc, &it);
+        try finalizeTest(&cfg);
 
         try testing.expectEqual(Color{
             .r = 0xEE,
@@ -10752,10 +10905,10 @@ test "theme loading correct light/dark" {
                 .{ light, dark },
             ),
         } };
-        try cfg.loadIter(alloc, &it);
-        try cfg.finalize();
+        try loadIterTest(&cfg, alloc, &it);
+        try finalizeTest(&cfg);
 
-        var new = (try cfg.changeConditionalState(.{ .theme = .dark })).?;
+        var new = (try changeConditionalStateTest(&cfg, .{ .theme = .dark })).?;
         defer new.deinit();
         try testing.expectEqual(Color{
             .r = 0xEE,
@@ -10776,8 +10929,8 @@ test "theme specifying light/dark changes window-theme from auto" {
             "--theme=light:foo,dark:bar",
             "--window-theme=auto",
         } };
-        try cfg.loadIter(alloc, &it);
-        try cfg.finalize();
+        try loadIterTest(&cfg, alloc, &it);
+        try finalizeTest(&cfg);
 
         try testing.expect(cfg.@"window-theme" == .system);
     }
@@ -10794,8 +10947,8 @@ test "theme specifying light/dark sets theme usage in conditional state" {
             "--theme=light:foo,dark:bar",
             "--window-theme=auto",
         } };
-        try cfg.loadIter(alloc, &it);
-        try cfg.finalize();
+        try loadIterTest(&cfg, alloc, &it);
+        try finalizeTest(&cfg);
 
         try testing.expect(cfg.@"window-theme" == .system);
         try testing.expect(cfg._conditional_set.contains(.theme));
@@ -10812,7 +10965,7 @@ test "compatibility: gtk-single-instance desktop" {
         var it: TestIterator = .{ .data = &.{
             "--gtk-single-instance=desktop",
         } };
-        try cfg.loadIter(alloc, &it);
+        try loadIterTest(&cfg, alloc, &it);
 
         // We need to test this BEFORE finalize, because finalize will
         // convert our detect to a real value.
@@ -10833,8 +10986,8 @@ test "compatibility: removed cursor-invert-fg-bg" {
         var it: TestIterator = .{ .data = &.{
             "--cursor-invert-fg-bg",
         } };
-        try cfg.loadIter(alloc, &it);
-        try cfg.finalize();
+        try loadIterTest(&cfg, alloc, &it);
+        try finalizeTest(&cfg);
 
         try testing.expectEqual(
             TerminalColor.@"cell-foreground",
@@ -10857,8 +11010,8 @@ test "compatibility: removed selection-invert-fg-bg" {
         var it: TestIterator = .{ .data = &.{
             "--selection-invert-fg-bg",
         } };
-        try cfg.loadIter(alloc, &it);
-        try cfg.finalize();
+        try loadIterTest(&cfg, alloc, &it);
+        try finalizeTest(&cfg);
 
         try testing.expectEqual(
             TerminalColor.@"cell-background",
@@ -10881,8 +11034,8 @@ test "compatibility: removed bold-is-bright" {
         var it: TestIterator = .{ .data = &.{
             "--bold-is-bright",
         } };
-        try cfg.loadIter(alloc, &it);
-        try cfg.finalize();
+        try loadIterTest(&cfg, alloc, &it);
+        try finalizeTest(&cfg);
 
         try testing.expectEqual(
             BoldColor.bright,
@@ -10901,8 +11054,8 @@ test "compatibility: window new-window" {
         var it: TestIterator = .{ .data = &.{
             "--macos-dock-drop-behavior=window",
         } };
-        try cfg.loadIter(alloc, &it);
-        try cfg.finalize();
+        try loadIterTest(&cfg, alloc, &it);
+        try finalizeTest(&cfg);
         try testing.expectEqual(
             MacOSDockDropBehavior.@"new-window",
             cfg.@"macos-dock-drop-behavior",

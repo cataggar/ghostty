@@ -50,10 +50,12 @@ pub const Face = struct {
 
     /// Initialize a CoreText-based font from a TTF/TTC in memory.
     pub fn init(
+        io: std.Io,
         lib: font.Library,
         source: [:0]const u8,
         opts: font.face.Options,
     ) !Face {
+        _ = io;
         _ = lib;
 
         const data = try macos.foundation.Data.createWithBytesNoCopy(source);
@@ -1046,7 +1048,7 @@ test "in-memory" {
     var lib = try font.Library.init(alloc);
     defer lib.deinit();
 
-    var face = try Face.init(lib, testFont, .{ .size = .{ .points = 12 } });
+    var face = try Face.init(testing.io, lib, testFont, .{ .size = .{ .points = 12 } });
     defer face.deinit();
 
     // Generate all visible ASCII
@@ -1073,7 +1075,7 @@ test "variable" {
     var lib = try font.Library.init(alloc);
     defer lib.deinit();
 
-    var face = try Face.init(lib, testFont, .{ .size = .{ .points = 12 } });
+    var face = try Face.init(testing.io, lib, testFont, .{ .size = .{ .points = 12 } });
     defer face.deinit();
 
     // Generate all visible ASCII
@@ -1100,7 +1102,7 @@ test "variable set variation" {
     var lib = try font.Library.init(alloc);
     defer lib.deinit();
 
-    var face = try Face.init(lib, testFont, .{ .size = .{ .points = 12 } });
+    var face = try Face.init(testing.io, lib, testFont, .{ .size = .{ .points = 12 } });
     defer face.deinit();
 
     try face.setVariations(&.{
@@ -1128,7 +1130,7 @@ test "svg font table" {
     var lib = try font.Library.init(alloc);
     defer lib.deinit();
 
-    var face = try Face.init(lib, testFont, .{ .size = .{ .points = 12 } });
+    var face = try Face.init(testing.io, lib, testFont, .{ .size = .{ .points = 12 } });
     defer face.deinit();
 
     const table = (try face.copyTable(alloc, "SVG ")).?;
@@ -1145,7 +1147,7 @@ test "glyphIndex colored vs text" {
     var lib = try font.Library.init(alloc);
     defer lib.deinit();
 
-    var face = try Face.init(lib, testFont, .{ .size = .{ .points = 12 } });
+    var face = try Face.init(testing.io, lib, testFont, .{ .size = .{ .points = 12 } });
     defer face.deinit();
 
     {

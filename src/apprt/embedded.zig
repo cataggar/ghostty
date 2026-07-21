@@ -18,6 +18,7 @@ const terminal = @import("../terminal/main.zig");
 const CoreApp = @import("../App.zig");
 const CoreInspector = @import("../inspector/main.zig").Inspector;
 const CoreSurface = @import("../Surface.zig");
+const global_state = &@import("../global.zig").state;
 const configpkg = @import("../config.zig");
 const Config = configpkg.Config;
 const String = @import("../main_c.zig").String;
@@ -330,10 +331,11 @@ pub const App = struct {
     /// to use.
     pub fn performIpc(
         _: Allocator,
+        _: std.Io,
         _: apprt.ipc.Target,
         comptime action: apprt.ipc.Action.Key,
         _: apprt.ipc.Action.Value(action),
-    ) (Allocator.Error || std.posix.WriteError || apprt.ipc.Errors)!bool {
+    ) (Allocator.Error || std.Io.Writer.Error || apprt.ipc.Errors)!bool {
         switch (action) {
             .new_window => return false,
             .toggle_quick_terminal => return false,
@@ -372,7 +374,8 @@ pub const Platform = union(PlatformTag) {
 
     /// Initialize a Platform a tag and configuration from the C ABI.
     pub fn init(tag_int: c_int, c_platform: C) !Platform {
-        const tag = try std.meta.intToEnum(PlatformTag, tag_int);
+        const tag = std.enums.fromInt(PlatformTag, tag_int) orelse
+            return error.UnsupportedPlatform;
         return switch (tag) {
             .macos => if (MacOS != void) macos: {
                 const config = c_platform.macos;
@@ -490,16 +493,16 @@ pub const Surface = struct {
         if (opts.working_directory) |c_wd| {
             const wd = std.mem.sliceTo(c_wd, 0);
             if (wd.len > 0) wd: {
-                var dir = std.fs.openDirAbsolute(wd, .{}) catch |err| {
+                var dir = std.Io.Dir.openDirAbsolute(app.core_app.io, wd, .{}) catch |err| {
                     log.warn(
                         "error opening requested working directory dir={s} err={}",
                         .{ wd, err },
                     );
                     break :wd;
                 };
-                defer dir.close();
+                defer dir.close(app.core_app.io);
 
-                const stat = dir.stat() catch |err| {
+                const stat = dir.stat(app.core_app.io) catch |err| {
                     log.warn(
                         "failed to stat requested working directory dir={s} err={}",
                         .{ wd, err },
@@ -516,7 +519,7 @@ pub const Surface = struct {
                 }
 
                 var wd_val: configpkg.WorkingDirectory = .{ .path = wd };
-                if (wd_val.finalize(config.arenaAlloc())) |_| {
+                if (wd_val.finalize(config.arenaAlloc(), app.core_app.io, &global_state.environ_map)) |_| {
                     config.@"working-directory" = wd_val;
                 } else |err| {
                     log.warn(
@@ -950,9 +953,13 @@ pub const Surface = struct {
         };
     }
 
-    pub fn defaultTermioEnv(self: *const Surface) !std.process.EnvMap {
+    pub fn defaultTermioEnv(self: *const Surface) !std.process.Environ.Map {
         const alloc = self.app.core_app.alloc;
-        var env = try internal_os.getEnvMap(alloc);
+        var env = try internal_os.getSurfaceEnvMap(
+            alloc,
+            self.app.core_app.io,
+            &global_state.environ_map,
+        );
         errdefer env.deinit();
 
         if (comptime builtin.target.os.tag.isDarwin()) {
@@ -1000,7 +1007,7 @@ pub const Inspector = struct {
     content_scale: f64 = 1,
 
     /// Our previous instant used to calculate delta time for animations.
-    instant: ?std.time.Instant = null,
+    instant: ?std.Io.Timestamp = null,
 
     const Backend = enum {
         metal,
@@ -1065,6 +1072,7 @@ pub const Inspector = struct {
 
     pub fn renderMetal(
         self: *Inspector,
+        io: std.Io,
         command_buffer: objc.Object,
         desc: objc.Object,
     ) !void {
@@ -1080,7 +1088,7 @@ pub const Inspector = struct {
         // this.
         for (0..2) |_| {
             cimgui.ImGui_ImplMetal_NewFrame(desc.value);
-            try self.newFrame();
+            try self.newFrame(io);
             cimgui.c.ImGui_NewFrame();
 
             // Build our UI
@@ -1225,13 +1233,13 @@ pub const Inspector = struct {
         }
     }
 
-    fn newFrame(self: *Inspector) !void {
-        const io: *cimgui.c.ImGuiIO = cimgui.c.ImGui_GetIO();
+    fn newFrame(self: *Inspector, io: std.Io) !void {
+        const cio: *cimgui.c.ImGuiIO = cimgui.c.ImGui_GetIO();
 
         // Determine our delta time
-        const now = try std.time.Instant.now();
-        io.DeltaTime = if (self.instant) |prev| delta: {
-            const since_ns: f64 = @floatFromInt(now.since(prev));
+        const now = std.Io.Timestamp.now(io, .awake);
+        cio.DeltaTime = if (self.instant) |prev| delta: {
+            const since_ns: f64 = @floatFromInt(prev.durationTo(now).toNanoseconds());
             const ns_per_s: f64 = @floatFromInt(std.time.ns_per_s);
             const since_s: f32 = @floatCast(since_ns / ns_per_s);
             break :delta @max(0.00001, since_s);
@@ -1410,7 +1418,7 @@ pub const CAPI = struct {
         opts: *const apprt.runtime.App.Options,
         config: *const Config,
     ) !*App {
-        const core_app = try CoreApp.create(global.alloc);
+        const core_app = try CoreApp.create(global.alloc, global.io(), global.args, &global.environ_map);
         errdefer core_app.destroy();
 
         // Create our runtime app
@@ -1467,8 +1475,8 @@ pub const CAPI = struct {
     /// if it were sent to the surface right now. The "right now"
     /// is important because things like trigger sequences are only
     /// valid until the next key event.
-    export fn ghostty_config_key_is_binding(
-        config: *Config,
+    export fn ghostty_app_key_is_binding(
+        app: *App,
         event: KeyEvent,
     ) bool {
         const core_event = event.keyEvent().core() orelse {
@@ -1476,7 +1484,7 @@ pub const CAPI = struct {
             return false;
         };
 
-        return config.keyEventIsBinding(core_event);
+        return app.config.keyEventIsBinding(core_event);
     }
 
     /// Notify the app that the keyboard was changed. This causes the
@@ -1520,7 +1528,7 @@ pub const CAPI = struct {
 
     /// Update the color scheme of the app.
     export fn ghostty_app_set_color_scheme(v: *App, scheme_raw: c_int) void {
-        const scheme = std.meta.intToEnum(apprt.ColorScheme, scheme_raw) catch {
+        const scheme = std.enums.fromInt(apprt.ColorScheme, scheme_raw) orelse {
             log.warn(
                 "invalid color scheme to ghostty_surface_set_color_scheme value={}",
                 .{scheme_raw},
@@ -1612,8 +1620,8 @@ pub const CAPI = struct {
         result: *Text,
     ) bool {
         const core_surface = &surface.core_surface;
-        core_surface.renderer_state.mutex.lock();
-        defer core_surface.renderer_state.mutex.unlock();
+        core_surface.renderer_state.mutex.lockUncancelable(global.io());
+        defer core_surface.renderer_state.mutex.unlock(global.io());
 
         // If we don't have a selection, do nothing.
         const core_sel = core_surface.io.terminal.screens.active.selection orelse return false;
@@ -1632,8 +1640,8 @@ pub const CAPI = struct {
         sel: Selection,
         result: *Text,
     ) bool {
-        surface.core_surface.renderer_state.mutex.lock();
-        defer surface.core_surface.renderer_state.mutex.unlock();
+        surface.core_surface.renderer_state.mutex.lockUncancelable(global.io());
+        defer surface.core_surface.renderer_state.mutex.unlock(global.io());
 
         const core_sel = sel.core(
             surface.core_surface.renderer_state.terminal.screens.active,
@@ -1730,7 +1738,7 @@ pub const CAPI = struct {
 
     /// Update the color scheme of the surface.
     export fn ghostty_surface_set_color_scheme(surface: *Surface, scheme_raw: c_int) void {
-        const scheme = std.meta.intToEnum(apprt.ColorScheme, scheme_raw) catch {
+        const scheme = std.enums.fromInt(apprt.ColorScheme, scheme_raw) orelse {
             log.warn(
                 "invalid color scheme to ghostty_surface_set_color_scheme value={}",
                 .{scheme_raw},
@@ -1891,16 +1899,7 @@ pub const CAPI = struct {
         stage_raw: u32,
         pressure: f64,
     ) void {
-        const stage = std.meta.intToEnum(
-            input.MousePressureStage,
-            stage_raw,
-        ) catch {
-            log.warn(
-                "invalid mouse pressure stage value={}",
-                .{stage_raw},
-            );
-            return;
-        };
+        const stage = std.enums.fromInt(input.MousePressureStage, stage_raw) orelse return;
 
         surface.mousePressureCallback(stage, pressure);
     }
@@ -2136,6 +2135,7 @@ pub const CAPI = struct {
             _ = surface.renderer_thread.mailbox.push(
                 .{ .macos_display_id = display_id },
                 .{ .forever = {} },
+                global_state.io(),
             );
             surface.renderer_thread.wakeup.notify() catch {};
         }
@@ -2157,8 +2157,8 @@ pub const CAPI = struct {
             // read the font face. It should not be deferred since
             // we're loading the primary face.
             const grid = ptr.core_surface.renderer.font_grid;
-            grid.lock.lockShared();
-            defer grid.lock.unlockShared();
+            grid.lock.lockSharedUncancelable(global_state.io());
+            defer grid.lock.unlockShared(global_state.io());
 
             const collection = &grid.resolver.collection;
             const face = collection.getFace(.{}) catch return null;
@@ -2195,8 +2195,8 @@ pub const CAPI = struct {
             result: *Text,
         ) bool {
             const surface = &ptr.core_surface;
-            surface.renderer_state.mutex.lock();
-            defer surface.renderer_state.mutex.unlock();
+            surface.renderer_state.mutex.lockUncancelable(global.io());
+            defer surface.renderer_state.mutex.unlock(global.io());
 
             // Get our word selection
             const sel = sel: {
@@ -2232,6 +2232,7 @@ pub const CAPI = struct {
             descriptor: objc.c.id,
         ) void {
             return ptr.renderMetal(
+                global_state.io(),
                 .fromId(command_buffer),
                 .fromId(descriptor),
             ) catch |err| {

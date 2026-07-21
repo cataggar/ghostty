@@ -176,7 +176,9 @@ test "adding actions to an object" {
         _ = addAsGroup(gtk.Box, box, "test", &actions);
     }
 
-    const expected = std.crypto.random.intRangeAtMost(i32, 1, std.math.maxInt(u31));
+    var random: u32 = undefined;
+    testing.io.random(std.mem.asBytes(&random));
+    const expected: i32 = @intCast(random % std.math.maxInt(u31) + 1);
     const parameter = glib.Variant.newInt32(expected);
 
     try testing.expect(box.as(gtk.Widget).activateActionVariant("test.test", parameter) != 0);

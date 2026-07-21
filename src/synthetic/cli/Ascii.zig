@@ -42,11 +42,8 @@ pub fn run(_: *Ascii, writer: *std.Io.Writer, rand: std.Random) !void {
 
     while (true) {
         _ = gen.write(writer) catch |err| {
-            const Error = error{ WriteFailed, BrokenPipe } || @TypeOf(err);
-            switch (@as(Error, err)) {
-                error.BrokenPipe => return, // stdout closed
+            switch (err) {
                 error.WriteFailed => return, // fixed buffer full
-                else => return err,
             }
         };
     }

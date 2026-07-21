@@ -79,13 +79,14 @@ pub fn performAction(
 /// to use.
 pub fn performIpc(
     alloc: Allocator,
+    io: std.Io,
     target: apprt.ipc.Target,
     comptime action: apprt.ipc.Action.Key,
     value: apprt.ipc.Action.Value(action),
 ) !bool {
     switch (action) {
-        .new_window => return try ipcNewWindow(alloc, target, value),
-        .toggle_quick_terminal => return try ipcToggleQuickTerminal(alloc, target),
+        .new_window => return try ipcNewWindow(alloc, io, target, value),
+        .toggle_quick_terminal => return try ipcToggleQuickTerminal(alloc, io, target),
     }
 }
 

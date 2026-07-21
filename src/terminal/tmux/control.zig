@@ -117,7 +117,7 @@ pub const Parser = struct {
                 const line = written[idx..];
 
                 if (parseBlockTerminator(line)) |terminator| {
-                    const output = std.mem.trimRight(
+                    const output = std.mem.trimEnd(
                         u8,
                         written[0..idx],
                         "\r\n",
@@ -192,7 +192,7 @@ pub const Parser = struct {
             break :line line;
         };
         const cmd = cmd: {
-            const idx = std.mem.indexOfScalar(u8, line, ' ') orelse line.len;
+            const idx = std.mem.findScalar(u8, line, ' ') orelse line.len;
             break :cmd line[0..idx];
         };
 

@@ -135,9 +135,11 @@ pub const Head = extern struct {
 
     /// Parse the table from raw data.
     pub fn init(data: []const u8) error{EndOfStream}!Head {
-        var fbs = std.io.fixedBufferStream(data);
-        const reader = fbs.reader();
-        return try reader.readStructEndian(Head, .big);
+        var reader: std.Io.Reader = .fixed(data);
+        return reader.takeStruct(Head, .big) catch |err| switch (err) {
+            error.ReadFailed => unreachable,
+            error.EndOfStream => return error.EndOfStream,
+        };
     }
 };
 

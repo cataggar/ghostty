@@ -92,8 +92,6 @@ pub fn recordKeyEvent(
             events.deleteOldest(1);
             try events.append(ev);
         },
-
-        else => return err,
     };
 }
 
@@ -118,6 +116,7 @@ pub fn render(
 ) void {
     // Draw the UI
     self.gui.draw(
+        surface.app.io,
         surface,
         self.mouse,
     );

@@ -122,7 +122,7 @@ const PosixPty = struct {
 
     /// Buffer for storage of slave tty name so that we don't have to recompute
     /// it every time we need it.
-    tty_name_buf: [std.fs.max_path_bytes:0]u8 = undefined,
+    tty_name_buf: [std.Io.Dir.max_path_bytes:0]u8 = undefined,
     /// The name of slave tty. If `null` it has not yet been computed or
     /// may not be available. Should not be accessed directly, but through
     /// `self.getProcessInfo(.tty_name)`
@@ -153,28 +153,35 @@ const PosixPty = struct {
         // Set CLOEXEC on the master fd, only the slave fd should be inherited
         // by the child process (shell/command).
         cloexec: {
-            const flags = posix.fcntl(master_fd, posix.F.GETFD, 0) catch |err| {
-                log.warn("error getting flags for master fd err={}", .{err});
+            const flags = posix.system.fcntl(master_fd, posix.F.GETFD);
+            if (flags < 0) {
+                log.warn(
+                    "error getting flags for master fd err={}",
+                    .{flags},
+                );
                 break :cloexec;
-            };
-
-            _ = posix.fcntl(
+            }
+            const rc = posix.system.fcntl(
                 master_fd,
                 posix.F.SETFD,
-                flags | posix.FD_CLOEXEC,
-            ) catch |err| {
-                log.warn("error setting CLOEXEC on master fd err={}", .{err});
+                @as(c_uint, @intCast(flags)) |
+                    posix.FD_CLOEXEC,
+            );
+            if (rc < 0) {
+                log.warn(
+                    "error setting CLOEXEC on master fd err={}",
+                    .{rc},
+                );
                 break :cloexec;
-            };
+            }
         }
 
         // Enable UTF-8 mode. I think this is on by default on Linux but it
         // is NOT on by default on macOS so we ensure that it is always set.
-        var attrs: c.termios = undefined;
-        if (c.tcgetattr(master_fd, &attrs) != 0)
+        var attrs = posix.tcgetattr(master_fd) catch
             return error.OpenptyFailed;
-        attrs.c_iflag |= c.IUTF8;
-        if (c.tcsetattr(master_fd, c.TCSANOW, &attrs) != 0)
+        attrs.iflag.IUTF8 = true;
+        posix.tcsetattr(master_fd, .NOW, attrs) catch
             return error.OpenptyFailed;
 
         return .{
@@ -186,7 +193,7 @@ const PosixPty = struct {
     }
 
     pub fn deinit(self: *Pty) void {
-        _ = posix.system.close(self.master);
+        _ = std.c.close(self.master);
         self.* = undefined;
     }
 
@@ -260,8 +267,8 @@ const PosixPty = struct {
         }
 
         // Can close master/slave pair now
-        posix.close(self.slave);
-        posix.close(self.master);
+        _ = std.c.close(self.slave);
+        _ = std.c.close(self.master);
     }
 
     /// Get information about the process(es) attached to the PTY. Returns
@@ -275,7 +282,7 @@ const PosixPty = struct {
                         const linux = std.os.linux;
                         var pgrp: i32 = undefined;
                         const rc = linux.tcgetpgrp(self.master, &pgrp);
-                        switch (linux.E.init(rc)) {
+                        switch (linux.errno(rc)) {
                             .SUCCESS => return @intCast(pgrp),
                             else => return null,
                         }
@@ -367,12 +374,12 @@ const WindowsPty = struct {
             .lpSecurityDescriptor = null,
         };
 
-        pty.in_pipe = windows.kernel32.CreateNamedPipeW(
+        pty.in_pipe = windows.exp.kernel32.CreateNamedPipeW(
             pipe_path_w.ptr,
-            windows.PIPE_ACCESS_OUTBOUND |
+            windows.exp.PIPE_ACCESS_OUTBOUND |
                 windows.exp.FILE_FLAG_FIRST_PIPE_INSTANCE |
-                windows.FILE_FLAG_OVERLAPPED,
-            windows.PIPE_TYPE_BYTE,
+                windows.exp.FILE_FLAG_OVERLAPPED,
+            windows.exp.PIPE_TYPE_BYTE,
             1,
             4096,
             4096,
@@ -380,12 +387,12 @@ const WindowsPty = struct {
             &security_attributes,
         );
         if (pty.in_pipe == windows.INVALID_HANDLE_VALUE) {
-            return windows.unexpectedError(windows.kernel32.GetLastError());
+            return windows.unexpectedError(windows.GetLastError());
         }
         errdefer _ = windows.CloseHandle(pty.in_pipe);
 
         var security_attributes_read = security_attributes;
-        pty.in_pipe_pty = windows.kernel32.CreateFileW(
+        pty.in_pipe_pty = windows.exp.kernel32.CreateFileW(
             pipe_path_w.ptr,
             windows.GENERIC_READ,
             0,
@@ -395,7 +402,7 @@ const WindowsPty = struct {
             null,
         );
         if (pty.in_pipe_pty == windows.INVALID_HANDLE_VALUE) {
-            return windows.unexpectedError(windows.kernel32.GetLastError());
+            return windows.unexpectedError(windows.GetLastError());
         }
         errdefer _ = windows.CloseHandle(pty.in_pipe_pty);
 
@@ -414,8 +421,8 @@ const WindowsPty = struct {
         //     _ = windows.CloseHandle(pty.in_pipe);
         // }
 
-        if (windows.exp.kernel32.CreatePipe(&pty.out_pipe, &pty.out_pipe_pty, null, 0) == 0) {
-            return windows.unexpectedError(windows.kernel32.GetLastError());
+        if (windows.exp.kernel32.CreatePipe(&pty.out_pipe, &pty.out_pipe_pty, null, 0) == .FALSE) {
+            return windows.unexpectedError(windows.GetLastError());
         }
         errdefer {
             _ = windows.CloseHandle(pty.out_pipe);

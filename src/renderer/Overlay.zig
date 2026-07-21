@@ -131,16 +131,19 @@ pub fn reset(self: *Overlay) void {
 pub fn applyFeatures(
     self: *Overlay,
     alloc: Allocator,
+    io: std.Io,
     state: *const terminal.RenderState,
     features: []const Feature,
 ) void {
     for (features) |f| switch (f) {
         .highlight_hyperlinks => self.highlightHyperlinks(
             alloc,
+            io,
             state,
         ),
         .semantic_prompts => self.highlightSemanticPrompts(
             alloc,
+            io,
             state,
         ),
     };
@@ -154,6 +157,7 @@ pub fn applyFeatures(
 fn highlightHyperlinks(
     self: *Overlay,
     alloc: Allocator,
+    io: std.Io,
     state: *const terminal.RenderState,
 ) void {
     const border_color = Color.hyperlink.rectBorder();
@@ -185,6 +189,7 @@ fn highlightHyperlinks(
 
             self.highlightGridRect(
                 alloc,
+                io,
                 start_x,
                 y,
                 end_x - start_x,
@@ -201,6 +206,7 @@ fn highlightHyperlinks(
 fn highlightSemanticPrompts(
     self: *Overlay,
     alloc: Allocator,
+    io: std.Io,
     state: *const terminal.RenderState,
 ) void {
     const row_slice = state.row_data.slice();
@@ -235,6 +241,7 @@ fn highlightSemanticPrompts(
             const bar_width = @min(@as(usize, 5), self.cell_size.width);
             self.highlightPixelRect(
                 alloc,
+                io,
                 0,
                 start_y,
                 bar_width,
@@ -281,6 +288,7 @@ fn highlightSemanticPrompts(
 
             self.highlightGridRect(
                 alloc,
+                io,
                 start_x,
                 y,
                 x - start_x,
@@ -299,6 +307,7 @@ fn highlightSemanticPrompts(
 fn highlightGridRect(
     self: *Overlay,
     alloc: Allocator,
+    io: std.Io,
     x: usize,
     y: usize,
     width: usize,
@@ -337,7 +346,7 @@ fn highlightGridRect(
     const end_y: f64 = start_y + @as(f64, @floatFromInt(px_height));
 
     // Grab our context to draw
-    var ctx: z2d.Context = .init(alloc, &self.surface);
+    var ctx: z2d.Context = .init(io, alloc, &self.surface);
     defer ctx.deinit();
 
     // Don't need AA because we use sharp edges
@@ -367,6 +376,7 @@ fn highlightGridRect(
 fn highlightPixelRect(
     self: *Overlay,
     alloc: Allocator,
+    io: std.Io,
     x: usize,
     y: usize,
     width_px: usize,
@@ -394,7 +404,7 @@ fn highlightPixelRect(
     const end_x: f64 = start_x + @as(f64, @floatFromInt(px_width));
     const end_y: f64 = start_y + @as(f64, @floatFromInt(px_height));
 
-    var ctx: z2d.Context = .init(alloc, &self.surface);
+    var ctx: z2d.Context = .init(io, alloc, &self.surface);
     defer ctx.deinit();
 
     ctx.setAntiAliasingMode(.none);

@@ -1,5 +1,3 @@
-const builtin = @import("builtin");
-
 pub const carbon = @import("carbon.zig");
 pub const foundation = @import("foundation.zig");
 pub const animation = @import("animation.zig");
@@ -24,10 +22,6 @@ pub const c = @cImport({
     @cInclude("dispatch/dispatch.h");
     @cInclude("os/log.h");
     @cInclude("os/signpost.h");
-
-    if (builtin.os.tag == .macos) {
-        @cInclude("Carbon/Carbon.h");
-    }
 });
 
 test {

@@ -78,6 +78,7 @@ const Terminal = terminalpkg.Terminal;
 const log = std.log.scoped(.@"scrollback-compression-bench");
 
 opts: Options,
+io: std.Io,
 terminal: Terminal,
 
 pub const Options = struct {
@@ -127,6 +128,8 @@ pub const Mode = enum {
 
 pub fn create(
     alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     opts: Options,
 ) !*ScrollbackCompression {
     const ptr = try alloc.create(ScrollbackCompression);
@@ -134,7 +137,8 @@ pub fn create(
 
     ptr.* = .{
         .opts = opts,
-        .terminal = try .init(alloc, .{
+        .io = io,
+        .terminal = try .init(alloc, io, env, .{
             .rows = opts.@"terminal-rows",
             .cols = opts.@"terminal-cols",
             .max_scrollback = opts.@"max-scrollback",
@@ -181,14 +185,14 @@ fn setup(ptr: *anyopaque) Benchmark.Error!void {
 /// Feed the corpus in the same 64 KiB chunks used by the real IO thread and
 /// terminal-stream benchmark. Parser and file IO costs remain in setup.
 fn loadCorpus(self: *ScrollbackCompression) !void {
-    const data_file = try options.dataFile(self.opts.data) orelse return;
-    defer data_file.close();
+    const data_file = try options.dataFile(self.io, self.opts.data) orelse return;
+    defer data_file.close(self.io);
 
     var stream = self.terminal.vtStream();
     defer stream.deinit();
 
     var read_buf: [64 * 1024]u8 align(std.atomic.cache_line) = undefined;
-    var file_reader = data_file.reader(&read_buf);
+    var file_reader = data_file.reader(self.io, &read_buf);
     const reader = &file_reader.interface;
 
     var buf: [64 * 1024]u8 = undefined;
@@ -277,16 +281,20 @@ fn percentage(part: usize, whole: usize) f64 {
 
 test ScrollbackCompression {
     const testing = std.testing;
-    const impl: *ScrollbackCompression = try .create(testing.allocator, .{});
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
+    const impl: *ScrollbackCompression = try .create(testing.allocator, testing.io, &env, .{});
     defer impl.destroy(testing.allocator);
 
     const bench = impl.benchmark();
-    _ = try bench.run(.once);
+    _ = try bench.run(std.testing.io, .once);
 }
 
 test "ScrollbackCompression restores cold terminal pages" {
     const testing = std.testing;
-    const impl: *ScrollbackCompression = try .create(testing.allocator, .{
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
+    const impl: *ScrollbackCompression = try .create(testing.allocator, testing.io, &env, .{
         .mode = .restore,
         .@"terminal-rows" = 4,
         // Standard-width pages hold 215 rows. Keeping that row capacity here
@@ -318,7 +326,9 @@ test "ScrollbackCompression restores cold terminal pages" {
 
 test "ScrollbackCompression drains incremental compression steps" {
     const testing = std.testing;
-    const impl: *ScrollbackCompression = try .create(testing.allocator, .{
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
+    const impl: *ScrollbackCompression = try .create(testing.allocator, testing.io, &env, .{
         .mode = .incremental,
         .@"terminal-rows" = 4,
         .@"terminal-cols" = 215,

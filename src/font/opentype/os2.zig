@@ -352,17 +352,22 @@ pub const OS2 = struct {
         EndOfStream,
         OS2VersionNotSupported,
     }!OS2 {
-        var fbs = std.io.fixedBufferStream(data);
-        const reader = fbs.reader();
+        var reader: std.Io.Reader = .fixed(data);
 
-        const version = try reader.readInt(sfnt.uint16, .big);
+        const version = reader.takeInt(sfnt.uint16, .big) catch |err| switch (err) {
+            error.ReadFailed => unreachable,
+            error.EndOfStream => return error.EndOfStream,
+        };
 
         // Return to the start, cause the version is part of the struct.
-        try fbs.seekTo(0);
+        reader.seek = 0;
 
         switch (version) {
             5 => {
-                const table = try reader.readStructEndian(OS2v5, .big);
+                const table = reader.takeStruct(OS2v5, .big) catch |err| switch (err) {
+                    error.ReadFailed => unreachable,
+                    error.EndOfStream => return error.EndOfStream,
+                };
                 return .{
                     .version = table.version,
                     .xAvgCharWidth = table.xAvgCharWidth,
@@ -406,7 +411,10 @@ pub const OS2 = struct {
                 };
             },
             4, 3, 2 => {
-                const table = try reader.readStructEndian(OS2v4_3_2, .big);
+                const table = reader.takeStruct(OS2v4_3_2, .big) catch |err| switch (err) {
+                    error.ReadFailed => unreachable,
+                    error.EndOfStream => return error.EndOfStream,
+                };
                 return .{
                     .version = table.version,
                     .xAvgCharWidth = table.xAvgCharWidth,
@@ -448,7 +456,10 @@ pub const OS2 = struct {
                 };
             },
             1 => {
-                const table = try reader.readStructEndian(OS2v1, .big);
+                const table = reader.takeStruct(OS2v1, .big) catch |err| switch (err) {
+                    error.ReadFailed => unreachable,
+                    error.EndOfStream => return error.EndOfStream,
+                };
                 return .{
                     .version = table.version,
                     .xAvgCharWidth = table.xAvgCharWidth,
@@ -485,7 +496,10 @@ pub const OS2 = struct {
                 };
             },
             0 => {
-                const table = try reader.readStructEndian(OS2v0, .big);
+                const table = reader.takeStruct(OS2v0, .big) catch |err| switch (err) {
+                    error.ReadFailed => unreachable,
+                    error.EndOfStream => return error.EndOfStream,
+                };
                 return .{
                     .version = table.version,
                     .xAvgCharWidth = table.xAvgCharWidth,

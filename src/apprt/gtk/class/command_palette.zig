@@ -153,7 +153,7 @@ pub const CommandPalette = extern struct {
         priv.source.removeAll();
 
         const alloc = Application.default().allocator();
-        var commands: std.ArrayList(*Command) = .{};
+        var commands: std.ArrayList(*Command) = .empty;
         defer {
             for (commands.items) |cmd| cmd.unref();
             commands.deinit(alloc);
@@ -721,7 +721,7 @@ const Command = extern struct {
                 const pwd = surface.getPwd();
 
                 if (pwd) |p| {
-                    if (std.mem.indexOf(u8, title, p) == null) {
+                    if (std.mem.find(u8, title, p) == null) {
                         j.description = alloc.dupeZ(u8, p) catch null;
                     }
                 }

@@ -17,7 +17,7 @@ pub fn indexOf(input: []const u8, needle: u8) ?usize {
 }
 
 fn indexOfScalar(input: []const u8, needle: u8) ?usize {
-    return std.mem.indexOfScalar(u8, input, needle);
+    return std.mem.findScalar(u8, input, needle);
 }
 
 test "indexOf" {

@@ -107,37 +107,42 @@ fn drawCellBoxes(atlas: *z2d.Surface, y: usize, cell_width: usize, cell_height: 
 /// `glyf_rasterize_diff.png`, where red is reference-only coverage and green is
 /// newly generated coverage. Returns true when a difference was found.
 fn diffAtlas(
+    io: std.Io,
     alloc: Allocator,
     atlas: *z2d.Surface,
     generated_path: []const u8,
 ) !bool {
     const ref_path = "src/font/testdata/glyf_rasterize.png";
 
-    const generated_file = try std.fs.openFileAbsolute(generated_path, .{ .mode = .read_only });
-    defer generated_file.close();
-    const generated_bytes = try generated_file.readToEndAlloc(alloc, std.math.maxInt(usize));
+    const generated_file = try std.Io.Dir.openFileAbsolute(io, generated_path, .{ .mode = .read_only });
+    defer generated_file.close(io);
+    var generated_read_buf: [4096]u8 = undefined;
+    var generated_reader = generated_file.reader(io, &generated_read_buf);
+    const generated_bytes = try generated_reader.interface.allocRemaining(alloc, .unlimited);
     defer alloc.free(generated_bytes);
 
-    const cwd_absolute = try std.fs.cwd().realpathAlloc(alloc, ".");
+    const cwd_absolute = try std.Io.Dir.cwd().realPathFileAlloc(io, ".", alloc);
     defer alloc.free(cwd_absolute);
 
-    const ref_file = std.fs.cwd().openFile(ref_path, .{ .mode = .read_only }) catch |err| {
+    const ref_file = std.Io.Dir.cwd().openFile(io, ref_path, .{ .mode = .read_only }) catch |err| {
         log.err("Can't open reference file {s}: {}", .{ ref_path, err });
 
         const test_path = try std.fmt.allocPrint(alloc, "{s}/glyf_rasterize_test.png", .{cwd_absolute});
         defer alloc.free(test_path);
-        try std.fs.copyFileAbsolute(generated_path, test_path, .{});
+        try std.Io.Dir.copyFileAbsolute(generated_path, test_path, io, .{});
         return true;
     };
-    defer ref_file.close();
-    const ref_bytes = try ref_file.readToEndAlloc(alloc, std.math.maxInt(usize));
+    defer ref_file.close(io);
+    var ref_read_buf: [4096]u8 = undefined;
+    var ref_reader = ref_file.reader(io, &ref_read_buf);
+    const ref_bytes = try ref_reader.interface.allocRemaining(alloc, .unlimited);
     defer alloc.free(ref_bytes);
 
     if (std.mem.eql(u8, generated_bytes, ref_bytes)) return false;
 
     const test_path = try std.fmt.allocPrint(alloc, "{s}/glyf_rasterize_test.png", .{cwd_absolute});
     defer alloc.free(test_path);
-    try std.fs.copyFileAbsolute(generated_path, test_path, .{});
+    try std.Io.Dir.copyFileAbsolute(generated_path, test_path, io, .{});
 
     const ref_rgba = try wuffs.png.decode(alloc, ref_bytes);
     defer alloc.free(ref_rgba.data);
@@ -185,7 +190,7 @@ fn diffAtlas(
     }
 
     const diff_path = "./glyf_rasterize_diff.png";
-    try z2d.png_exporter.writeToPNGFile(diff, diff_path, .{});
+    try z2d.png_exporter.writeToPNGFile(io, diff, diff_path, .{});
     log.err(
         "glyf rasterize visual output differs from reference: test={s}, reference={s}, diff={s}",
         .{ test_path, ref_path, diff_path },
@@ -290,12 +295,12 @@ test "glyf_rasterize: bubbletea glyph protocol examples match reference image" {
 
     var dir = testing.tmpDir(.{});
     defer dir.cleanup();
-    const tmp_dir = try dir.dir.realpathAlloc(alloc, ".");
+    const tmp_dir = try dir.dir.realPathFileAlloc(testing.io, ".", alloc);
     defer alloc.free(tmp_dir);
 
     const generated_path = try std.fmt.allocPrint(alloc, "{s}/glyf_rasterize.png", .{tmp_dir});
     defer alloc.free(generated_path);
-    try z2d.png_exporter.writeToPNGFile(atlas, generated_path, .{});
+    try z2d.png_exporter.writeToPNGFile(testing.io, atlas, generated_path, .{});
 
-    try testing.expect(!try diffAtlas(alloc, &atlas, generated_path));
+    try testing.expect(!try diffAtlas(testing.io, alloc, &atlas, generated_path));
 }

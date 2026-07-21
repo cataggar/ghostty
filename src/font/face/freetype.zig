@@ -32,6 +32,9 @@ pub const Face = struct {
     /// Our Library
     lib: Library,
 
+    /// IO implementation used for synchronized FreeType access.
+    io: std.Io,
+
     /// Our font face.
     face: freetype.Face,
 
@@ -41,7 +44,7 @@ pub const Face = struct {
     ///
     /// This means that anywhere where `self.face.loadGlyph`
     /// is called, this mutex must be held.
-    ft_mutex: *std.Thread.Mutex,
+    ft_mutex: *std.Io.Mutex,
 
     /// Harfbuzz font corresponding to this face.
     hb_font: harfbuzz.Font,
@@ -63,32 +66,35 @@ pub const Face = struct {
 
     /// Initialize a new font face with the given source in-memory.
     pub fn initFile(
+        io: std.Io,
         lib: Library,
         path: [:0]const u8,
         index: i32,
         opts: font.face.Options,
     ) !Face {
-        lib.mutex.lock();
-        defer lib.mutex.unlock();
+        lib.mutex.lockUncancelable(io);
+        defer lib.mutex.unlock(io);
         const face = try lib.lib.initFace(path, index);
         errdefer face.deinit();
-        return try initFace(lib, face, opts);
+        return try initFace(io, lib, face, opts);
     }
 
     /// Initialize a new font face with the given source in-memory.
     pub fn init(
+        io: std.Io,
         lib: Library,
         source: [:0]const u8,
         opts: font.face.Options,
     ) !Face {
-        lib.mutex.lock();
-        defer lib.mutex.unlock();
+        lib.mutex.lockUncancelable(io);
+        defer lib.mutex.unlock(io);
         const face = try lib.lib.initMemoryFace(source, 0);
         errdefer face.deinit();
-        return try initFace(lib, face, opts);
+        return try initFace(io, lib, face, opts);
     }
 
     fn initFace(
+        io: std.Io,
         lib: Library,
         face: freetype.Face,
         opts: font.face.Options,
@@ -99,12 +105,13 @@ pub const Face = struct {
         var hb_font = try harfbuzz.freetype.createFont(face.handle);
         errdefer hb_font.destroy();
 
-        const ft_mutex = try lib.alloc.create(std.Thread.Mutex);
+        const ft_mutex = try lib.alloc.create(std.Io.Mutex);
         errdefer lib.alloc.destroy(ft_mutex);
-        ft_mutex.* = .{};
+        ft_mutex.* = .init;
 
         var result: Face = .{
             .lib = lib,
+            .io = io,
             .face = face,
             .hb_font = hb_font,
             .ft_mutex = ft_mutex,
@@ -142,8 +149,8 @@ pub const Face = struct {
     pub fn deinit(self: *Face) void {
         self.lib.alloc.destroy(self.ft_mutex);
         {
-            self.lib.mutex.lock();
-            defer self.lib.mutex.unlock();
+            self.lib.mutex.lockUncancelable(self.io);
+            defer self.lib.mutex.unlock(self.io);
 
             self.face.deinit();
         }
@@ -187,7 +194,7 @@ pub const Face = struct {
         defer lib.deinit();
 
         {
-            var face: Face = try .init(lib, embedded.variable, .{ .size = .{ .points = 14 } });
+            var face: Face = try .init(std.testing.io, lib, embedded.variable, .{ .size = .{ .points = 14 } });
             defer face.deinit();
 
             var buf: [1024]u8 = undefined;
@@ -197,7 +204,7 @@ pub const Face = struct {
         }
 
         {
-            var face: Face = try .init(lib, embedded.inconsolata, .{ .size = .{ .points = 14 } });
+            var face: Face = try .init(std.testing.io, lib, embedded.inconsolata, .{ .size = .{ .points = 14 } });
             defer face.deinit();
 
             var buf: [1024]u8 = undefined;
@@ -214,7 +221,7 @@ pub const Face = struct {
         self.face.ref();
         errdefer self.face.deinit();
 
-        var f = try initFace(self.lib, self.face, opts);
+        var f = try initFace(self.io, self.lib, self.face, opts);
         errdefer f.deinit();
         f.synthetic = self.synthetic;
         f.synthetic.bold = true;
@@ -229,7 +236,7 @@ pub const Face = struct {
         self.face.ref();
         errdefer self.face.deinit();
 
-        var f = try initFace(self.lib, self.face, opts);
+        var f = try initFace(self.io, self.lib, self.face, opts);
         errdefer f.deinit();
         f.synthetic = self.synthetic;
         f.synthetic.italic = true;
@@ -330,8 +337,8 @@ pub const Face = struct {
 
     /// Returns true if the given glyph ID is colorized.
     pub fn isColorGlyph(self: *const Face, glyph_id: u32) bool {
-        self.ft_mutex.lock();
-        defer self.ft_mutex.unlock();
+        self.ft_mutex.lockUncancelable(self.io);
+        defer self.ft_mutex.unlock(self.io);
 
         // Load the glyph and see what pixel mode it renders with.
         // All modes other than BGRA are non-color.
@@ -425,12 +432,13 @@ pub const Face = struct {
     pub fn renderGlyph(
         self: Face,
         alloc: Allocator,
+        io: std.Io,
         atlas: *font.Atlas,
         glyph_index: u32,
         opts: font.Glyph.RenderOptions,
     ) !Glyph {
-        self.ft_mutex.lock();
-        defer self.ft_mutex.unlock();
+        self.ft_mutex.lockUncancelable(io);
+        defer self.ft_mutex.unlock(io);
 
         // Load the glyph.
         try self.face.loadGlyph(glyph_index, self.glyphLoadFlags(opts.constraint.doesAnything()));
@@ -542,7 +550,7 @@ pub const Face = struct {
                         0.0;
 
                 const outline = &glyph.*.outline;
-                for (outline.points[0..@intCast(outline.n_points)]) |*p| {
+                for (outline.*.points[0..@intCast(outline.*.n_points)]) |*p| {
                     // Convert to f64 for processing
                     var px = f26dot6ToF64(p.x);
                     var py = f26dot6ToF64(p.y);
@@ -971,8 +979,8 @@ pub const Face = struct {
         // the metrics provided by FreeType, and set ascii_height to null as
         // it's optional.
         const cell_width: f64, const ascii_height: ?f64 = measurements: {
-            self.ft_mutex.lock();
-            defer self.ft_mutex.unlock();
+            self.ft_mutex.lockUncancelable(self.io);
+            defer self.ft_mutex.unlock(self.io);
 
             var max: f64 = 0.0;
             var top: f64 = 0.0;
@@ -1024,8 +1032,8 @@ pub const Face = struct {
 
             break :heights .{
                 cap: {
-                    self.ft_mutex.lock();
-                    defer self.ft_mutex.unlock();
+                    self.ft_mutex.lockUncancelable(self.io);
+                    defer self.ft_mutex.unlock(self.io);
                     if (face.getCharIndex('H')) |glyph_index| {
                         if (face.loadGlyph(glyph_index, self.glyphLoadFlags(false))) {
                             break :cap getGlyphSize(face.handle.*.glyph).height;
@@ -1034,8 +1042,8 @@ pub const Face = struct {
                     break :cap null;
                 },
                 ex: {
-                    self.ft_mutex.lock();
-                    defer self.ft_mutex.unlock();
+                    self.ft_mutex.lockUncancelable(self.io);
+                    defer self.ft_mutex.unlock(self.io);
                     if (face.getCharIndex('x')) |glyph_index| {
                         if (face.loadGlyph(glyph_index, self.glyphLoadFlags(false))) {
                             break :ex getGlyphSize(face.handle.*.glyph).height;
@@ -1048,8 +1056,8 @@ pub const Face = struct {
 
         // Measure "水" (CJK water ideograph, U+6C34) for our ic width.
         const ic_width: ?f64 = ic_width: {
-            self.ft_mutex.lock();
-            defer self.ft_mutex.unlock();
+            self.ft_mutex.lockUncancelable(self.io);
+            defer self.ft_mutex.unlock(self.io);
 
             const glyph = face.getCharIndex('水') orelse break :ic_width null;
 
@@ -1119,6 +1127,7 @@ test {
     defer atlas.deinit(alloc);
 
     var ft_font = try Face.init(
+        testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -1130,6 +1139,7 @@ test {
     while (i < 127) : (i += 1) {
         _ = try ft_font.renderGlyph(
             alloc,
+            testing.io,
             &atlas,
             ft_font.glyphIndex(i).?,
             .{ .grid_metrics = font.Metrics.calc(ft_font.getMetrics()) },
@@ -1140,6 +1150,7 @@ test {
     {
         const g1 = try ft_font.renderGlyph(
             alloc,
+            testing.io,
             &atlas,
             ft_font.glyphIndex('A').?,
             .{ .grid_metrics = font.Metrics.calc(ft_font.getMetrics()) },
@@ -1149,6 +1160,7 @@ test {
         try ft_font.setSize(.{ .size = .{ .points = 24, .xdpi = 96, .ydpi = 96 } });
         const g2 = try ft_font.renderGlyph(
             alloc,
+            testing.io,
             &atlas,
             ft_font.glyphIndex('A').?,
             .{ .grid_metrics = font.Metrics.calc(ft_font.getMetrics()) },
@@ -1168,6 +1180,7 @@ test "color emoji" {
     defer atlas.deinit(alloc);
 
     var ft_font = try Face.init(
+        testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -1176,6 +1189,7 @@ test "color emoji" {
 
     _ = try ft_font.renderGlyph(
         alloc,
+        testing.io,
         &atlas,
         ft_font.glyphIndex('🥸').?,
         .{ .grid_metrics = font.Metrics.calc(ft_font.getMetrics()) },
@@ -1199,12 +1213,13 @@ test "mono to bgra" {
     var atlas = try font.Atlas.init(alloc, 512, .bgra);
     defer atlas.deinit(alloc);
 
-    var ft_font = try Face.init(lib, testFont, .{ .size = .{ .points = 12, .xdpi = 72, .ydpi = 72 } });
+    var ft_font = try Face.init(std.testing.io, lib, testFont, .{ .size = .{ .points = 12, .xdpi = 72, .ydpi = 72 } });
     defer ft_font.deinit();
 
     // glyph 3 is mono in Noto
     _ = try ft_font.renderGlyph(
         alloc,
+        testing.io,
         &atlas,
         3,
         .{ .grid_metrics = font.Metrics.calc(ft_font.getMetrics()) },
@@ -1218,7 +1233,7 @@ test "svg font table" {
     var lib = try font.Library.init(alloc);
     defer lib.deinit();
 
-    var face = try Face.init(lib, testFont, .{ .size = .{ .points = 12, .xdpi = 72, .ydpi = 72 } });
+    var face = try Face.init(std.testing.io, lib, testFont, .{ .size = .{ .points = 12, .xdpi = 72, .ydpi = 72 } });
     defer face.deinit();
 
     const table = (try face.copyTable(alloc, "SVG ")).?;
@@ -1259,7 +1274,7 @@ test "bitmap glyph" {
     defer atlas.deinit(alloc);
 
     // Any glyph at 12pt @ 96 DPI is a bitmap
-    var ft_font = try Face.init(lib, testFont, .{ .size = .{
+    var ft_font = try Face.init(std.testing.io, lib, testFont, .{ .size = .{
         .points = 12,
         .xdpi = 96,
         .ydpi = 96,
@@ -1269,6 +1284,7 @@ test "bitmap glyph" {
     // glyph 77 = 'i'
     const glyph = try ft_font.renderGlyph(
         alloc,
+        testing.io,
         &atlas,
         77,
         .{ .grid_metrics = font.Metrics.calc(ft_font.getMetrics()) },
@@ -1325,7 +1341,7 @@ test "bitmap glyph BDF" {
     defer atlas.deinit(alloc);
 
     // Spleen 8x16 is a pure bitmap font at 16px height
-    var ft_font = try Face.init(lib, testFont, .{ .size = .{
+    var ft_font = try Face.init(std.testing.io, lib, testFont, .{ .size = .{
         .points = spleen_test_point_size,
         .xdpi = spleen_test_dpi,
         .ydpi = spleen_test_dpi,
@@ -1337,6 +1353,7 @@ test "bitmap glyph BDF" {
 
     const glyph = try ft_font.renderGlyph(
         alloc,
+        testing.io,
         &atlas,
         glyph_index,
         .{ .grid_metrics = font.Metrics.calc(ft_font.getMetrics()) },
@@ -1368,7 +1385,7 @@ test "bitmap glyph PCF" {
     var atlas = try font.Atlas.init(alloc, 512, .grayscale);
     defer atlas.deinit(alloc);
 
-    var ft_font = try Face.init(lib, testFont, .{ .size = .{
+    var ft_font = try Face.init(std.testing.io, lib, testFont, .{ .size = .{
         .points = spleen_test_point_size,
         .xdpi = spleen_test_dpi,
         .ydpi = spleen_test_dpi,
@@ -1379,6 +1396,7 @@ test "bitmap glyph PCF" {
 
     const glyph = try ft_font.renderGlyph(
         alloc,
+        testing.io,
         &atlas,
         glyph_index,
         .{ .grid_metrics = font.Metrics.calc(ft_font.getMetrics()) },
@@ -1408,7 +1426,7 @@ test "bitmap glyph OTB" {
     var atlas = try font.Atlas.init(alloc, 512, .grayscale);
     defer atlas.deinit(alloc);
 
-    var ft_font = try Face.init(lib, testFont, .{ .size = .{
+    var ft_font = try Face.init(std.testing.io, lib, testFont, .{ .size = .{
         .points = spleen_test_point_size,
         .xdpi = spleen_test_dpi,
         .ydpi = spleen_test_dpi,
@@ -1419,6 +1437,7 @@ test "bitmap glyph OTB" {
 
     const glyph = try ft_font.renderGlyph(
         alloc,
+        testing.io,
         &atlas,
         glyph_index,
         .{ .grid_metrics = font.Metrics.calc(ft_font.getMetrics()) },

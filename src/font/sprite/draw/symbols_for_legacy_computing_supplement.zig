@@ -119,7 +119,7 @@ pub fn draw1CD00_1CDE5(
             // Octants are in the format "BLOCK OCTANT-1235". The numbers
             // at the end are keys into our packed struct. Since we're
             // at comptime we can metaprogram it all.
-            const idx = std.mem.indexOfScalar(u8, line, '-').?;
+            const idx = std.mem.findScalar(u8, line, '-').?;
             for (line[idx + 1 ..]) |c| @field(current, &.{c}) = true;
         }
 

@@ -55,6 +55,8 @@ pub const Error = error{
 pub fn parse(
     comptime T: type,
     alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     dst: *T,
     iter: anytype,
 ) !void {
@@ -90,6 +92,8 @@ pub fn parse(
         if (@hasDecl(T, "parseManuallyHook")) {
             if (!try dst.parseManuallyHook(
                 arena_alloc,
+                io,
+                env,
                 arg,
                 iter,
             )) return;
@@ -489,18 +493,13 @@ pub fn parseTaggedUnion(comptime T: type, alloc: Allocator, v: []const u8) !T {
 
             // We need to create a struct that looks like this union field.
             // This lets us use parseIntoField as if its a dedicated struct.
-            const Target = @Type(.{ .@"struct" = .{
-                .layout = .auto,
-                .fields = &.{.{
-                    .name = field.name,
-                    .type = field.type,
-                    .default_value_ptr = null,
-                    .is_comptime = false,
-                    .alignment = @alignOf(field.type),
-                }},
-                .decls = &.{},
-                .is_tuple = false,
-            } });
+            const Target = @Struct(
+                .auto,
+                null,
+                &.{field.name},
+                &.{field.type},
+                &.{.{ .@"align" = @alignOf(field.type) }},
+            );
 
             // Parse the value into the struct
             var t: Target = undefined;
@@ -667,6 +666,8 @@ pub fn parseBool(v: []const u8) !bool {
 
 test "parse: simple" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: []const u8 = "",
@@ -677,24 +678,24 @@ test "parse: simple" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a=42 --b --b-f=false",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expect(data._arena != null);
     try testing.expectEqualStrings("42", data.a);
     try testing.expect(data.b);
     try testing.expect(!data.@"b-f");
 
     // Reparsing works
-    var iter2 = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter2 = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a=84",
     );
     defer iter2.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter2);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter2);
     try testing.expect(data._arena != null);
     try testing.expectEqualStrings("84", data.a);
     try testing.expect(data.b);
@@ -703,6 +704,8 @@ test "parse: simple" {
 
 test "parse: quoted value" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: u8 = 0,
@@ -711,18 +714,20 @@ test "parse: quoted value" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a=\"42\" --b=\"hello!\"",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expectEqual(@as(u8, 42), data.a);
     try testing.expectEqualStrings("hello!", data.b);
 }
 
 test "parse: empty value resets to default" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: u8 = 42,
@@ -731,18 +736,20 @@ test "parse: empty value resets to default" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a= --b=",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expectEqual(@as(u8, 42), data.a);
     try testing.expect(!data.b);
 }
 
 test "parse: positional arguments are invalid" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: u8 = 42,
@@ -750,20 +757,22 @@ test "parse: positional arguments are invalid" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a=84 what",
     );
     defer iter.deinit();
     try testing.expectError(
         error.InvalidField,
-        parse(@TypeOf(data), testing.allocator, &data, &iter),
+        parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter),
     );
     try testing.expectEqual(@as(u8, 84), data.a);
 }
 
 test "parse: diagnostic tracking" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: []const u8 = "",
@@ -774,12 +783,12 @@ test "parse: diagnostic tracking" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--what --a=42",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expect(data._arena != null);
     try testing.expectEqualStrings("42", data.a);
     try testing.expect(data._diagnostics.items().len == 1);
@@ -793,6 +802,8 @@ test "parse: diagnostic tracking" {
 
 test "parse: diagnostic location" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: []const u8 = "",
@@ -810,7 +821,7 @@ test "parse: diagnostic location" {
     );
 
     var iter: LineIterator = .{ .r = &r, .filepath = "test" };
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expect(data._arena != null);
     try testing.expectEqualStrings("42", data.a);
     try testing.expect(data.b == .two);
@@ -826,6 +837,8 @@ test "parse: diagnostic location" {
 
 test "parse: compatibility handler" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: bool = false,
@@ -858,18 +871,20 @@ test "parse: compatibility handler" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--a=yuh",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expect(data._arena != null);
     try testing.expect(data.a);
 }
 
 test "parse: compatibility renamed" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     var data: struct {
         a: bool = false,
@@ -884,12 +899,12 @@ test "parse: compatibility renamed" {
     } = .{};
     defer if (data._arena) |arena| arena.deinit();
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--old=true --b=true",
     );
     defer iter.deinit();
-    try parse(@TypeOf(data), testing.allocator, &data, &iter);
+    try parse(@TypeOf(data), testing.allocator, testing.io, &env, &data, &iter);
     try testing.expect(data._arena != null);
     try testing.expect(data.a);
     try testing.expect(data.b);
@@ -1363,8 +1378,8 @@ pub fn ArgsIterator(comptime Iterator: type) type {
 }
 
 /// Create an args iterator for the process args. This will skip argv0.
-pub fn argsIterator(alloc_gpa: Allocator) internal_os.args.ArgIterator.InitError!ArgsIterator(internal_os.args.ArgIterator) {
-    var iter = try internal_os.args.iterator(alloc_gpa);
+pub fn argsIterator(args: std.process.Args, alloc: Allocator) internal_os.args.ArgIterator.InitError!ArgsIterator(internal_os.args.ArgIterator) {
+    var iter = try internal_os.args.iterator(args, alloc);
     errdefer iter.deinit();
     _ = iter.next(); // skip argv0
     return .{ .iterator = iter };
@@ -1373,7 +1388,7 @@ pub fn argsIterator(alloc_gpa: Allocator) internal_os.args.ArgIterator.InitError
 test "ArgsIterator" {
     const testing = std.testing;
 
-    const child = try std.process.ArgIteratorGeneral(.{}).init(
+    const child = try std.process.Args.IteratorGeneral(.{}).init(
         testing.allocator,
         "--what +list-things --a=42",
     );

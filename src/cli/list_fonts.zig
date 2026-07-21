@@ -59,16 +59,26 @@ pub const Options = struct {
 ///   * `--family`: Filter results to a specific font family. The family handling
 ///     is identical to the `font-family` set of Ghostty configuration values, so
 ///     this can be used to debug why your desired font may not be loading.
-pub fn run(alloc: Allocator) !u8 {
-    var iter = try args.argsIterator(alloc);
+pub fn run(
+    alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    proc_args: std.process.Args,
+) !u8 {
+    var iter = try args.argsIterator(proc_args, alloc);
     defer iter.deinit();
-    return try runArgs(alloc, &iter);
+    return try runArgs(alloc, io, env, &iter);
 }
 
-fn runArgs(alloc_gpa: Allocator, argsIter: anytype) !u8 {
+fn runArgs(
+    alloc_gpa: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    argsIter: anytype,
+) !u8 {
     var config: Options = .{};
     defer config.deinit();
-    try args.parse(Options, alloc_gpa, &config, argsIter);
+    try args.parse(Options, alloc_gpa, io, env, &config, argsIter);
 
     // Use an arena for all our memory allocs
     var arena = ArenaAllocator.init(alloc_gpa);
@@ -78,7 +88,7 @@ fn runArgs(alloc_gpa: Allocator, argsIter: anytype) !u8 {
     // Its possible to build Ghostty without font discovery!
     if (comptime font.Discover == void) {
         var buffer: [1024]u8 = undefined;
-        var stderr_writer = std.fs.File.stderr().writer(&buffer);
+        var stderr_writer = std.Io.File.stderr().writer(io, &buffer);
         const stderr = &stderr_writer.interface;
         try stderr.print(
             \\Ghostty was built without a font discovery mechanism. This is a compile-time
@@ -92,20 +102,20 @@ fn runArgs(alloc_gpa: Allocator, argsIter: anytype) !u8 {
     }
 
     var buffer: [2048]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&buffer);
+    var stdout_writer = std.Io.File.stdout().writer(io, &buffer);
     const stdout = &stdout_writer.interface;
 
     // We'll be putting our fonts into a list categorized by family
     // so it is easier to read the output.
     var families: std.ArrayList([]const u8) = .empty;
-    var map: std.StringHashMap(std.ArrayListUnmanaged([]const u8)) = .init(alloc);
+    var map: std.StringHashMap(std.ArrayList([]const u8)) = .init(alloc);
 
     // Look up all available fonts. The library is only used by backends
     // that need it (the Windows backend opens candidate font files with
     // FreeType); other backends ignore it.
     var font_lib = try font.Library.init(alloc);
     defer font_lib.deinit();
-    var disco = font.Discover.init(font_lib);
+    var disco = font.Discover.init(font_lib, io, env);
     defer disco.deinit();
     var disco_it = try disco.discover(alloc, .{
         .family = config.family,
@@ -133,7 +143,7 @@ fn runArgs(alloc_gpa: Allocator, argsIter: anytype) !u8 {
         const gop = try map.getOrPut(family);
         if (!gop.found_existing) {
             try families.append(alloc, family);
-            gop.value_ptr.* = .{};
+            gop.value_ptr.* = .empty;
         }
         try gop.value_ptr.append(alloc, full_name);
     }

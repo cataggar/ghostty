@@ -13,6 +13,9 @@ const ApprtApp = @import("../App.zig");
 /// The target for this IPC.
 target: apprt.ipc.Target,
 
+/// I/O implementation used for diagnostics.
+io: std.Io,
+
 /// Connection to the DBus session bus.
 dbus: *gio.DBusConnection,
 
@@ -29,9 +32,14 @@ payload_builder: *glib.VariantBuilder,
 parameters_builder: *glib.VariantBuilder,
 
 /// Initialize the helper.
-pub fn init(alloc: Allocator, target: apprt.ipc.Target, action: [:0]const u8) (Allocator.Error || std.Io.Writer.Error || apprt.ipc.Errors)!Self {
+pub fn init(
+    alloc: Allocator,
+    io: std.Io,
+    target: apprt.ipc.Target,
+    action: [:0]const u8,
+) (Allocator.Error || std.Io.Writer.Error || apprt.ipc.Errors)!Self {
     var buf: [256]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&buf);
+    var stderr_writer = std.Io.File.stderr().writer(io, &buf);
     const stderr = &stderr_writer.interface;
 
     // Get the appropriate bus name and object path for contacting the
@@ -116,6 +124,7 @@ pub fn init(alloc: Allocator, target: apprt.ipc.Target, action: [:0]const u8) (A
 
     return .{
         .target = target,
+        .io = io,
         .dbus = dbus,
         .bus_name = bus_name,
         .object_path = object_path,
@@ -133,7 +142,7 @@ pub fn addParameter(self: *Self, variant: *glib.Variant) void {
 /// should be done with this object other than call `deinit`.
 pub fn send(self: *Self) (std.Io.Writer.Error || apprt.ipc.Errors)!void {
     var buf: [256]u8 = undefined;
-    var stderr_writer = std.fs.File.stderr().writer(&buf);
+    var stderr_writer = std.Io.File.stderr().writer(self.io, &buf);
     const stderr = &stderr_writer.interface;
 
     // finish building the parameters

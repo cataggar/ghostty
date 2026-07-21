@@ -21,7 +21,7 @@ pub const State = struct {
     images: ImageMap,
 
     /// The placements for the Kitty image protocol.
-    kitty_placements: std.ArrayListUnmanaged(Placement),
+    kitty_placements: std.ArrayList(Placement),
 
     /// The end index (exclusive) for placements that should be
     /// drawn below the background, below the text, etc.
@@ -34,7 +34,7 @@ pub const State = struct {
     kitty_virtual: bool,
 
     /// Overlays
-    overlay_placements: std.ArrayListUnmanaged(Placement),
+    overlay_placements: std.ArrayList(Placement),
 
     pub const empty: State = .{
         .images = .empty,
@@ -183,7 +183,9 @@ pub const State = struct {
         self: *State,
         alloc: Allocator,
         overlay_: ?Overlay,
+        io: std.Io,
     ) !void {
+        _ = io;
         const overlay = overlay_ orelse {
             // If we don't have an overlay, remove any existing one.
             if (self.images.getPtr(.overlay)) |data| {

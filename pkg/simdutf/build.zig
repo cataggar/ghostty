@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
@@ -10,28 +11,24 @@ pub fn build(b: *std.Build) !void {
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
+            .link_libc = true,
         }),
         .linkage = .static,
     });
-    lib.addIncludePath(b.path("vendor"));
-    lib.linkLibC();
-    libcpp: {
-        if (target.result.abi == .msvc) {
-            // On MSVC, we must not use linkLibCpp because Zig unconditionally
-            // passes -nostdinc++ and then adds its bundled libc++/libc++abi
-            // include paths, which conflict with MSVC's own C++ runtime headers.
-            // The MSVC SDK include directories (added via linkLibC) contain
-            // both C and C++ headers, so linkLibCpp is not needed.
-            break :libcpp;
-        }
 
-        // We link libcpp even with no_libcxx because simdutf requires
-        // libc++ headers at build time. But it doesn't require libc++
-        // at runtime. For Ghostty itself, we have CI tests to verify this.
-        lib.linkLibCpp();
+    // We link libcpp even with no_libcxx because simdutf requires
+    // libc++ headers at build time (but not at runtime).
+    // On MSVC, we must not use linkLibCpp because Zig unconditionally
+    // passes -nostdinc++ and then adds its bundled libc++/libc++abi
+    // include paths, which conflict with MSVC's own C++ runtime headers.
+    // The MSVC SDK include directories (added via linkLibC) contain
+    // both C and C++ headers, so linkLibCpp is not needed.
+    if (target.result.abi != .msvc) {
+        lib.root_module.link_libcpp = true;
     }
+    lib.root_module.addIncludePath(b.path("vendor"));
 
-    if (target.result.os.tag.isDarwin()) {
+    if (builtin.os.tag.isDarwin() and target.result.os.tag.isDarwin()) {
         const apple_sdk = @import("apple_sdk");
         try apple_sdk.addPaths(b, lib);
     }
@@ -45,10 +42,11 @@ pub fn build(b: *std.Build) !void {
     defer flags.deinit(b.allocator);
     // Zig 0.13 bug: https://github.com/ziglang/zig/issues/20414
     // (See root Ghostty build.zig on why we do this)
-    try flags.append(b.allocator, "-DSIMDUTF_IMPLEMENTATION_ICELAKE=0");
-
-    // Fixes linker issues for release builds missing ubsanitizer symbols
     try flags.appendSlice(b.allocator, &.{
+        "-DSIMDUTF_IMPLEMENTATION_ICELAKE=0",
+        "-std=c++17",
+
+        // Fixes linker issues for release builds missing ubsanitizer symbols
         "-fno-sanitize=undefined",
         "-fno-sanitize-trap=undefined",
     });
@@ -56,25 +54,17 @@ pub fn build(b: *std.Build) !void {
     if (no_libcxx) {
         try flags.append(b.allocator, "-DSIMDUTF_NO_LIBCXX");
         if (target.result.abi != .msvc) {
-            // Clang/GCC-only flags; MSVC doesn't accept these.
             try flags.append(b.allocator, "-fno-exceptions");
             try flags.append(b.allocator, "-fno-rtti");
         }
-
         lib.root_module.addCMacro("SIMDUTF_NO_LIBCXX", "1");
     }
 
-    if (target.result.abi == .msvc) {
-        // On MSVC we skip linkLibCpp (see above), so the C++ standard is
-        // not set implicitly. simdutf requires C++17, so set it explicitly.
-        try flags.append(b.allocator, "-std=c++17");
-    }
-
-    if (target.result.os.tag == .freebsd or target.result.abi == .musl) {
+    if (target.result.os.tag == .freebsd or target.result.abi == .musl or target.result.abi.isAndroid()) {
         try flags.append(b.allocator, "-fPIC");
     }
 
-    lib.addCSourceFiles(.{
+    lib.root_module.addCSourceFiles(.{
         .flags = flags.items,
         .files = &.{
             "vendor/simdutf.cpp",

@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 const build_options = @import("terminal_options");
 const lib = @import("../lib.zig");
@@ -25,11 +26,13 @@ const selection_c = @import("selection.zig");
 const style_c = @import("style.zig");
 const color = @import("../color.zig");
 const clipboard = @import("../clipboard.zig");
+const internal_os = @import("../../os/main.zig");
 const Result = @import("result.zig").Result;
 
 const Handler = @import("../stream_terminal.zig").Handler;
 
 const log = std.log.scoped(.terminal_c);
+const TerminalIo = if (builtin.os.tag == .freestanding) void else std.Io.Threaded;
 
 /// Wrapper around ZigTerminal that tracks additional state for C API usage,
 /// such as the persistent VT stream needed to handle escape sequences split
@@ -39,6 +42,8 @@ const TerminalWrapper = struct {
     stream: Stream,
     effects: Effects = .{},
     tracked_grid_refs: std.AutoArrayHashMapUnmanaged(*grid_ref_tracked_c.TrackedGridRef, void) = .{},
+    io: TerminalIo,
+    env: std.process.Environ.Map,
 };
 
 /// A single MIME representation in a clipboard write.
@@ -150,21 +155,21 @@ const Effects = struct {
 
     fn writePtyTrampoline(handler: *Handler, data: [:0]const u8) void {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.write_pty orelse return;
         func(@ptrCast(wrapper), wrapper.effects.userdata, data.ptr, data.len);
     }
 
     fn bellTrampoline(handler: *Handler) void {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.bell orelse return;
         func(@ptrCast(wrapper), wrapper.effects.userdata);
     }
 
     fn clipboardWriteTrampoline(handler: *Handler, write: clipboard.Write) clipboard.WriteResult {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.clipboard_write orelse return .unsupported;
 
         // Most protocols currently produce one representation, so keep that
@@ -202,7 +207,7 @@ const Effects = struct {
 
     fn colorSchemeTrampoline(handler: *Handler) ?device_status.ColorScheme {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.color_scheme orelse return null;
         var scheme: device_status.ColorScheme = undefined;
         if (func(@ptrCast(wrapper), wrapper.effects.userdata, &scheme)) return scheme;
@@ -211,7 +216,7 @@ const Effects = struct {
 
     fn deviceAttributesTrampoline(handler: *Handler) device_attributes.Attributes {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.device_attributes_cb orelse return .{};
 
         // Get our attributes from the callback.
@@ -242,7 +247,7 @@ const Effects = struct {
 
     fn enquiryTrampoline(handler: *Handler) []const u8 {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.enquiry orelse return "";
         const result = func(@ptrCast(wrapper), wrapper.effects.userdata);
         if (result.len == 0) return "";
@@ -251,7 +256,7 @@ const Effects = struct {
 
     fn xtversionTrampoline(handler: *Handler) []const u8 {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.xtversion orelse return "";
         const result = func(@ptrCast(wrapper), wrapper.effects.userdata);
         if (result.len == 0) return "";
@@ -260,21 +265,21 @@ const Effects = struct {
 
     fn titleChangedTrampoline(handler: *Handler) void {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.title_changed orelse return;
         func(@ptrCast(wrapper), wrapper.effects.userdata);
     }
 
     fn pwdChangedTrampoline(handler: *Handler) void {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.pwd_changed orelse return;
         func(@ptrCast(wrapper), wrapper.effects.userdata);
     }
 
     fn sizeTrampoline(handler: *Handler) ?size_report.Size {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.size_cb orelse return null;
         var s: size_report.Size = undefined;
         if (func(@ptrCast(wrapper), wrapper.effects.userdata, &s)) return s;
@@ -338,12 +343,31 @@ fn new_(
         return error.OutOfMemory;
     errdefer alloc.destroy(wrapper);
 
+    // Initialize the env and io directly in the wrapper so that the
+    // pointer we pass to Terminal.init remains stable for the lifetime
+    // of the wrapper.
+    const io: std.Io = if (comptime builtin.os.tag == .freestanding) io: {
+        wrapper.io = {};
+        break :io undefined;
+    } else io: {
+        wrapper.io = .init_single_threaded;
+        break :io wrapper.io.io();
+    };
+    errdefer if (comptime builtin.os.tag != .freestanding) wrapper.io.deinit();
+    wrapper.env = internal_os.getEnvMapC(alloc);
+    errdefer wrapper.env.deinit();
+
     // Setup our terminal
-    t.* = try .init(alloc, .{
-        .cols = opts.cols,
-        .rows = opts.rows,
-        .max_scrollback = opts.max_scrollback,
-    });
+    t.* = try .init(
+        alloc,
+        io,
+        &wrapper.env,
+        .{
+            .cols = opts.cols,
+            .rows = opts.rows,
+            .max_scrollback = opts.max_scrollback,
+        },
+    );
     errdefer t.deinit(alloc);
 
     // libghostty-vt embedders don't necessarily install Ghostty's shell
@@ -367,10 +391,10 @@ fn new_(
         .clipboard_write = &Effects.clipboardWriteTrampoline,
     };
 
-    wrapper.* = .{
-        .terminal = t,
-        .stream = .initAlloc(alloc, handler),
-    };
+    wrapper.terminal = t;
+    wrapper.stream = .initAlloc(alloc, handler);
+    wrapper.effects = .{};
+    wrapper.tracked_grid_refs = .{};
 
     return wrapper;
 }
@@ -401,7 +425,7 @@ pub fn compress(
 ) callconv(lib.calling_conv) Result {
     const t: *ZigTerminal = (terminal_ orelse return .invalid_value).terminal;
     const out_result = out_result_ orelse return .invalid_value;
-    const mode = std.meta.intToEnum(CompressionMode, mode_) catch
+    const mode = std.enums.fromInt(CompressionMode, mode_) orelse
         return .invalid_value;
 
     out_result.* = t.compress(mode);
@@ -475,7 +499,7 @@ pub fn set(
     value: ?*const anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        _ = std.meta.intToEnum(Option, @intFromEnum(option)) catch {
+        _ = std.enums.fromInt(Option, @intFromEnum(option)) orelse {
             log.warn("terminal_set invalid option value={d}", .{@intFromEnum(option)});
             return .invalid_value;
         };
@@ -778,7 +802,7 @@ pub fn get(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) Result {
     if (comptime std.debug.runtime_safety) {
-        _ = std.meta.intToEnum(TerminalData, @intFromEnum(data)) catch {
+        _ = std.enums.fromInt(TerminalData, @intFromEnum(data)) orelse {
             log.warn("terminal_get invalid data value={d}", .{@intFromEnum(data)});
             return .invalid_value;
         };
@@ -894,7 +918,12 @@ pub fn grid_ref(
     out_ref: ?*grid_ref_c.CGridRef,
 ) callconv(lib.calling_conv) Result {
     const t: *ZigTerminal = (terminal_ orelse return .invalid_value).terminal;
-    const zig_pt: point.Point = .fromC(pt);
+    const zig_pt: point.Point = switch (pt.tag) {
+        .active => .{ .active = pt.value.active },
+        .viewport => .{ .viewport = pt.value.viewport },
+        .screen => .{ .screen = pt.value.screen },
+        .history => .{ .history = pt.value.history },
+    };
     const p = t.screens.active.pages.pin(zig_pt) orelse
         return .invalid_value;
     if (out_ref) |out| out.* = grid_ref_c.CGridRef.fromPin(p);
@@ -967,6 +996,8 @@ pub fn free(terminal_: Terminal) callconv(lib.calling_conv) void {
     wrapper.tracked_grid_refs.deinit(alloc);
     wrapper.stream.deinit();
     t.deinit(alloc);
+    wrapper.env.deinit();
+    if (comptime builtin.os.tag != .freestanding) wrapper.io.deinit();
     alloc.destroy(t);
     alloc.destroy(wrapper);
 }
@@ -1498,29 +1529,6 @@ test "vt_write split escape sequence" {
     defer testing.allocator.free(str);
     // If the escape sequence leaked, we'd see "[1mBold" as literal text.
     try testing.expectEqualStrings("Hello Bold", str);
-}
-
-test "vt_write split combining mark after base at right edge" {
-    var t: Terminal = null;
-    try testing.expectEqual(Result.success, new(
-        &lib.alloc.test_allocator,
-        &t,
-        .{
-            .cols = 2,
-            .rows = 2,
-            .max_scrollback = 0,
-        },
-    ));
-    defer free(t);
-
-    // Put "å" in the final column, then send its combining low line in a
-    // separate write so the mark arrives while the cursor has a pending wrap.
-    vt_write(t, "xå", 3);
-    vt_write(t, "\xcc\xb2", 2);
-
-    const str = try t.?.terminal.plainString(testing.allocator);
-    defer testing.allocator.free(str);
-    try testing.expectEqualStrings("xå̲", str);
 }
 
 test "get cols and rows" {

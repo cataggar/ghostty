@@ -26,10 +26,13 @@ pub var state: GlobalState = undefined;
 /// be one of these at any given moment. This is extracted into a dedicated
 /// struct because it is reused by main and the static C lib.
 pub const GlobalState = struct {
-    const GPA = std.heap.GeneralPurposeAllocator(.{});
+    const GPA = std.heap.DebugAllocator(.{});
 
     gpa: ?GPA,
     alloc: std.mem.Allocator,
+    io_threaded: std.Io.Threaded,
+    args: std.process.Args,
+    environ_map: std.process.Environ.Map,
     action: ?cli.ghostty.Action,
     logging: Logging,
     rlimits: ResourceLimits = .{},
@@ -49,11 +52,11 @@ pub const GlobalState = struct {
     };
 
     /// Initialize the global state.
-    pub fn init(self: *GlobalState) !void {
-        // const start = try std.time.Instant.now();
+    pub fn init(self: *GlobalState, init_minimal: std.process.Init.Minimal) !void {
+        // const start = try std.Io.Timestamp.now();
         // const start_micro = std.time.microTimestamp();
         // defer {
-        //     const end = std.time.Instant.now() catch unreachable;
+        //     const end = std.Io.Timestamp.now() catch unreachable;
         //     // "[updateFrame critical time] <START us>\t<TIME_TAKEN us>"
         //     std.log.err("[global init time] start={}us duration={}ns", .{ start_micro, end.since(start) / std.time.ns_per_us });
         // }
@@ -64,12 +67,14 @@ pub const GlobalState = struct {
         self.* = .{
             .gpa = null,
             .alloc = undefined,
+            .io_threaded = undefined,
+            .args = init_minimal.args,
+            .environ_map = undefined,
             .action = null,
             .logging = .{},
             .rlimits = .{},
             .resources_dir = .{},
         };
-        errdefer self.deinit();
 
         self.gpa = gpa: {
             // Use the libc allocator if it is available because it is WAY
@@ -95,10 +100,20 @@ pub const GlobalState = struct {
         else
             unreachable;
 
+        // TODO: Figure out how to place libxev within all of this.
+        self.io_threaded = .init(self.alloc, .{});
+        self.environ_map = init_minimal.environ.createMap(self.alloc) catch |err| {
+            self.io_threaded.deinit();
+            if (self.gpa) |*value| _ = value.deinit();
+            return err;
+        };
+        errdefer self.deinit();
+
         // We first try to parse any action that we may be executing.
         self.action = try cli.action.detectArgs(
             cli.ghostty.Action,
             self.alloc,
+            init_minimal.args,
         );
 
         // If we have an action executing, we disable logging by default
@@ -111,9 +126,8 @@ pub const GlobalState = struct {
         // maybe once for logging) so for now this is an easy way to do
         // this. Env vars are useful for logging too because they are
         // easy to set.
-        if ((try internal_os.getenv(self.alloc, "GHOSTTY_LOG"))) |v| {
-            defer v.deinit(self.alloc);
-            self.logging = cli.args.parsePackedStruct(Logging, v.value) catch .{};
+        if (self.environ_map.get("GHOSTTY_LOG")) |v| {
+            self.logging = cli.args.parsePackedStruct(Logging, v) catch .{};
         }
 
         // Setup our signal handlers before logging
@@ -143,7 +157,11 @@ pub const GlobalState = struct {
         self.rlimits = .init();
 
         // Initialize our crash reporting.
-        crash.init(self.alloc) catch |err| {
+        crash.init(
+            self.alloc,
+            self.io_threaded.io(),
+            &self.environ_map,
+        ) catch |err| {
             std.log.warn(
                 "sentry init failed, no crash capture available err={}",
                 .{err},
@@ -161,7 +179,7 @@ pub const GlobalState = struct {
 
         // We need to make sure the process locale is set properly. Locale
         // affects a lot of behaviors in a shell.
-        try internal_os.ensureLocale(self.alloc);
+        try internal_os.ensureLocale(&self.environ_map);
 
         // Initialize glslang for shader compilation
         try glslang.init();
@@ -171,7 +189,7 @@ pub const GlobalState = struct {
 
         // Find our resources directory once for the app so every launch
         // hereafter can use this cached value.
-        self.resources_dir = try apprt.runtime.resourcesDir(self.alloc);
+        self.resources_dir = try apprt.runtime.resourcesDir(self.alloc, self.io(), &self.environ_map);
         errdefer self.resources_dir.deinit(self.alloc);
 
         // Setup i18n
@@ -188,11 +206,17 @@ pub const GlobalState = struct {
         // Flush our crash logs
         crash.deinit();
 
+        self.environ_map.deinit();
+        self.io_threaded.deinit();
         if (self.gpa) |*value| {
             // We want to ensure that we deinit the GPA because this is
             // the point at which it will output if there were safety violations.
             _ = value.deinit();
         }
+    }
+
+    pub fn io(self: *GlobalState) std.Io {
+        return self.io_threaded.io();
     }
 
     fn initSignals() void {

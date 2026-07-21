@@ -327,6 +327,7 @@ pub fn getPresentation(
 pub fn renderGlyph(
     self: *CodepointResolver,
     alloc: Allocator,
+    io: std.Io,
     atlas: *Atlas,
     index: Collection.Index,
     glyph_index: u32,
@@ -336,6 +337,7 @@ pub fn renderGlyph(
     if (index.special()) |sp| switch (sp) {
         .sprite => return try self.sprite.?.renderGlyph(
             alloc,
+            io,
             atlas,
             glyph_index,
             opts,
@@ -343,7 +345,10 @@ pub fn renderGlyph(
     };
 
     const face = try self.collection.getFace(index);
-    const glyph = try face.renderGlyph(alloc, atlas, glyph_index, opts);
+    const glyph = switch (font.options.backend) {
+        .freetype, .fontconfig_freetype, .freetype_windows => try face.renderGlyph(alloc, io, atlas, glyph_index, opts),
+        else => try face.renderGlyph(alloc, atlas, glyph_index, opts),
+    };
     // log.warn("GLYPH={}", .{glyph});
     return glyph;
 }
@@ -391,11 +396,12 @@ test getIndex {
     defer lib.deinit();
 
     var c = Collection.init();
-    c.load_options = .{ .library = lib };
+    c.load_options = .{ .io = std.testing.io, .library = lib };
 
     {
         errdefer c.deinit(alloc);
         _ = try c.add(alloc, try .init(
+            std.testing.io,
             lib,
             testFont,
             .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -407,6 +413,7 @@ test getIndex {
         if (comptime !font.options.backend.hasCoretext()) {
             // Coretext doesn't support Noto's format
             _ = try c.add(alloc, try .init(
+                std.testing.io,
                 lib,
                 testEmoji,
                 .{ .size = .{ .points = 12 } },
@@ -417,6 +424,7 @@ test getIndex {
             });
         }
         _ = try c.add(alloc, try .init(
+            std.testing.io,
             lib,
             testEmojiText,
             .{ .size = .{ .points = 12 } },
@@ -476,9 +484,10 @@ test "getIndex disabled font style" {
     defer lib.deinit();
 
     var c = Collection.init();
-    c.load_options = .{ .library = lib };
+    c.load_options = .{ .io = std.testing.io, .library = lib };
 
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -488,6 +497,7 @@ test "getIndex disabled font style" {
         .size_adjustment = .none,
     });
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -497,6 +507,7 @@ test "getIndex disabled font style" {
         .size_adjustment = .none,
     });
     _ = try c.add(alloc, try .init(
+        std.testing.io,
         lib,
         testFont,
         .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },

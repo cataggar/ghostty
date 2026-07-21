@@ -9,15 +9,21 @@ const macos = @import("macos");
 ///
 /// For Zig-aware readers: this is the same as std.process.argsWithAllocator
 /// but handles macOS using NSProcessInfo instead of libc argc/argv.
-pub fn iterator(allocator: Allocator) ArgIterator.InitError!ArgIterator {
-    //if (true) return try std.process.argsWithAllocator(allocator);
-    return .initWithAllocator(allocator);
+pub fn iterator(args: std.process.Args, allocator: Allocator) ArgIterator.InitError!ArgIterator {
+    return .initAllocator(args, allocator);
 }
 
-/// Duck-typed to std.process.ArgIterator
+pub fn testingArgs() std.process.Args {
+    return .{ .vector = switch (builtin.os.tag) {
+        .windows => std.unicode.utf8ToUtf16LeStringLiteral("test"),
+        else => &.{"test"},
+    } };
+}
+
+/// Duck-typed to std.process.Args.Iterator
 pub const ArgIterator = switch (builtin.os.tag) {
     .macos => IteratorMacOS,
-    else => std.process.ArgIterator,
+    else => std.process.Args.Iterator,
 };
 
 /// This is an ArgIterator (duck-typed for std.process.ArgIterator) for
@@ -38,7 +44,8 @@ const IteratorMacOS = struct {
 
     pub const InitError = Allocator.Error;
 
-    pub fn initWithAllocator(alloc: Allocator) InitError!IteratorMacOS {
+    pub fn initAllocator(a: std.process.Args, alloc: Allocator) InitError!IteratorMacOS {
+        _ = a;
         const NSProcessInfo = objc.getClass("NSProcessInfo").?;
         const info = NSProcessInfo.msgSend(objc.Object, objc.sel("processInfo"), .{});
         const args = info.getProperty(objc.Object, "arguments");
@@ -124,7 +131,7 @@ test "args" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var iter = try iterator(alloc);
+    var iter = try iterator(testingArgs(), alloc);
     defer iter.deinit();
     try testing.expect(iter.next().?.len > 0);
 }

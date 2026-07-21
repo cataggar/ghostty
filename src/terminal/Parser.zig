@@ -912,17 +912,15 @@ test "osc: 112 incomplete sequence" {
         try testing.expect(cmd == .color_operation);
         try testing.expectEqual(cmd.color_operation.terminator, .bel);
         try testing.expect(cmd.color_operation.op == .osc_112);
-        try testing.expect(cmd.color_operation.requests.count() == 1);
-        var it = cmd.color_operation.requests.constIterator(0);
+        try testing.expect(cmd.color_operation.requests.items.len == 1);
         {
-            const op = it.next().?;
+            const op = &cmd.color_operation.requests.items[0];
             try testing.expect(op.* == .reset);
             try testing.expectEqual(
                 osc.color.Request{ .reset = .{ .dynamic = .cursor } },
                 op.*,
             );
         }
-        try std.testing.expect(it.next() == null);
     }
 }
 
@@ -948,13 +946,11 @@ test "osc: 104 empty" {
         try testing.expect(cmd == .color_operation);
         try testing.expectEqual(cmd.color_operation.terminator, .bel);
         try testing.expect(cmd.color_operation.op == .osc_104);
-        try testing.expect(cmd.color_operation.requests.count() == 1);
-        var it = cmd.color_operation.requests.constIterator(0);
+        try testing.expect(cmd.color_operation.requests.items.len == 1);
         {
-            const op = it.next().?;
+            const op = &cmd.color_operation.requests.items[0];
             try testing.expect(op.* == .reset_palette);
         }
-        try std.testing.expect(it.next() == null);
     }
 }
 

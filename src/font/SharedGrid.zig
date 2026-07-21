@@ -60,7 +60,7 @@ metrics: Metrics,
 /// this directly if they need to i.e. access the atlas directly. Because
 /// callers can use this lock directly, maintainers need to be extra careful
 /// to review call sites to ensure they are using the lock correctly.
-lock: std.Thread.RwLock,
+lock: std.Io.RwLock,
 
 pub const init_tw = tripwire.module(enum {
     codepoints_capacity,
@@ -77,10 +77,12 @@ pub const init_tw = tripwire.module(enum {
 /// SharedGrid always configures the sprite font. This struct is expected to be
 /// used with a terminal grid and therefore the sprite font is always
 /// necessary for correct rendering.
+pub const InitError = Allocator.Error || error{CannotLoadPrimaryFont};
+
 pub fn init(
     alloc: Allocator,
     resolver: CodepointResolver,
-) !SharedGrid {
+) InitError!SharedGrid {
     const tw = init_tw;
 
     // We need to support loading options since we use the size data
@@ -95,7 +97,7 @@ pub fn init(
         .resolver = resolver,
         .atlas_grayscale = atlas_grayscale,
         .atlas_color = atlas_color,
-        .lock = .{},
+        .lock = .init,
         .metrics = undefined, // Loaded below
     };
 
@@ -153,6 +155,7 @@ pub fn cellSize(self: *SharedGrid) renderer.CellSize {
 pub fn getIndex(
     self: *SharedGrid,
     alloc: Allocator,
+    io: std.Io,
     cp: u32,
     style: Style,
     p: ?Presentation,
@@ -162,14 +165,14 @@ pub fn getIndex(
     // Fast path: the cache has the value. This is almost always true and
     // only requires a read lock.
     {
-        self.lock.lockShared();
-        defer self.lock.unlockShared();
+        self.lock.lockSharedUncancelable(io);
+        defer self.lock.unlockShared(io);
         if (self.codepoints.get(key)) |v| return v;
     }
 
     // Slow path: we need to search this codepoint
-    self.lock.lock();
-    defer self.lock.unlock();
+    self.lock.lockUncancelable(io);
+    defer self.lock.unlock(io);
 
     // Try to get it, if it is now in the cache another thread beat us to it.
     const gop = try self.codepoints.getOrPut(alloc, key);
@@ -197,12 +200,13 @@ pub fn getIndex(
 /// Returns true if the given font index has the codepoint and presentation.
 pub fn hasCodepoint(
     self: *SharedGrid,
+    io: std.Io,
     idx: Collection.Index,
     cp: u32,
     p: ?Presentation,
 ) bool {
-    self.lock.lockShared();
-    defer self.lock.unlockShared();
+    self.lock.lockSharedUncancelable(io);
+    defer self.lock.unlockShared(io);
     return self.resolver.collection.hasCodepoint(
         idx,
         cp,
@@ -221,6 +225,7 @@ pub const Render = struct {
 pub fn renderCodepoint(
     self: *SharedGrid,
     alloc: Allocator,
+    io: std.Io,
     cp: u32,
     style: Style,
     p: ?Presentation,
@@ -232,18 +237,18 @@ pub fn renderCodepoint(
     // surfaces at the same time.
 
     // Get the font that has the codepoint
-    const index = try self.getIndex(alloc, cp, style, p) orelse return null;
+    const index = try self.getIndex(alloc, io, cp, style, p) orelse return null;
 
     // Get the glyph for the font
     const glyph_index = glyph_index: {
-        self.lock.lockShared();
-        defer self.lock.unlockShared();
+        self.lock.lockSharedUncancelable(io);
+        defer self.lock.unlockShared(io);
         const face = try self.resolver.collection.getFace(index);
         break :glyph_index face.glyphIndex(cp) orelse return null;
     };
 
     // Render
-    return try self.renderGlyph(alloc, index, glyph_index, opts);
+    return try self.renderGlyph(alloc, io, index, glyph_index, opts);
 }
 
 pub const renderGlyph_tw = tripwire.module(enum {
@@ -252,13 +257,18 @@ pub const renderGlyph_tw = tripwire.module(enum {
 
 /// Render a glyph index. This automatically determines the correct texture
 /// atlas to use and caches the result.
+pub const RenderError =
+    @typeInfo(@typeInfo(@TypeOf(CodepointResolver.renderGlyph)).@"fn".return_type.?).error_union.error_set ||
+    Allocator.Error;
+
 pub fn renderGlyph(
     self: *SharedGrid,
     alloc: Allocator,
+    io: std.Io,
     index: Collection.Index,
     glyph_index: u32,
     opts: RenderOptions,
-) !Render {
+) RenderError!Render {
     const tw = renderGlyph_tw;
 
     const key: GlyphKey = .{ .index = index, .glyph = glyph_index, .opts = opts };
@@ -266,14 +276,14 @@ pub fn renderGlyph(
     // Fast path: the cache has the value. This is almost always true and
     // only requires a read lock.
     {
-        self.lock.lockShared();
-        defer self.lock.unlockShared();
+        self.lock.lockSharedUncancelable(io);
+        defer self.lock.unlockShared(io);
         if (self.glyphs.get(key)) |v| return v;
     }
 
     // Slow path: we need to search this codepoint
-    self.lock.lock();
-    defer self.lock.unlock();
+    self.lock.lockUncancelable(io);
+    defer self.lock.unlock(io);
 
     const gop = try self.glyphs.getOrPut(alloc, key);
     if (gop.found_existing) return gop.value_ptr.*;
@@ -310,6 +320,7 @@ pub fn renderGlyph(
     // Render into the atlas
     const glyph = self.resolver.renderGlyph(
         alloc,
+        io,
         atlas,
         index,
         glyph_index,
@@ -320,6 +331,7 @@ pub fn renderGlyph(
             try atlas.grow(alloc, atlas.size * 2);
             break :blk try self.resolver.renderGlyph(
                 alloc,
+                io,
                 atlas,
                 index,
                 glyph_index,
@@ -397,11 +409,12 @@ fn testGrid(mode: TestMode, alloc: Allocator, lib: Library) !SharedGrid {
     const testFont = font.embedded.regular;
 
     var c = Collection.init();
-    c.load_options = .{ .library = lib };
+    c.load_options = .{ .io = std.testing.io, .library = lib };
 
     switch (mode) {
         .normal => {
             _ = try c.add(alloc, try .init(
+                std.testing.io,
                 lib,
                 testFont,
                 .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },
@@ -432,10 +445,10 @@ test getIndex {
 
     // Visible ASCII.
     for (32..127) |i| {
-        const idx = (try grid.getIndex(alloc, @intCast(i), .regular, null)).?;
+        const idx = (try grid.getIndex(alloc, testing.io, @intCast(i), .regular, null)).?;
         try testing.expectEqual(Style.regular, idx.style);
         try testing.expectEqual(@as(Collection.Index.IndexInt, 0), idx.idx);
-        try testing.expect(grid.hasCodepoint(idx, @intCast(i), null));
+        try testing.expect(grid.hasCodepoint(testing.io, idx, @intCast(i), null));
     }
 
     // Do it again without a resolver set to ensure we only hit the cache
@@ -443,7 +456,7 @@ test getIndex {
     grid.resolver = undefined;
     defer grid.resolver = old_resolver;
     for (32..127) |i| {
-        const idx = (try grid.getIndex(alloc, @intCast(i), .regular, null)).?;
+        const idx = (try grid.getIndex(alloc, testing.io, @intCast(i), .regular, null)).?;
         try testing.expectEqual(Style.regular, idx.style);
         try testing.expectEqual(@as(Collection.Index.IndexInt, 0), idx.idx);
     }
@@ -464,12 +477,12 @@ test "renderGlyph error after cache insert rolls back cache entry" {
     defer grid.deinit(alloc);
 
     // Get the font index for 'A'
-    const idx = (try grid.getIndex(alloc, 'A', .regular, null)).?;
+    const idx = (try grid.getIndex(alloc, testing.io, 'A', .regular, null)).?;
 
     // Get the glyph index for 'A'
     const glyph_index = glyph_index: {
-        grid.lock.lockShared();
-        defer grid.lock.unlockShared();
+        try grid.lock.lockShared(testing.io);
+        defer grid.lock.unlockShared(testing.io);
         const face = try grid.resolver.collection.getFace(idx);
         break :glyph_index face.glyphIndex('A').?;
     };
@@ -489,7 +502,7 @@ test "renderGlyph error after cache insert rolls back cache entry" {
     // This should fail due to the tripwire
     try testing.expectError(
         error.OutOfMemory,
-        grid.renderGlyph(alloc, idx, glyph_index, render_opts),
+        grid.renderGlyph(alloc, testing.io, idx, glyph_index, render_opts),
     );
 
     // The errdefer should have removed the cache entry, leaving the cache clean.
@@ -518,8 +531,9 @@ test "init error" {
         defer lib.deinit();
 
         var c = Collection.init();
-        c.load_options = .{ .library = lib };
+        c.load_options = .{ .io = std.testing.io, .library = lib };
         _ = try c.add(alloc, try .init(
+            std.testing.io,
             lib,
             font.embedded.regular,
             .{ .size = .{ .points = 12, .xdpi = 96, .ydpi = 96 } },

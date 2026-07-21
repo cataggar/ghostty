@@ -350,7 +350,7 @@ fn syncDrawTimer(self: *Thread) void {
 }
 
 /// Drain the mailbox.
-fn drainMailbox(self: *Thread) !void {
+fn drainMailbox(self: *Thread, io: std.Io) !void {
     // There's probably a more elegant way to do this...
     //
     // This is effectively an @autoreleasepool{} block, which we need in
@@ -361,7 +361,7 @@ fn drainMailbox(self: *Thread) !void {
         void;
     defer if (builtin.os.tag.isDarwin()) pool.deinit();
 
-    while (self.mailbox.pop()) |message| {
+    while (self.mailbox.pop(io)) |message| {
         log.debug("mailbox message={}", .{message});
         switch (message) {
             .crash => @panic("crash request, crashing intentionally"),
@@ -380,6 +380,7 @@ fn drainMailbox(self: *Thread) !void {
                 // (renderCallback skips updateFrame while invisible) and draw.
                 if (v) {
                     self.renderer.updateFrame(
+                        self.app_mailbox.io,
                         self.state,
                         self.flags.cursor_blink_visible,
                     ) catch |err|
@@ -461,17 +462,17 @@ fn drainMailbox(self: *Thread) !void {
             },
 
             .font_grid => |grid| {
-                self.renderer.setFontGrid(grid.grid);
-                grid.set.deref(grid.old_key);
+                self.renderer.setFontGrid(io, grid.grid);
+                grid.set.deref(io, grid.old_key);
             },
 
-            .resize => |v| self.renderer.setScreenSize(v),
+            .resize => |v| self.renderer.setScreenSize(io, v),
 
             .change_config => |config| {
                 defer config.alloc.destroy(config.thread);
                 defer config.alloc.destroy(config.impl);
                 try self.changeConfig(config.thread);
-                try self.renderer.changeConfig(config.impl);
+                try self.renderer.changeConfig(io, config.impl);
 
                 // Stop and start the draw timer to capture the new
                 // hasAnimations value.
@@ -537,7 +538,7 @@ fn drawFrame(self: *Thread, now: bool) void {
             .{ .instant = {} },
         );
     } else {
-        self.renderer.drawFrame(false) catch |err|
+        self.renderer.drawFrame(self.app_mailbox.io, false) catch |err|
             log.warn("error drawing err={}", .{err});
     }
 }
@@ -557,7 +558,7 @@ fn wakeupCallback(
 
     // When we wake up, we check the mailbox. Mailbox producers should
     // wake up our thread after publishing.
-    t.drainMailbox() catch |err|
+    t.drainMailbox(t.app_mailbox.io) catch |err|
         log.err("error draining mailbox err={}", .{err});
 
     // Render immediately
@@ -648,6 +649,7 @@ fn renderCallback(
 
     // Update our frame data
     t.renderer.updateFrame(
+        t.app_mailbox.io,
         t.state,
         t.flags.cursor_blink_visible,
     ) catch |err|
@@ -788,7 +790,7 @@ const Compression = struct {
         // frame without changing terminal contents and must not starve this
         // timer indefinitely.
         if (thread.state.mutex.tryLock()) {
-            defer thread.state.mutex.unlock();
+            defer thread.state.mutex.unlock(thread.app_mailbox.io);
             const activity = thread.state.terminal.compressionActivity();
             if (self.activity == activity) return;
             self.activity = activity;
@@ -847,7 +849,7 @@ const Compression = struct {
 
         const state = thread.state;
         if (!state.mutex.tryLock()) return idle_interval;
-        defer state.mutex.unlock();
+        defer state.mutex.unlock(thread.app_mailbox.io);
 
         const activity = state.terminal.compressionActivity();
         if (self.activity != activity) {

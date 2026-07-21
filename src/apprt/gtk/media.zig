@@ -8,9 +8,9 @@ const glib = @import("glib");
 const gobject = @import("gobject");
 const gtk = @import("gtk");
 
-pub fn fromFilename(path: [:0]const u8) ?*gtk.MediaFile {
-    assert(std.fs.path.isAbsolute(path));
-    std.fs.accessAbsolute(path, .{ .mode = .read_only }) catch |err| {
+pub fn fromFilename(io: std.Io, path: [:0]const u8) ?*gtk.MediaFile {
+    assert(std.Io.Dir.path.isAbsolute(path));
+    std.Io.Dir.accessAbsolute(io, path, .{ .read = true }) catch |err| {
         log.warn("unable to access {s}: {t}", .{ path, err });
         return null;
     };
@@ -18,7 +18,7 @@ pub fn fromFilename(path: [:0]const u8) ?*gtk.MediaFile {
 }
 
 pub fn fromResource(path: [:0]const u8) ?*gtk.MediaFile {
-    assert(std.fs.path.isAbsolute(path));
+    assert(std.Io.Dir.path.isAbsolute(path));
     var gerr: ?*glib.Error = null;
 
     const found = gio.resourcesGetInfo(path, .{}, null, null, &gerr);
@@ -57,6 +57,7 @@ pub fn fromResource(path: [:0]const u8) ?*gtk.MediaFile {
 /// is never torn down on the happy path, so allocating one per bell leaked a
 /// pipeline + its threads on every ring. See the caller in surface.zig.
 pub fn bellMediaFile(
+    io: std.Io,
     current: ?*gtk.MediaFile,
     path: [:0]const u8,
     required: bool,
@@ -66,7 +67,7 @@ pub fn bellMediaFile(
         media_file.unref();
     }
 
-    const media_file = fromFilename(path) orelse return null;
+    const media_file = fromFilename(io, path) orelse return null;
 
     // If the audio file is marked as required, we'll emit an error if there
     // was a problem playing it. Otherwise there will be silence. We connect
@@ -140,16 +141,16 @@ test "bellMediaFile reuses one MediaFile per path" {
     const path_a: [:0]const u8 = "/tmp/ghostty-bell-test-a.oga";
     const path_b: [:0]const u8 = "/tmp/ghostty-bell-test-b.oga";
 
-    var current = bellMediaFile(null, path_a, false) orelse return error.SkipZigTest;
+    var current = bellMediaFile(testing.io, null, path_a, false) orelse return error.SkipZigTest;
     const first = current;
     try testing.expect(isForPath(current, path_a));
 
     // Same path => identical object (the leak regression is rebuilding here).
-    current = bellMediaFile(current, path_a, false).?;
+    current = bellMediaFile(testing.io, current, path_a, false).?;
     try testing.expectEqual(first, current);
 
     // Changed path => rebuilt object targeting the new path (old one freed).
-    current = bellMediaFile(current, path_b, false) orelse return error.SkipZigTest;
+    current = bellMediaFile(testing.io, current, path_b, false) orelse return error.SkipZigTest;
     try testing.expect(isForPath(current, path_b));
     try testing.expect(!isForPath(current, path_a));
 

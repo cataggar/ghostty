@@ -30,30 +30,34 @@ pub const Action = enum {
 };
 
 /// An entrypoint for the synthetic generator CLI.
-pub fn main() !void {
-    const alloc = std.heap.c_allocator;
-    const action_ = try cli.action.detectArgs(Action, alloc);
+pub fn main(init: std.process.Init) !void {
+    const alloc = init.arena.allocator();
+    const action_ = try cli.action.detectArgs(Action, alloc, init.minimal.args);
     const action = action_ orelse return error.NoAction;
-    try mainAction(alloc, action, .cli);
+    try mainAction(alloc, action, init.io, init.environ_map, .{
+        .cli = init.minimal.args,
+    });
 }
 
 pub const Args = union(enum) {
     /// The arguments passed to the CLI via argc/argv.
-    cli,
+    cli: std.process.Args,
 
-    /// Simple string arguments, parsed via std.process.ArgIteratorGeneral.
+    /// Simple string arguments, parsed via std.process.Args.IteratorGeneral.
     string: []const u8,
 };
 
 pub fn mainAction(
     alloc: Allocator,
     action: Action,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     args: Args,
 ) !void {
     switch (action) {
         inline else => |comptime_action| {
             const Impl = Action.Struct(comptime_action);
-            try mainActionImpl(Impl, alloc, args);
+            try mainActionImpl(Impl, alloc, io, env, args);
         },
     }
 }
@@ -61,6 +65,8 @@ pub fn mainAction(
 fn mainActionImpl(
     comptime Impl: type,
     alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     args: Args,
 ) !void {
     // First, parse our CLI options.
@@ -68,32 +74,30 @@ fn mainActionImpl(
     var opts: Options = .{};
     defer if (@hasDecl(Options, "deinit")) opts.deinit();
     switch (args) {
-        .cli => {
-            var iter = try cli.args.argsIterator(alloc);
+        .cli => |a| {
+            var iter = try cli.args.argsIterator(a, alloc);
             defer iter.deinit();
-            try cli.args.parse(Options, alloc, &opts, &iter);
+            try cli.args.parse(Options, alloc, io, env, &opts, &iter);
         },
         .string => |str| {
-            var iter = try std.process.ArgIteratorGeneral(.{}).init(
+            var iter = try std.process.Args.IteratorGeneral(.{}).init(
                 alloc,
                 str,
             );
             defer iter.deinit();
-            try cli.args.parse(Options, alloc, &opts, &iter);
+            try cli.args.parse(Options, alloc, io, env, &opts, &iter);
         },
     }
 
     // TODO: Make this a command line option.
-    const seed: u64 = @truncate(@as(
-        u128,
-        @bitCast(std.time.nanoTimestamp()),
-    ));
+    var seed: u64 = undefined;
+    std.Io.random(io, std.mem.asBytes(&seed));
     var prng = std.Random.DefaultPrng.init(seed);
     const rand = prng.random();
 
     // Our output always goes to stdout.
     var buffer: [2048]u8 = undefined;
-    var stdout_writer = std.fs.File.stdout().writer(&buffer);
+    var stdout_writer = std.Io.File.stdout().writer(io, &buffer);
     const writer = &stdout_writer.interface;
 
     // Create our implementation

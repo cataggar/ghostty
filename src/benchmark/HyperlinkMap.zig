@@ -43,7 +43,14 @@ pub const Mode = enum {
     churn,
 };
 
-pub fn create(alloc: Allocator, opts: Options) !*HyperlinkMap {
+pub fn create(
+    alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+    opts: Options,
+) !*HyperlinkMap {
+    _ = io;
+    _ = env;
     if (opts.entries < 16 or !std.math.isPowerOfTwo(opts.entries)) {
         log.err("entries must be a power of two greater than or equal to 16", .{});
         return error.InvalidEntries;
@@ -141,15 +148,17 @@ fn stepChurn(ptr: *anyopaque) Benchmark.Error!void {
 
 test HyperlinkMap {
     const alloc = std.testing.allocator;
+    var env = try std.testing.environ.createMap(alloc);
+    defer env.deinit();
 
     inline for (.{ Mode.lookup, Mode.churn }) |mode| {
-        const impl = try HyperlinkMap.create(alloc, .{
+        const impl = try HyperlinkMap.create(alloc, std.testing.io, &env, .{
             .entries = 64,
             .mode = mode,
         });
         defer impl.destroy(alloc);
 
         const bench = impl.benchmark();
-        _ = try bench.run(.once);
+        _ = try bench.run(std.testing.io, .once);
     }
 }

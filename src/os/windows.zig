@@ -4,33 +4,49 @@ const windows = std.os.windows;
 // Export any constants or functions we need from the Windows API so
 // we can just import one file.
 pub const kernel32 = windows.kernel32;
+pub const ntdll = windows.ntdll;
+pub const GetLastError = windows.GetLastError;
 pub const unexpectedError = windows.unexpectedError;
-pub const OpenFile = windows.OpenFile;
+pub const unexpectedStatus = windows.unexpectedStatus;
 pub const CloseHandle = windows.CloseHandle;
 pub const GetCurrentProcessId = windows.GetCurrentProcessId;
-pub const SetHandleInformation = windows.SetHandleInformation;
 pub const DWORD = windows.DWORD;
-pub const FILE_ATTRIBUTE_NORMAL = windows.FILE_ATTRIBUTE_NORMAL;
-pub const FILE_FLAG_OVERLAPPED = windows.FILE_FLAG_OVERLAPPED;
-pub const FILE_SHARE_READ = windows.FILE_SHARE_READ;
-pub const GENERIC_READ = windows.GENERIC_READ;
+pub const FILE_ATTRIBUTE_NORMAL = 0x00000080;
+pub const FILE_SHARE_READ = 0x00000001;
+pub const FILE_SHARE_WRITE = 0x00000002;
+pub const GENERIC_READ = 0x80000000;
+pub const GENERIC_WRITE = 0x40000000;
 pub const HANDLE = windows.HANDLE;
-pub const HANDLE_FLAG_INHERIT = windows.HANDLE_FLAG_INHERIT;
+pub const HANDLE_FLAG_INHERIT = 0x00000001;
 pub const INFINITE = windows.INFINITE;
 pub const INVALID_HANDLE_VALUE = windows.INVALID_HANDLE_VALUE;
 pub const MAX_PATH = windows.MAX_PATH;
-pub const OPEN_EXISTING = windows.OPEN_EXISTING;
-pub const PIPE_ACCESS_OUTBOUND = windows.PIPE_ACCESS_OUTBOUND;
-pub const PIPE_TYPE_BYTE = windows.PIPE_TYPE_BYTE;
-pub const PROCESS_INFORMATION = windows.PROCESS_INFORMATION;
-pub const S_OK = windows.S_OK;
+pub const OPEN_EXISTING = 3;
+pub const PROCESS_INFORMATION = extern struct {
+    hProcess: windows.HANDLE,
+    hThread: windows.HANDLE,
+    dwProcessId: windows.DWORD,
+    dwThreadId: windows.DWORD,
+};
+pub const HRESULT = windows.LONG;
+pub const S_OK: HRESULT = 0;
 pub const SECURITY_ATTRIBUTES = windows.SECURITY_ATTRIBUTES;
 pub const STARTUPINFOW = windows.STARTUPINFOW;
 pub const STARTF_USESTDHANDLES = windows.STARTF_USESTDHANDLES;
 pub const SYNCHRONIZE = windows.SYNCHRONIZE;
 pub const WAIT_FAILED = windows.WAIT_FAILED;
-pub const FALSE = windows.FALSE;
-pub const TRUE = windows.TRUE;
+pub const FALSE = windows.BOOL.FALSE;
+pub const TRUE = windows.BOOL.TRUE;
+
+pub fn SetHandleInformation(
+    handle: windows.HANDLE,
+    mask: windows.DWORD,
+    flags: windows.DWORD,
+) std.Io.UnexpectedError!void {
+    if (exp.kernel32.SetHandleInformation(handle, mask, flags) == .FALSE) {
+        return windows.unexpectedError(windows.GetLastError());
+    }
+}
 
 pub const exp = struct {
     pub const HPCON = windows.LPVOID;
@@ -39,6 +55,13 @@ pub const exp = struct {
     pub const EXTENDED_STARTUPINFO_PRESENT = 0x00080000;
     pub const LPPROC_THREAD_ATTRIBUTE_LIST = ?*anyopaque;
     pub const FILE_FLAG_FIRST_PIPE_INSTANCE = 0x00080000;
+    pub const FILE_FLAG_OVERLAPPED = 0x40000000;
+    pub const PIPE_ACCESS_OUTBOUND = 0x00000002;
+    pub const PIPE_TYPE_BYTE = 0x00000000;
+    pub const MEM_COMMIT = 0x00001000;
+    pub const MEM_RESERVE = 0x00002000;
+    pub const MEM_RELEASE = 0x00008000;
+    pub const PAGE_READWRITE = 0x04;
 
     pub const STATUS_PENDING = 0x00000103;
     pub const STILL_ACTIVE = STATUS_PENDING;
@@ -49,11 +72,50 @@ pub const exp = struct {
     };
 
     pub const kernel32 = struct {
+        pub extern "kernel32" fn GetExitCodeProcess(
+            hProcess: windows.HANDLE,
+            lpExitCode: *windows.DWORD,
+        ) callconv(.winapi) windows.BOOL;
         pub extern "kernel32" fn CreatePipe(
             hReadPipe: *windows.HANDLE,
             hWritePipe: *windows.HANDLE,
             lpPipeAttributes: ?*const windows.SECURITY_ATTRIBUTES,
             nSize: windows.DWORD,
+        ) callconv(.winapi) windows.BOOL;
+        pub extern "kernel32" fn CreateNamedPipeW(
+            lpName: windows.LPCWSTR,
+            dwOpenMode: windows.DWORD,
+            dwPipeMode: windows.DWORD,
+            nMaxInstances: windows.DWORD,
+            nOutBufferSize: windows.DWORD,
+            nInBufferSize: windows.DWORD,
+            nDefaultTimeOut: windows.DWORD,
+            lpSecurityAttributes: ?*const windows.SECURITY_ATTRIBUTES,
+        ) callconv(.winapi) windows.HANDLE;
+        pub extern "kernel32" fn CreateFileW(
+            lpFileName: windows.LPCWSTR,
+            dwDesiredAccess: windows.DWORD,
+            dwShareMode: windows.DWORD,
+            lpSecurityAttributes: ?*const windows.SECURITY_ATTRIBUTES,
+            dwCreationDisposition: windows.DWORD,
+            dwFlagsAndAttributes: windows.DWORD,
+            hTemplateFile: ?windows.HANDLE,
+        ) callconv(.winapi) windows.HANDLE;
+        pub extern "kernel32" fn ReadFile(
+            hFile: windows.HANDLE,
+            lpBuffer: windows.LPVOID,
+            nNumberOfBytesToRead: windows.DWORD,
+            lpNumberOfBytesRead: ?*windows.DWORD,
+            lpOverlapped: ?*anyopaque,
+        ) callconv(.winapi) windows.BOOL;
+        pub extern "kernel32" fn CancelIoEx(
+            hFile: windows.HANDLE,
+            lpOverlapped: ?*anyopaque,
+        ) callconv(.winapi) windows.BOOL;
+        pub extern "kernel32" fn SetHandleInformation(
+            hObject: windows.HANDLE,
+            dwMask: windows.DWORD,
+            dwFlags: windows.DWORD,
         ) callconv(.winapi) windows.BOOL;
         pub extern "kernel32" fn CreatePseudoConsole(
             size: windows.COORD,
@@ -61,8 +123,8 @@ pub const exp = struct {
             hOutput: windows.HANDLE,
             dwFlags: windows.DWORD,
             phPC: *HPCON,
-        ) callconv(.winapi) windows.HRESULT;
-        pub extern "kernel32" fn ResizePseudoConsole(hPC: HPCON, size: windows.COORD) callconv(.winapi) windows.HRESULT;
+        ) callconv(.winapi) HRESULT;
+        pub extern "kernel32" fn ResizePseudoConsole(hPC: HPCON, size: windows.COORD) callconv(.winapi) HRESULT;
         pub extern "kernel32" fn ClosePseudoConsole(hPC: HPCON) callconv(.winapi) void;
         pub extern "kernel32" fn InitializeProcThreadAttributeList(
             lpAttributeList: LPPROC_THREAD_ATTRIBUTE_LIST,
@@ -98,7 +160,7 @@ pub const exp = struct {
             lpEnvironment: ?*anyopaque,
             lpCurrentDirectory: ?windows.LPWSTR,
             lpStartupInfo: *windows.STARTUPINFOW,
-            lpProcessInformation: *windows.PROCESS_INFORMATION,
+            lpProcessInformation: *PROCESS_INFORMATION,
         ) callconv(.winapi) windows.BOOL;
         /// https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-getcomputernamea
         pub extern "kernel32" fn GetComputerNameA(
@@ -110,6 +172,17 @@ pub const exp = struct {
             nBufferLength: windows.DWORD,
             lpBuffer: windows.LPWSTR,
         ) callconv(.winapi) windows.DWORD;
+        pub extern "kernel32" fn VirtualAlloc(
+            lpAddress: ?windows.LPVOID,
+            dwSize: windows.SIZE_T,
+            flAllocationType: windows.DWORD,
+            flProtect: windows.DWORD,
+        ) callconv(.winapi) ?windows.LPVOID;
+        pub extern "kernel32" fn VirtualFree(
+            lpAddress: windows.LPVOID,
+            dwSize: windows.SIZE_T,
+            dwFreeType: windows.DWORD,
+        ) callconv(.winapi) windows.BOOL;
     };
 
     pub const PROC_THREAD_ATTRIBUTE_NUMBER = 0x0000FFFF;

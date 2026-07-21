@@ -31,7 +31,7 @@ pub fn parseCLI(
         return;
     }
 
-    const index = std.mem.indexOfScalar(
+    const index = std.mem.findScalar(
         u8,
         value,
         '=',

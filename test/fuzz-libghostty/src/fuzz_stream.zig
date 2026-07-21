@@ -26,7 +26,11 @@ pub export fn zig_fuzz_test(
 
     // Allocate a terminal; if we run out of fixed-buffer space just
     // skip this input (not a bug, just a very large allocation).
-    var t = Terminal.init(alloc, .{
+    var io_threaded: std.Io.Threaded = .init_single_threaded;
+    defer io_threaded.deinit();
+    var env: std.process.Environ.Map = .init(alloc);
+    defer env.deinit();
+    var t = Terminal.init(alloc, io_threaded.io(), &env, .{
         .cols = 80,
         .rows = 24,
         .max_scrollback = 100,

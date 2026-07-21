@@ -11,7 +11,6 @@ const list_keybinds = @import("list_keybinds.zig");
 const list_themes = @import("list_themes.zig");
 const list_colors = @import("list_colors.zig");
 const list_actions = @import("list_actions.zig");
-const ssh = @import("ssh.zig");
 const ssh_cache = @import("ssh_cache.zig");
 const edit_config = @import("edit_config.zig");
 const show_config = @import("show_config.zig");
@@ -47,9 +46,6 @@ pub const Action = enum {
 
     /// List keybind actions
     @"list-actions",
-
-    /// Wrap `ssh` to configure Ghostty terminal integration on remote hosts
-    ssh,
 
     /// Manage SSH terminfo cache for automatic remote host setup
     @"ssh-cache",
@@ -108,8 +104,19 @@ pub const Action = enum {
     pub const help_error = error.ActionHelpRequested;
 
     /// Run the action. This returns the exit code to exit with.
-    pub fn run(self: Action, alloc: Allocator) !u8 {
-        return self.runMain(alloc) catch |err| switch (err) {
+    pub fn run(
+        self: Action,
+        alloc: Allocator,
+        io: std.Io,
+        env: *const std.process.Environ.Map,
+        proc_args: std.process.Args,
+    ) !u8 {
+        return self.runMain(
+            alloc,
+            io,
+            env,
+            proc_args,
+        ) catch |err| switch (err) {
             // If help is requested, then we use some comptime trickery
             // to find this action in the help strings and output that.
             help_error => err: {
@@ -120,9 +127,10 @@ pub const Action = enum {
 
                     if (std.mem.eql(u8, field.name, @tagName(self))) {
                         var buffer: [1024]u8 = undefined;
-                        var stdout_writer = std.fs.File.stdout().writer(&buffer);
-                        const stdout = &stdout_writer.interface;
                         const text = @field(help_strings.Action, field.name) ++ "\n";
+                        var stdout_file: std.Io.File = .stdout();
+                        var stdout_writer = stdout_file.writer(io, &buffer);
+                        const stdout = &stdout_writer.interface;
                         stdout.writeAll(text) catch |write_err| {
                             std.log.warn("failed to write help text: {}\n", .{write_err});
                             break :err 1;
@@ -142,26 +150,31 @@ pub const Action = enum {
         };
     }
 
-    fn runMain(self: Action, alloc: Allocator) !u8 {
+    fn runMain(
+        self: Action,
+        alloc: Allocator,
+        io: std.Io,
+        env: *const std.process.Environ.Map,
+        args: std.process.Args,
+    ) !u8 {
         return switch (self) {
-            .version => try version.run(alloc),
-            .help => try help.run(alloc),
-            .@"list-fonts" => try list_fonts.run(alloc),
-            .@"list-keybinds" => try list_keybinds.run(alloc),
-            .@"list-themes" => try list_themes.run(alloc),
-            .@"list-colors" => try list_colors.run(alloc),
-            .@"list-actions" => try list_actions.run(alloc),
-            .@"ssh-cache" => try ssh_cache.run(alloc),
-            .ssh => try ssh.run(alloc),
-            .@"edit-config" => try edit_config.run(alloc),
-            .@"show-config" => try show_config.run(alloc),
-            .@"explain-config" => try explain_config.run(alloc),
-            .@"validate-config" => try validate_config.run(alloc),
-            .@"crash-report" => try crash_report.run(alloc),
-            .@"show-face" => try show_face.run(alloc),
-            .boo => try boo.run(alloc),
-            .@"new-window" => try new_window.run(alloc),
-            .@"toggle-quick-terminal" => try toggle_quick_terminal.run(alloc),
+            .version => try version.run(alloc, io, env),
+            .help => try help.run(alloc, io, env, args),
+            .@"list-fonts" => try list_fonts.run(alloc, io, env, args),
+            .@"list-keybinds" => try list_keybinds.run(alloc, io, env, args),
+            .@"list-themes" => try list_themes.run(alloc, io, env, args),
+            .@"list-colors" => try list_colors.run(alloc, io, env, args),
+            .@"list-actions" => try list_actions.run(alloc, io, env, args),
+            .@"ssh-cache" => try ssh_cache.run(alloc, io, env, args),
+            .@"edit-config" => try edit_config.run(alloc, io, env, args),
+            .@"show-config" => try show_config.run(alloc, io, env, args),
+            .@"explain-config" => try explain_config.run(alloc, io, env, args),
+            .@"validate-config" => try validate_config.run(alloc, io, env, args),
+            .@"crash-report" => try crash_report.run(alloc, io, env, args),
+            .@"show-face" => try show_face.run(alloc, io, env, args),
+            .boo => try boo.run(alloc, io, env, args),
+            .@"new-window" => try new_window.run(alloc, io, env, args),
+            .@"toggle-quick-terminal" => try toggle_quick_terminal.run(alloc, io, env, args),
         };
     }
 
@@ -194,7 +207,6 @@ pub const Action = enum {
                 .@"list-colors" => list_colors.Options,
                 .@"list-actions" => list_actions.Options,
                 .@"ssh-cache" => ssh_cache.Options,
-                .ssh => ssh.Options,
                 .@"edit-config" => edit_config.Options,
                 .@"show-config" => show_config.Options,
                 .@"explain-config" => explain_config.Options,
@@ -213,7 +225,7 @@ test "parse action none" {
     const testing = std.testing;
     const alloc = testing.allocator;
 
-    var iter = try std.process.ArgIteratorGeneral(.{}).init(
+    var iter = try std.process.Args.IteratorGeneral(.{}).init(
         alloc,
         "--a=42 --b --b-f=false",
     );
@@ -227,7 +239,7 @@ test "parse action version" {
     const alloc = testing.allocator;
 
     {
-        var iter = try std.process.ArgIteratorGeneral(.{}).init(
+        var iter = try std.process.Args.IteratorGeneral(.{}).init(
             alloc,
             "--a=42 --b --b-f=false --version",
         );
@@ -237,7 +249,7 @@ test "parse action version" {
     }
 
     {
-        var iter = try std.process.ArgIteratorGeneral(.{}).init(
+        var iter = try std.process.Args.IteratorGeneral(.{}).init(
             alloc,
             "--version --a=42 --b --b-f=false",
         );
@@ -247,7 +259,7 @@ test "parse action version" {
     }
 
     {
-        var iter = try std.process.ArgIteratorGeneral(.{}).init(
+        var iter = try std.process.Args.IteratorGeneral(.{}).init(
             alloc,
             "--c=84 --d --version --a=42 --b --b-f=false",
         );
@@ -262,7 +274,7 @@ test "parse action plus" {
     const alloc = testing.allocator;
 
     {
-        var iter = try std.process.ArgIteratorGeneral(.{}).init(
+        var iter = try std.process.Args.IteratorGeneral(.{}).init(
             alloc,
             "--a=42 --b --b-f=false +version",
         );
@@ -272,7 +284,7 @@ test "parse action plus" {
     }
 
     {
-        var iter = try std.process.ArgIteratorGeneral(.{}).init(
+        var iter = try std.process.Args.IteratorGeneral(.{}).init(
             alloc,
             "+version --a=42 --b --b-f=false",
         );
@@ -282,7 +294,7 @@ test "parse action plus" {
     }
 
     {
-        var iter = try std.process.ArgIteratorGeneral(.{}).init(
+        var iter = try std.process.Args.IteratorGeneral(.{}).init(
             alloc,
             "--c=84 --d +version --a=42 --b --b-f=false",
         );
@@ -297,7 +309,7 @@ test "parse action plus ignores -e" {
     const alloc = testing.allocator;
 
     {
-        var iter = try std.process.ArgIteratorGeneral(.{}).init(
+        var iter = try std.process.Args.IteratorGeneral(.{}).init(
             alloc,
             "--a=42 -e +version",
         );
@@ -307,7 +319,7 @@ test "parse action plus ignores -e" {
     }
 
     {
-        var iter = try std.process.ArgIteratorGeneral(.{}).init(
+        var iter = try std.process.Args.IteratorGeneral(.{}).init(
             alloc,
             "+list-fonts --a=42 -e +version",
         );

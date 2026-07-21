@@ -247,8 +247,14 @@ pub const Descriptor = struct {
 pub const Fontconfig = struct {
     fc_config: *fontconfig.Config,
 
-    pub fn init(lib: Library) Fontconfig {
+    pub fn init(
+        lib: Library,
+        io: std.Io,
+        env: *const std.process.Environ.Map,
+    ) Fontconfig {
         _ = lib;
+        _ = io;
+        _ = env;
         // safe to call multiple times and concurrently
         _ = fontconfig.init();
         return .{ .fc_config = fontconfig.initLoadConfigAndFonts() };
@@ -339,8 +345,14 @@ pub const Fontconfig = struct {
 };
 
 pub const CoreText = struct {
-    pub fn init(lib: Library) CoreText {
+    pub fn init(
+        lib: Library,
+        io: std.Io,
+        env: *const std.process.Environ.Map,
+    ) CoreText {
         _ = lib;
+        _ = io;
+        _ = env;
         // Required for the "interface" but does nothing for CoreText.
         return .{};
     }
@@ -899,9 +911,15 @@ pub const CoreText = struct {
 /// probe its CMap.
 pub const Windows = struct {
     lib: Library,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
 
-    pub fn init(lib: Library) Windows {
-        return .{ .lib = lib };
+    pub fn init(
+        lib: Library,
+        io: std.Io,
+        env: *const std.process.Environ.Map,
+    ) Windows {
+        return .{ .lib = lib, .io = io, .env = env };
     }
 
     pub fn deinit(self: *Windows) void {
@@ -916,6 +934,8 @@ pub const Windows = struct {
         return .{
             .alloc = alloc,
             .lib = self.lib,
+            .io = self.io,
+            .env = self.env,
             .desc = desc,
             .variations = desc.variations,
             .state = .system,
@@ -939,18 +959,20 @@ pub const Windows = struct {
     pub const DiscoverIterator = struct {
         alloc: Allocator,
         lib: Library,
+        io: std.Io,
+        env: *const std.process.Environ.Map,
         desc: Descriptor,
         variations: []const Variation,
         state: State,
-        dir: ?std.fs.Dir,
-        iter: ?std.fs.Dir.Iterator,
+        dir: ?std.Io.Dir,
+        iter: ?std.Io.Dir.Iterator,
         system_path: ?[:0]const u8,
         user_path: ?[:0]const u8,
 
         const State = enum { system, user, done };
 
         pub fn deinit(self: *DiscoverIterator) void {
-            if (self.dir) |*d| d.close();
+            if (self.dir) |*d| d.close(self.io);
             if (self.system_path) |p| self.alloc.free(p);
             if (self.user_path) |p| self.alloc.free(p);
             self.* = undefined;
@@ -967,7 +989,8 @@ pub const Windows = struct {
                                 continue;
                             };
                             self.system_path = path;
-                            self.dir = std.fs.openDirAbsoluteZ(
+                            self.dir = std.Io.Dir.openDirAbsolute(
+                                self.io,
                                 path,
                                 .{ .iterate = true },
                             ) catch {
@@ -982,7 +1005,8 @@ pub const Windows = struct {
                                 continue;
                             };
                             self.user_path = path;
-                            self.dir = std.fs.openDirAbsoluteZ(
+                            self.dir = std.Io.Dir.openDirAbsolute(
+                                self.io,
                                 path,
                                 .{ .iterate = true },
                             ) catch {
@@ -995,9 +1019,9 @@ pub const Windows = struct {
                     }
                 }
 
-                const entry = (self.iter.?.next() catch null) orelse {
+                const entry = (self.iter.?.next(self.io) catch null) orelse {
                     // Finished this directory; advance state.
-                    if (self.dir) |*d| d.close();
+                    if (self.dir) |*d| d.close(self.io);
                     self.dir = null;
                     self.iter = null;
                     self.state = switch (self.state) {
@@ -1020,11 +1044,7 @@ pub const Windows = struct {
         /// Windows install but we just skip the directory rather than
         /// falling back to a hardcoded drive letter.
         fn systemFontsPath(self: *DiscoverIterator) ?[:0]const u8 {
-            const systemroot = std.process.getEnvVarOwned(
-                self.alloc,
-                "SYSTEMROOT",
-            ) catch return null;
-            defer self.alloc.free(systemroot);
+            const systemroot = self.env.get("SYSTEMROOT") orelse return null;
             return std.fmt.allocPrintSentinel(
                 self.alloc,
                 "{s}\\Fonts",
@@ -1034,11 +1054,7 @@ pub const Windows = struct {
         }
 
         fn userFontsPath(self: *DiscoverIterator) ?[:0]const u8 {
-            const local_appdata = std.process.getEnvVarOwned(
-                self.alloc,
-                "LOCALAPPDATA",
-            ) catch return null;
-            defer self.alloc.free(local_appdata);
+            const local_appdata = self.env.get("LOCALAPPDATA") orelse return null;
             return std.fmt.allocPrintSentinel(
                 self.alloc,
                 "{s}\\Microsoft\\Windows\\Fonts",
@@ -1057,7 +1073,7 @@ pub const Windows = struct {
                 .done => return null,
             };
 
-            var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+            var path_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
             const full_path = std.fmt.bufPrintZ(
                 &path_buf,
                 "{s}\\{s}",
@@ -1071,6 +1087,7 @@ pub const Windows = struct {
             var face_index: i32 = 0;
             while (face_index < max_faces) : (face_index += 1) {
                 var face = Face.initFile(
+                    self.io,
                     self.lib,
                     full_path,
                     face_index,
@@ -1166,8 +1183,10 @@ test "fontconfig" {
 
     var lib = try Library.init(alloc);
     defer lib.deinit();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
-    var fc = Fontconfig.init(lib);
+    var fc = Fontconfig.init(lib, testing.io, &env);
     defer fc.deinit();
     var it = try fc.discover(alloc, .{ .family = "monospace", .size = 12 });
     defer it.deinit();
@@ -1181,8 +1200,10 @@ test "fontconfig codepoint" {
 
     var lib = try Library.init(alloc);
     defer lib.deinit();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
-    var fc = Fontconfig.init(lib);
+    var fc = Fontconfig.init(lib, testing.io, &env);
     defer fc.deinit();
     var it = try fc.discover(alloc, .{ .codepoint = 'A', .size = 12 });
     defer it.deinit();
@@ -1335,8 +1356,10 @@ test "windows" {
 
     var lib = try Library.init(alloc);
     defer lib.deinit();
+    var env = try testing.environ.createMap(alloc);
+    defer env.deinit();
 
-    var win = Windows.init(lib);
+    var win = Windows.init(lib, testing.io, &env);
     defer win.deinit();
 
     // Arial ships on every stock Windows install.

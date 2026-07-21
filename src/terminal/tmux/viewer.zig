@@ -15,6 +15,13 @@ const output = @import("output.zig");
 
 const log = std.log.scoped(.terminal_tmux_viewer);
 
+fn testEnv() *std.process.Environ.Map {
+    const Env = struct {
+        var map: std.process.Environ.Map = .init(std.testing.allocator);
+    };
+    return &Env.map;
+}
+
 // TODO: A list of TODOs as I think about them.
 // - We need to make startup more robust so session and block can happen
 //   out of order.
@@ -159,6 +166,10 @@ pub const Viewer = struct {
     /// Allocator used for all internal state.
     alloc: Allocator,
 
+    /// IO and environment needed for Terminal.init.
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+
     /// Current state of the state machine.
     state: State,
 
@@ -265,13 +276,19 @@ pub const Viewer = struct {
     ///
     /// The given allocator is used for all internal state. You must
     /// call deinit when you're done with the viewer to free it.
-    pub fn init(alloc: Allocator) Allocator.Error!Viewer {
+    pub fn init(
+        alloc: Allocator,
+        io: std.Io,
+        env: *const std.process.Environ.Map,
+    ) Allocator.Error!Viewer {
         // Create our initial command queue
         var command_queue: CommandQueue = try .init(alloc, COMMAND_QUEUE_INITIAL);
         errdefer command_queue.deinit(alloc);
 
         return .{
             .alloc = alloc,
+            .io = io,
+            .env = env,
             .state = .startup_block,
             // The default value here is meaningless. We don't get started
             // until we receive a session-changed notification which will
@@ -640,6 +657,8 @@ pub const Viewer = struct {
         }
         for (windows) |window| try initLayout(
             self.alloc,
+            self.io,
+            self.env,
             &self.panes,
             &panes,
             window.layout,
@@ -723,7 +742,11 @@ pub const Viewer = struct {
         session_id: usize,
     ) (Allocator.Error || std.Io.Writer.Error)!void {
         // Build up a new viewer. Its the easiest way to reset ourselves.
-        var replacement: Viewer = try .init(self.alloc);
+        var replacement: Viewer = try .init(
+            self.alloc,
+            self.io,
+            self.env,
+        );
         errdefer replacement.deinit();
 
         // Our actions must start out empty so we don't mix arenas
@@ -1116,6 +1139,8 @@ pub const Viewer = struct {
 
     fn initLayout(
         gpa_alloc: Allocator,
+        io: std.Io,
+        env: *const std.process.Environ.Map,
         panes_old: *const PanesMap,
         panes_new: *PanesMap,
         layout: Layout,
@@ -1126,6 +1151,8 @@ pub const Viewer = struct {
                 for (layouts) |l| {
                     try initLayout(
                         gpa_alloc,
+                        io,
+                        env,
                         panes_old,
                         panes_new,
                         l,
@@ -1135,9 +1162,14 @@ pub const Viewer = struct {
 
             // A leaf! Initialize.
             .pane => |id| pane: {
-                const gop = try panes_new.getOrPut(gpa_alloc, id);
+                const gop = try panes_new.getOrPut(
+                    gpa_alloc,
+                    id,
+                );
                 if (gop.found_existing) break :pane;
-                errdefer _ = panes_new.swapRemove(gop.key_ptr.*);
+                errdefer _ = panes_new.swapRemove(
+                    gop.key_ptr.*,
+                );
 
                 // If we already have this pane, it is already initialized
                 // so just copy it over.
@@ -1146,13 +1178,18 @@ pub const Viewer = struct {
                     break :pane;
                 }
 
-                // TODO: We need to gracefully handle overflow of our
-                // max cols/width here. In practice we shouldn't hit this
+                // TODO: We need to gracefully handle overflow of our max
+                // cols/width here. In practice we shouldn't hit this
                 // so we cast but its not safe.
-                var t: Terminal = try .init(gpa_alloc, .{
-                    .cols = @intCast(layout.width),
-                    .rows = @intCast(layout.height),
-                });
+                var t: Terminal = try .init(
+                    gpa_alloc,
+                    io,
+                    env,
+                    .{
+                        .cols = @intCast(layout.width),
+                        .rows = @intCast(layout.height),
+                    },
+                );
                 errdefer t.deinit(gpa_alloc);
 
                 gop.value_ptr.* = .{
@@ -1494,7 +1531,7 @@ fn testViewer(viewer: *Viewer, steps: []const TestStep) !void {
 }
 
 test "immediate exit" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -1514,7 +1551,7 @@ test "immediate exit" {
 }
 
 test "session changed resets state" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -1605,7 +1642,7 @@ test "session changed resets state" {
 }
 
 test "initial flow" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -1786,7 +1823,7 @@ test "initial flow" {
 }
 
 test "layout change" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -1857,7 +1894,7 @@ test "layout change" {
 }
 
 test "layout_change does not return command when queue not empty" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -1918,7 +1955,7 @@ test "layout_change does not return command when queue not empty" {
 }
 
 test "layout_change returns command when queue was empty" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -1985,7 +2022,7 @@ test "layout_change returns command when queue was empty" {
 }
 
 test "window_add queues list_windows when queue empty" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -2046,7 +2083,7 @@ test "window_add queues list_windows when queue empty" {
 }
 
 test "window_add queues list_windows when queue not empty" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{
@@ -2102,7 +2139,7 @@ test "window_add queues list_windows when queue not empty" {
 }
 
 test "two pane flow with pane state" {
-    var viewer = try Viewer.init(testing.allocator);
+    var viewer = try Viewer.init(testing.allocator, testing.io, testEnv());
     defer viewer.deinit();
 
     try testViewer(&viewer, &.{

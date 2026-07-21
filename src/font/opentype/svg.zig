@@ -25,23 +25,22 @@ pub const SVG = struct {
         EndOfStream,
         SVGVersionNotSupported,
     }!SVG {
-        var fbs = std.io.fixedBufferStream(data);
-        const reader = fbs.reader();
+        var reader: std.Io.Reader = .fixed(data);
 
         // Version
-        if (try reader.readInt(u16, .big) != 0) {
+        if (try takeInt(&reader, u16) != 0) {
             return error.SVGVersionNotSupported;
         }
 
         // Offset
-        const offset = try reader.readInt(u32, .big);
+        const offset = try takeInt(&reader, u32);
 
         // Seek to the offset to get our document list
-        try fbs.seekTo(offset);
+        reader.seek = offset;
 
         // Get our document records along with the start/end glyph range.
-        const len = try reader.readInt(u16, .big);
-        const records: [*]const [12]u8 = @ptrCast(data[try fbs.getPos()..]);
+        const len = try takeInt(&reader, u16);
+        const records: [*]const [12]u8 = @ptrCast(data[reader.seek..]);
         const start_range = try glyphRange(&records[0]);
         const end_range = if (len == 1) start_range else try glyphRange(&records[(len - 1)]);
 
@@ -84,11 +83,17 @@ pub const SVG = struct {
     }
 
     fn glyphRange(record: []const u8) !struct { u16, u16 } {
-        var fbs = std.io.fixedBufferStream(record);
-        const reader = fbs.reader();
+        var reader: std.Io.Reader = .fixed(record);
         return .{
-            try reader.readInt(u16, .big),
-            try reader.readInt(u16, .big),
+            try takeInt(&reader, u16),
+            try takeInt(&reader, u16),
+        };
+    }
+
+    fn takeInt(reader: *std.Io.Reader, comptime T: type) error{EndOfStream}!T {
+        return reader.takeInt(T, .big) catch |err| switch (err) {
+            error.ReadFailed => unreachable,
+            error.EndOfStream => return error.EndOfStream,
         };
     }
 };
@@ -101,7 +106,7 @@ test "SVG" {
     var lib = try font.Library.init(alloc);
     defer lib.deinit();
 
-    var face = try font.Face.init(lib, testFont, .{ .size = .{ .points = 12 } });
+    var face = try font.Face.init(std.testing.io, lib, testFont, .{ .size = .{ .points = 12 } });
     defer face.deinit();
 
     const table = (try face.copyTable(alloc, "SVG ")).?;

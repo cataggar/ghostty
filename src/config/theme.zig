@@ -1,5 +1,4 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const global_state = &@import("../global.zig").state;
 const internal_os = @import("../os/main.zig");
@@ -23,28 +22,23 @@ pub const Location = enum {
     pub fn dir(
         self: Location,
         arena_alloc: Allocator,
+        io: std.Io,
+        env: *const std.process.Environ.Map,
     ) error{OutOfMemory}!?[]const u8 {
         return switch (self) {
             .user => user: {
-                const subdir = std.fs.path.join(arena_alloc, &.{
+                const subdir = std.Io.Dir.path.join(arena_alloc, &.{
                     "ghostty", "themes",
                 }) catch return error.OutOfMemory;
 
                 break :user internal_os.xdg.config(
                     arena_alloc,
+                    io,
+                    env,
                     .{ .subdir = subdir },
                 ) catch |err| {
-                    // We need to do some comptime tricks to get the right
-                    // error set since some platforms don't support some
-                    // error types.
-                    const Error = @TypeOf(err) || switch (builtin.os.tag) {
-                        .ios => error{BufferTooSmall},
-                        else => error{},
-                    };
-
-                    switch (@as(Error, err)) {
+                    switch (err) {
                         error.OutOfMemory => return error.OutOfMemory,
-                        error.BufferTooSmall => return error.OutOfMemory,
 
                         // Any other error we treat as the XDG directory not
                         // existing. Windows in particularly can return a LOT
@@ -54,7 +48,7 @@ pub const Location = enum {
                 };
             },
 
-            .resources => try std.fs.path.join(arena_alloc, &.{
+            .resources => try std.Io.Dir.path.join(arena_alloc, &.{
                 global_state.resources_dir.app() orelse return null,
                 "themes",
             }),
@@ -69,6 +63,8 @@ pub const LocationIterator = struct {
     /// similar allocator implementation) should be used. It may not be safe to
     /// free the returned allocations.
     arena_alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     i: usize = 0,
 
     pub fn next(self: *LocationIterator) !?struct {
@@ -79,7 +75,7 @@ pub const LocationIterator = struct {
         while (self.i < max) {
             const location: Location = @enumFromInt(self.i);
             self.i += 1;
-            if (try location.dir(self.arena_alloc)) |dir|
+            if (try location.dir(self.arena_alloc, self.io, self.env)) |dir|
                 return .{
                     .location = location,
                     .dir = dir,
@@ -109,20 +105,23 @@ pub const LocationIterator = struct {
 /// will be added to the list and null will be returned.
 pub fn open(
     arena_alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     theme: []const u8,
     diags: *cli.DiagnosticList,
 ) error{OutOfMemory}!?struct {
     path: []const u8,
-    file: std.fs.File,
+    file: std.Io.File,
 } {
     // Absolute themes are loaded a different path.
-    if (std.fs.path.isAbsolute(theme)) {
-        const file: std.fs.File = try openAbsolute(
+    if (std.Io.Dir.path.isAbsolute(theme)) {
+        const file = try openAbsolute(
             arena_alloc,
+            io,
             theme,
             diags,
         ) orelse return null;
-        const stat = file.stat() catch |err| {
+        const stat = file.stat(io) catch |err| {
             try diags.append(arena_alloc, .{
                 .message = try std.fmt.allocPrintSentinel(
                     arena_alloc,
@@ -150,7 +149,7 @@ pub fn open(
         return .{ .path = theme, .file = file };
     }
 
-    const basename = std.fs.path.basename(theme);
+    const basename = std.Io.Dir.path.basename(theme);
     if (!std.mem.eql(u8, theme, basename)) {
         try diags.append(arena_alloc, .{
             .message = try std.fmt.allocPrintSentinel(
@@ -165,12 +164,16 @@ pub fn open(
 
     // Iterate over the possible locations to try to find the
     // one that exists.
-    var it: LocationIterator = .{ .arena_alloc = arena_alloc };
-    const cwd = std.fs.cwd();
+    var it: LocationIterator = .{
+        .arena_alloc = arena_alloc,
+        .io = io,
+        .env = env,
+    };
+    const cwd: std.Io.Dir = .cwd();
     while (try it.next()) |loc| {
-        const path = try std.fs.path.join(arena_alloc, &.{ loc.dir, theme });
-        if (cwd.openFile(path, .{})) |file| {
-            const stat = file.stat() catch |err| {
+        const path = try std.Io.Dir.path.join(arena_alloc, &.{ loc.dir, theme });
+        if (cwd.openFile(io, path, .{})) |file| {
+            const stat = file.stat(io) catch |err| {
                 try diags.append(arena_alloc, .{
                     .message = try std.fmt.allocPrintSentinel(
                         arena_alloc,
@@ -225,7 +228,7 @@ pub fn open(
     // fine.
     it.reset();
     while (try it.next()) |loc| {
-        const path = try std.fs.path.join(arena_alloc, &.{ loc.dir, theme });
+        const path = try std.Io.Dir.path.join(arena_alloc, &.{ loc.dir, theme });
         try diags.append(arena_alloc, .{
             .message = try std.fmt.allocPrintSentinel(
                 arena_alloc,
@@ -249,10 +252,11 @@ pub fn open(
 /// free the returned allocations.
 pub fn openAbsolute(
     arena_alloc: Allocator,
+    io: std.Io,
     theme: []const u8,
     diags: *cli.DiagnosticList,
-) error{OutOfMemory}!?std.fs.File {
-    return std.fs.openFileAbsolute(theme, .{}) catch |err| {
+) error{OutOfMemory}!?std.Io.File {
+    return std.Io.Dir.openFileAbsolute(io, theme, .{}) catch |err| {
         switch (err) {
             error.FileNotFound => try diags.append(arena_alloc, .{
                 .message = try std.fmt.allocPrintSentinel(

@@ -75,6 +75,7 @@ const log = std.log.scoped(.@"page-compression-bench");
 const max_data_size = 64 * 1024 * 1024;
 
 alloc: Allocator,
+io: std.Io,
 opts: Options,
 
 /// Complete contents of the input corpus. Individual pages are slices into
@@ -159,11 +160,15 @@ const Encoded = struct {
 /// `setup` so construction is cheap and follows the other benchmarks.
 pub fn create(
     alloc: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
     opts: Options,
 ) !*PageCompression {
+    _ = env;
     const ptr = try alloc.create(PageCompression);
     ptr.* = .{
         .alloc = alloc,
+        .io = io,
         .opts = opts,
     };
     return ptr;
@@ -209,10 +214,15 @@ fn setupData(self: *PageCompression) !void {
     if (self.opts.mode == .store and self.opts.@"retained-pages" == 0)
         return error.InvalidRetainedPages;
 
-    const data_file = try options.dataFile(self.opts.data) orelse return;
-    defer data_file.close();
+    const data_file = try options.dataFile(self.io, self.opts.data) orelse return;
+    defer data_file.close(self.io);
 
-    self.data = try data_file.readToEndAlloc(self.alloc, max_data_size);
+    var read_buf: [4096]u8 = undefined;
+    var file_reader = data_file.reader(self.io, &read_buf);
+    self.data = try file_reader.interface.allocRemaining(
+        self.alloc,
+        .limited(max_data_size),
+    );
     errdefer {
         self.alloc.free(self.data);
         self.data = &.{};
@@ -481,17 +491,21 @@ fn percentage(part: usize, whole: usize) f64 {
 
 test PageCompression {
     const testing = std.testing;
-    const impl: *PageCompression = try .create(testing.allocator, .{});
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
+    const impl: *PageCompression = try .create(testing.allocator, testing.io, &env, .{});
     defer impl.destroy(testing.allocator);
 
     const bench = impl.benchmark();
-    _ = try bench.run(.once);
+    _ = try bench.run(std.testing.io, .once);
 }
 
 test "PageCompression store retains exact encoded allocations" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
     const page_size = 1024;
-    const impl: *PageCompression = try .create(testing.allocator, .{
+    const impl: *PageCompression = try .create(testing.allocator, testing.io, &env, .{
         .mode = .store,
         .@"page-size" = page_size,
         .@"retained-pages" = 2,

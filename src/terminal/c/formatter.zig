@@ -400,7 +400,7 @@ test "format vt" {
     var written: usize = 0;
     try testing.expectEqual(Result.success, format_buf(f, &buf, buf.len, &written));
     try testing.expect(written > 0);
-    try testing.expect(std.mem.indexOf(u8, buf[0..written], "Test") != null);
+    try testing.expect(std.mem.find(u8, buf[0..written], "Test") != null);
 }
 
 test "format plain with selection" {
@@ -471,5 +471,5 @@ test "format html" {
     var written: usize = 0;
     try testing.expectEqual(Result.success, format_buf(f, &buf, buf.len, &written));
     try testing.expect(written > 0);
-    try testing.expect(std.mem.indexOf(u8, buf[0..written], "Html") != null);
+    try testing.expect(std.mem.find(u8, buf[0..written], "Html") != null);
 }

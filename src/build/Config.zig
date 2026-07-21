@@ -39,6 +39,8 @@ wasm_shared: bool = true,
 exe_entrypoint: ExeEntrypoint = .ghostty,
 version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
 lib_version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
+gtk_version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
+adw_version: std.SemanticVersion = .{ .major = 0, .minor = 0, .patch = 0 },
 
 /// Binary properties
 pie: bool = false,
@@ -65,9 +67,6 @@ emit_unicode_table_gen: bool = false,
 /// True when Ghostty is being built as a dependency of another project
 /// rather than as the root project.
 is_dep: bool = false,
-
-/// Environmental properties
-env: std.process.EnvMap,
 
 pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Config {
     // Setup our standard Zig target and optimize options, i.e.
@@ -123,17 +122,15 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
     // to run even on non-Linux platforms because any failures result in
     // defaults.
     const gtk_targets = gtk.targets(b);
-
-    // We use env vars throughout the build so we grab them immediately here.
-    var env = try std.process.getEnvMap(b.allocator);
-    errdefer env.deinit();
+    const gtk_versions = gtk.versions(b);
 
     var config: Config = .{
         .optimize = optimize,
         .target = target,
         .wasm_target = wasm_target,
         .is_dep = is_dep,
-        .env = env,
+        .gtk_version = gtk_versions.gtk,
+        .adw_version = gtk_versions.adwaita,
     };
 
     //---------------------------------------------------------------
@@ -327,8 +324,8 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
 
         // If we're in a nix shell we default to doing this.
         // Note: we purposely never deinit envmap because we leak the strings
-        if (env.get("IN_NIX_SHELL") == null) break :patch_rpath null;
-        break :patch_rpath env.get("LD_LIBRARY_PATH");
+        if (b.graph.environ_map.get("IN_NIX_SHELL") == null) break :patch_rpath null;
+        break :patch_rpath b.graph.environ_map.get("LD_LIBRARY_PATH");
     };
 
     config.pie = b.option(
@@ -401,8 +398,12 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
         if (system_package) break :emit_docs true;
 
         // We only default to true if we can find pandoc.
-        const path = expandPath(b.allocator, "pandoc") catch
-            break :emit_docs false;
+        const path = expandPath(
+            b.graph.io,
+            b.allocator,
+            &b.graph.environ_map,
+            "pandoc",
+        ) catch break :emit_docs false;
         defer if (path) |p| b.allocator.free(p);
         break :emit_docs path != null;
     };
@@ -444,22 +445,13 @@ pub fn init(b: *std.Build, appVersion: []const u8, libVersion: []const u8) !Conf
         bool,
         "emit-xcframework",
         "Build and install the xcframework for the macOS library.",
-    ) orelse emit_xcfw: {
-        if (!builtin.target.os.tag.isDarwin() or target.result.os.tag != .macos)
-            break :emit_xcfw false;
-        if (config.emit_lib_vt) {
-            // In lib-vt mode default to whether xcodebuild is available,
-            // since xcodebuild is required to produce the XCFramework.
-            const path = expandPath(b.allocator, "xcodebuild") catch
-                break :emit_xcfw false;
-            defer if (path) |p| b.allocator.free(p);
-            break :emit_xcfw path != null;
-        }
-        break :emit_xcfw config.app_runtime == .none and
-            (!config.emit_bench and
-                !config.emit_test_exe and
-                !config.emit_helpgen);
-    };
+    ) orelse !config.emit_lib_vt and
+        builtin.target.os.tag.isDarwin() and
+        target.result.os.tag == .macos and
+        config.app_runtime == .none and
+        (!config.emit_bench and
+            !config.emit_test_exe and
+            !config.emit_helpgen);
 
     config.emit_macos_app = b.option(
         bool,
@@ -539,6 +531,8 @@ pub fn addOptions(self: *const Config, step: *std.Build.Step.Options) !void {
     step.addOption(ExeEntrypoint, "exe_entrypoint", self.exe_entrypoint);
     step.addOption(WasmTarget, "wasm_target", self.wasm_target);
     step.addOption(bool, "wasm_shared", self.wasm_shared);
+    step.addOption(std.SemanticVersion, "gtk_version", self.gtk_version);
+    step.addOption(std.SemanticVersion, "adw_version", self.adw_version);
 
     // Our version. We also add the string version so we don't need
     // to do any allocations at runtime. This has to be long enough to
@@ -591,7 +585,7 @@ pub fn terminalOptions(self: *const Config, artifact: TerminalBuildOptions.Artif
 }
 
 /// Returns a baseline CPU target retaining all the other CPU configs.
-pub fn baselineTarget(self: *const Config) std.Build.ResolvedTarget {
+pub fn baselineTarget(self: *const Config, b: *std.Build) std.Build.ResolvedTarget {
     // Set our cpu model as baseline. There may need to be other modifications
     // we need to make such as resetting CPU features but for now this works.
     var q = self.target.query;
@@ -601,7 +595,7 @@ pub fn baselineTarget(self: *const Config) std.Build.ResolvedTarget {
     // handle the native case.
     return .{
         .query = q,
-        .result = std.zig.system.resolveTargetQuery(q) catch
+        .result = std.zig.system.resolveTargetQuery(b.graph.io, q) catch
             @panic("unable to resolve baseline query"),
     };
 }
@@ -615,7 +609,6 @@ pub fn fromOptions() Config {
         // Unused at runtime.
         .optimize = undefined,
         .target = undefined,
-        .env = undefined,
 
         .version = options.app_version,
         .flatpak = options.flatpak,

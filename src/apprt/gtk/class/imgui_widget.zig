@@ -13,6 +13,7 @@ const gresource = @import("../build/gresource.zig");
 
 const key = @import("../key.zig");
 const Common = @import("../class.zig").Common;
+const Application = @import("application.zig").Application;
 
 const log = std.log.scoped(.gtk_ghostty_imgui_widget);
 
@@ -61,13 +62,13 @@ pub const ImguiWidget = extern struct {
         ig_context: ?*cimgui.c.ImGuiContext = null,
 
         /// Our previous instant used to calculate delta time for animations.
-        instant: ?std.time.Instant = null,
+        instant: ?std.Io.Timestamp = null,
 
         /// Tick callback ID for timed updates.
         tick_callback_id: c_uint = 0,
 
         /// Last render time for throttling to 30 FPS.
-        last_render_time: ?std.time.Instant = null,
+        last_render_time: ?std.Io.Timestamp = null,
 
         pub var offset: c_int = 0;
     };
@@ -141,9 +142,9 @@ pub const ImguiWidget = extern struct {
         const io: *cimgui.c.ImGuiIO = cimgui.c.ImGui_GetIO();
 
         // Determine our delta time
-        const now = std.time.Instant.now() catch unreachable;
+        const now = std.Io.Timestamp.now(Application.default().core().io, .awake);
         io.DeltaTime = if (priv.instant) |prev| delta: {
-            const since_ns: f64 = @floatFromInt(now.since(prev));
+            const since_ns: f64 = @floatFromInt(prev.durationTo(now).nanoseconds);
             const ns_per_s: f64 = @floatFromInt(std.time.ns_per_s);
             const since_s: f32 = @floatCast(since_ns / ns_per_s);
             break :delta @max(0.00001, since_s);
@@ -298,7 +299,7 @@ pub const ImguiWidget = extern struct {
 
         // Update last render time for tick callback throttling.
         const priv = self.private();
-        priv.last_render_time = std.time.Instant.now() catch null;
+        priv.last_render_time = std.Io.Timestamp.now(Application.default().core().io, .awake);
 
         // Setup our frame. We render twice because some ImGui behaviors
         // take multiple renders to process. I don't know how to make this
@@ -457,15 +458,12 @@ pub const ImguiWidget = extern struct {
         const self: *Self = gobject.ext.cast(Self, widget) orelse return 0;
         const priv = self.private();
 
-        const now = std.time.Instant.now() catch {
-            self.queueRender();
-            return 1;
-        };
+        const now = std.Io.Timestamp.now(Application.default().core().io, .awake);
 
         // Throttle to 30 FPS (~33ms between frames)
         const frame_time_ns: u64 = std.time.ns_per_s / 30;
         const should_render = if (priv.last_render_time) |last|
-            now.since(last) >= frame_time_ns
+            last.durationTo(now).nanoseconds >= frame_time_ns
         else
             true;
 

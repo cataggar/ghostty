@@ -2,9 +2,9 @@ const GhosttyLib = @This();
 
 const std = @import("std");
 const RunStep = std.Build.Step.Run;
-const CombineArchivesStep = @import("CombineArchivesStep.zig");
 const Config = @import("Config.zig");
 const SharedDeps = @import("SharedDeps.zig");
+const LibtoolStep = @import("LibtoolStep.zig");
 const LipoStep = @import("LipoStep.zig");
 
 /// The step that generates the file.
@@ -29,12 +29,12 @@ pub fn initStatic(
             .strip = deps.config.strip,
             .omit_frame_pointer = deps.config.strip,
             .unwind_tables = if (deps.config.strip) .none else .sync,
+            .link_libc = true,
         }),
 
         // Fails on self-hosted x86_64 on macOS
         .use_llvm = true,
     });
-    lib.linkLibC();
 
     // These must be bundled since we're compiling into a static lib.
     // Otherwise, you get undefined symbol errors.
@@ -48,18 +48,29 @@ pub fn initStatic(
     }
 
     // Add our dependencies. Get the list of all static deps so we can
-    // build a combined archive.
+    // build a combined archive if necessary.
     var lib_list = try deps.add(lib);
     try lib_list.append(b.allocator, lib.getEmittedBin());
 
-    // Combine all archives into a single fat static library so
-    // consumers only need to link one file.
-    const combined = CombineArchivesStep.create(b, deps.config.target, "ghostty-internal", lib_list.items);
-    combined.step.dependOn(&lib.step);
+    if (!deps.config.target.result.os.tag.isDarwin()) return .{
+        .step = &lib.step,
+        .output = lib.getEmittedBin(),
+        .dsym = null,
+        .pkg_config = null,
+        .pkg_config_static = null,
+    };
+
+    // Create a static lib that contains all our dependencies.
+    const libtool = LibtoolStep.create(b, .{
+        .name = "ghostty",
+        .out_name = "libghostty-fat.a",
+        .sources = lib_list.items,
+    });
+    libtool.step.dependOn(&lib.step);
 
     return .{
-        .step = combined.step,
-        .output = combined.output,
+        .step = libtool.step,
+        .output = libtool.output,
 
         // Static libraries cannot have dSYMs because they aren't linked.
         .dsym = null,
@@ -99,12 +110,17 @@ pub fn initShared(
     {
         // The CRT initialization code in msvcrt.lib calls __vcrt_initialize
         // and __acrt_initialize, which are in the static CRT libraries.
-        lib.linkSystemLibrary("libvcruntime");
+        lib.root_module.linkSystemLibrary("libvcruntime", .{});
 
         // ucrt.lib is in the Windows SDK 'ucrt' dir. Detect the SDK
         // installation and add the UCRT library path.
         const arch = deps.config.target.result.cpu.arch;
-        const sdk = std.zig.WindowsSdk.find(b.allocator, arch) catch null;
+        const sdk = std.zig.WindowsSdk.find(
+            b.allocator,
+            b.graph.io,
+            arch,
+            &b.graph.environ_map,
+        ) catch null;
         if (sdk) |s| {
             if (s.windows10sdk) |w10| {
                 const arch_str: []const u8 = switch (arch) {
@@ -120,11 +136,11 @@ pub fn initShared(
                 ) catch null;
 
                 if (ucrt_lib_path) |path| {
-                    lib.addLibraryPath(.{ .cwd_relative = path });
+                    lib.root_module.addLibraryPath(.{ .cwd_relative = path });
                 }
             }
         }
-        lib.linkSystemLibrary("libucrt");
+        lib.root_module.linkSystemLibrary("libucrt", .{});
     }
 
     // Get our debug symbols

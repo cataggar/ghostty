@@ -39,11 +39,12 @@ pub const Backend = union(Kind) {
     pub fn threadEnter(
         self: *Backend,
         alloc: Allocator,
+        stdio: std.Io,
         io: *termio.Termio,
         td: *termio.Termio.ThreadData,
     ) !void {
         switch (self.*) {
-            .exec => |*exec| try exec.threadEnter(alloc, io, td),
+            .exec => |*exec| try exec.threadEnter(alloc, stdio, io, td),
         }
     }
 

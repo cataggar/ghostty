@@ -1,21 +1,10 @@
 const std = @import("std");
-
-// Until the gobject bindings are built at the same time we are building
-// Ghostty, we need to import `gtk/gtk.h` directly to ensure that the version
-// macros match the version of `gtk4` that we are building/linking against.
-const c = @cImport({
-    @cInclude("gtk/gtk.h");
-});
-
+const build_options = @import("build_options");
 const gtk = @import("gtk");
 
 const log = std.log.scoped(.gtk);
 
-pub const comptime_version: std.SemanticVersion = .{
-    .major = c.GTK_MAJOR_VERSION,
-    .minor = c.GTK_MINOR_VERSION,
-    .patch = c.GTK_MICRO_VERSION,
-};
+pub const comptime_version = build_options.gtk_version;
 
 pub fn getRuntimeVersion() std.SemanticVersion {
     return .{
@@ -47,9 +36,9 @@ pub fn logVersion() void {
 /// This is inlined so that the comptime checks will disable the runtime checks
 /// if the comptime checks fail.
 pub inline fn atLeast(
-    comptime major: u16,
-    comptime minor: u16,
-    comptime micro: u16,
+    comptime major: usize,
+    comptime minor: usize,
+    comptime micro: usize,
 ) bool {
     // If our header has lower versions than the given version,
     // we can return false immediately. This prevents us from
@@ -73,11 +62,11 @@ pub inline fn atLeast(
 /// is affected by the version check. For checks which would affect code
 /// generation, use `atLeast`.
 pub inline fn runtimeAtLeast(
-    comptime major: u16,
-    comptime minor: u16,
-    comptime micro: u16,
+    major: usize,
+    minor: usize,
+    micro: usize,
 ) bool {
-    // We use the functions instead of the constants such as c.GTK_MINOR_VERSION
+    // We use the functions instead of the compile-time version
     // because the function gets the actual runtime version.
     const runtime_version = getRuntimeVersion();
     return runtime_version.order(.{
@@ -88,9 +77,9 @@ pub inline fn runtimeAtLeast(
 }
 
 pub inline fn runtimeUntil(
-    comptime major: u16,
-    comptime minor: u16,
-    comptime micro: u16,
+    major: usize,
+    minor: usize,
+    micro: usize,
 ) bool {
     const runtime_version = getRuntimeVersion();
     return runtime_version.order(.{
@@ -103,38 +92,67 @@ pub inline fn runtimeUntil(
 test "atLeast" {
     const testing = std.testing;
 
-    const funs = &.{ atLeast, runtimeAtLeast };
-    inline for (funs) |fun| {
-        try testing.expect(fun(c.GTK_MAJOR_VERSION, c.GTK_MINOR_VERSION, c.GTK_MICRO_VERSION));
+    try testing.expect(comptime atLeast(
+        comptime_version.major,
+        comptime_version.minor,
+        comptime_version.patch,
+    ));
+    try testing.expect(!comptime atLeast(comptime_version.major, comptime_version.minor, comptime_version.patch + 1));
+    try testing.expect(!comptime atLeast(comptime_version.major, comptime_version.minor + 1, comptime_version.patch));
+    try testing.expect(!comptime atLeast(comptime_version.major + 1, comptime_version.minor, comptime_version.patch));
 
-        try testing.expect(!fun(c.GTK_MAJOR_VERSION, c.GTK_MINOR_VERSION, c.GTK_MICRO_VERSION + 1));
-        try testing.expect(!fun(c.GTK_MAJOR_VERSION, c.GTK_MINOR_VERSION + 1, c.GTK_MICRO_VERSION));
-        try testing.expect(!fun(c.GTK_MAJOR_VERSION + 1, c.GTK_MINOR_VERSION, c.GTK_MICRO_VERSION));
-
-        try testing.expect(fun(c.GTK_MAJOR_VERSION - 1, c.GTK_MINOR_VERSION, c.GTK_MICRO_VERSION));
-        try testing.expect(fun(c.GTK_MAJOR_VERSION - 1, c.GTK_MINOR_VERSION + 1, c.GTK_MICRO_VERSION));
-        try testing.expect(fun(c.GTK_MAJOR_VERSION - 1, c.GTK_MINOR_VERSION, c.GTK_MICRO_VERSION + 1));
-
-        try testing.expect(fun(c.GTK_MAJOR_VERSION, c.GTK_MINOR_VERSION - 1, c.GTK_MICRO_VERSION + 1));
+    if (comptime_version.major > 0) {
+        try testing.expect(comptime atLeast(comptime_version.major - 1, comptime_version.minor, comptime_version.patch));
+        try testing.expect(comptime atLeast(comptime_version.major - 1, comptime_version.minor + 1, comptime_version.patch));
+        try testing.expect(comptime atLeast(comptime_version.major - 1, comptime_version.minor, comptime_version.patch + 1));
     }
+
+    if (comptime_version.minor > 0)
+        try testing.expect(comptime atLeast(comptime_version.major, comptime_version.minor - 1, comptime_version.patch + 1));
+}
+
+test "runtimeAtLeast" {
+    const testing = std.testing;
+    const runtime_version = getRuntimeVersion();
+
+    try testing.expect(runtimeAtLeast(
+        runtime_version.major,
+        runtime_version.minor,
+        runtime_version.patch,
+    ));
+    try testing.expect(!runtimeAtLeast(runtime_version.major, runtime_version.minor, runtime_version.patch + 1));
+    try testing.expect(!runtimeAtLeast(runtime_version.major, runtime_version.minor + 1, runtime_version.patch));
+    try testing.expect(!runtimeAtLeast(runtime_version.major + 1, runtime_version.minor, runtime_version.patch));
+
+    if (runtime_version.major > 0) {
+        try testing.expect(runtimeAtLeast(runtime_version.major - 1, runtime_version.minor, runtime_version.patch));
+        try testing.expect(runtimeAtLeast(runtime_version.major - 1, runtime_version.minor + 1, runtime_version.patch));
+        try testing.expect(runtimeAtLeast(runtime_version.major - 1, runtime_version.minor, runtime_version.patch + 1));
+    }
+
+    if (runtime_version.minor > 0)
+        try testing.expect(runtimeAtLeast(runtime_version.major, runtime_version.minor - 1, runtime_version.patch + 1));
 }
 
 test "runtimeUntil" {
     const testing = std.testing;
+    const runtime_version = getRuntimeVersion();
 
-    // This is an array in case we add a comptime variant.
-    const funs = &.{runtimeUntil};
-    inline for (funs) |fun| {
-        try testing.expect(!fun(c.GTK_MAJOR_VERSION, c.GTK_MINOR_VERSION, c.GTK_MICRO_VERSION));
+    try testing.expect(!runtimeUntil(
+        runtime_version.major,
+        runtime_version.minor,
+        runtime_version.patch,
+    ));
+    try testing.expect(runtimeUntil(runtime_version.major, runtime_version.minor, runtime_version.patch + 1));
+    try testing.expect(runtimeUntil(runtime_version.major, runtime_version.minor + 1, runtime_version.patch));
+    try testing.expect(runtimeUntil(runtime_version.major + 1, runtime_version.minor, runtime_version.patch));
 
-        try testing.expect(fun(c.GTK_MAJOR_VERSION, c.GTK_MINOR_VERSION, c.GTK_MICRO_VERSION + 1));
-        try testing.expect(fun(c.GTK_MAJOR_VERSION, c.GTK_MINOR_VERSION + 1, c.GTK_MICRO_VERSION));
-        try testing.expect(fun(c.GTK_MAJOR_VERSION + 1, c.GTK_MINOR_VERSION, c.GTK_MICRO_VERSION));
-
-        try testing.expect(!fun(c.GTK_MAJOR_VERSION - 1, c.GTK_MINOR_VERSION, c.GTK_MICRO_VERSION));
-        try testing.expect(!fun(c.GTK_MAJOR_VERSION - 1, c.GTK_MINOR_VERSION + 1, c.GTK_MICRO_VERSION));
-        try testing.expect(!fun(c.GTK_MAJOR_VERSION - 1, c.GTK_MINOR_VERSION, c.GTK_MICRO_VERSION + 1));
-
-        try testing.expect(!fun(c.GTK_MAJOR_VERSION, c.GTK_MINOR_VERSION - 1, c.GTK_MICRO_VERSION + 1));
+    if (runtime_version.major > 0) {
+        try testing.expect(!runtimeUntil(runtime_version.major - 1, runtime_version.minor, runtime_version.patch));
+        try testing.expect(!runtimeUntil(runtime_version.major - 1, runtime_version.minor + 1, runtime_version.patch));
+        try testing.expect(!runtimeUntil(runtime_version.major - 1, runtime_version.minor, runtime_version.patch + 1));
     }
+
+    if (runtime_version.minor > 0)
+        try testing.expect(!runtimeUntil(runtime_version.major, runtime_version.minor - 1, runtime_version.patch + 1));
 }

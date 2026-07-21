@@ -5,6 +5,7 @@ const adw = @import("adw");
 const gdk = @import("gdk");
 const gio = @import("gio");
 const glib = @import("glib");
+const glibunix = @import("glibunix");
 const gobject = @import("gobject");
 const gtk = @import("gtk");
 
@@ -23,7 +24,6 @@ const xev = @import("../../../global.zig").xev;
 const Binding = @import("../../../input.zig").Binding;
 const CoreConfig = configpkg.Config;
 const CoreSurface = @import("../../../Surface.zig");
-const lib = @import("../../../lib/main.zig");
 
 const ext = @import("../ext.zig");
 const key = @import("../key.zig");
@@ -44,6 +44,8 @@ const GlobalShortcuts = @import("global_shortcuts.zig").GlobalShortcuts;
 const OpenURI = @import("../portal.zig").OpenURI;
 
 const log = std.log.scoped(.gtk_ghostty_application);
+
+extern fn ghostty_get_resource() ?*gio.Resource;
 
 /// Function used to funnel GLib/GObject/GTK log messages into Zig's logging
 /// system rather than just getting dumped directly to stderr.
@@ -209,7 +211,7 @@ pub const Application = extern struct {
         css_provider: *gtk.CssProvider,
 
         /// Providers for loading custom stylesheets defined by user
-        custom_css_providers: std.ArrayListUnmanaged(*gtk.CssProvider) = .empty,
+        custom_css_providers: std.ArrayList(*gtk.CssProvider) = .empty,
 
         /// A copy of the LANG environment variable that was provided to Ghostty
         /// by the system. If this is null, the LANG environment variable did
@@ -255,7 +257,12 @@ pub const Application = extern struct {
         adw_version.logVersion();
 
         // Load our configuration.
-        var config = CoreConfig.load(alloc) catch |err| err: {
+        var config = CoreConfig.load(
+            alloc,
+            core_app.io,
+            core_app.args,
+            core_app.environ,
+        ) catch |err| err: {
             // If we fail to load the configuration, then we should log
             // the error in the diagnostics so it can be shown to the user.
             // We can still load a default which only fails for OOM, allowing
@@ -273,9 +280,9 @@ pub const Application = extern struct {
 
         const saved_language: ?[:0]const u8 = saved_language: {
             const old_language = old_language: {
-                const result = (internal_os.getenv(alloc, "LANG") catch break :old_language null) orelse break :old_language null;
-                defer result.deinit(alloc);
-                break :old_language alloc.dupeZ(u8, result.value) catch break :old_language null;
+                const env = core_app.environ;
+                const result = env.get("LANG") orelse break :old_language null;
+                break :old_language alloc.dupeZ(u8, result) catch break :old_language null;
             };
 
             if (config.language) |language| _ = internal_os.setenv("LANG", language);
@@ -338,7 +345,7 @@ pub const Application = extern struct {
             // I'm unsure of any scenario where this happens. Because we don't
             // want to litter null checks everywhere, we just exit here.
             log.warn("gdk display is null, exiting", .{});
-            std.posix.exit(1);
+            std.process.exit(1);
         };
 
         // Setup our windowing protocol logic
@@ -540,7 +547,7 @@ pub const Application = extern struct {
         }
 
         // Tell systemd that we are ready.
-        systemd.notify.ready();
+        systemd.notify.ready(priv.core_app.environ);
 
         log.debug("entering runloop", .{});
         defer log.debug("exiting runloop", .{});
@@ -1063,7 +1070,7 @@ pub const Application = extern struct {
         }
     }
 
-    fn loadCustomCss(self: *Self) (std.fs.File.ReadError || Allocator.Error)!void {
+    fn loadCustomCss(self: *Self) std.Io.Reader.LimitedAllocError!void {
         const priv: *Private = self.private();
         const alloc = self.allocator();
         const display = gdk.Display.getDefault() orelse {
@@ -1087,7 +1094,8 @@ pub const Application = extern struct {
                 .optional => |path| .{ path, true },
                 .required => |path| .{ path, false },
             };
-            const file = std.fs.openFileAbsolute(path, .{}) catch |err| {
+            const io = Application.default().core().io;
+            const file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch |err| {
                 if (err != error.FileNotFound or !optional) {
                     log.warn(
                         "error opening gtk-custom-css file {s}: {}",
@@ -1096,16 +1104,18 @@ pub const Application = extern struct {
                 }
                 continue;
             };
-            defer file.close();
+            defer file.close(io);
 
             const css_file_size_limit = 5 * 1024 * 1024; // 5MB
 
             log.info("loading gtk-custom-css path={s}", .{path});
-            const contents = file.readToEndAlloc(
+            var read_buf: [4096]u8 = undefined;
+            var reader = file.reader(io, &read_buf);
+            const contents = reader.interface.allocRemaining(
                 alloc,
-                css_file_size_limit,
+                .limited(css_file_size_limit),
             ) catch |err| switch (err) {
-                error.FileTooBig => {
+                error.StreamTooLong => {
                     log.warn("gtk-custom-css file {s} was larger than {Bi}", .{ path, css_file_size_limit });
                     continue;
                 },
@@ -1400,8 +1410,8 @@ pub const Application = extern struct {
     fn startupSignals(self: *Self) void {
         const priv = self.private();
         assert(priv.signal_source == null);
-        priv.signal_source = glib.unixSignalAdd(
-            std.posix.SIG.USR2,
+        priv.signal_source = glibunix.signalAdd(
+            @intCast(@intFromEnum(std.posix.SIG.USR2)),
             handleSigusr2,
             self,
         );
@@ -1463,7 +1473,7 @@ pub const Application = extern struct {
         const priv = self.private();
         _ = priv.core_app.mailbox.push(.{
             .new_window = .{},
-        }, .{ .forever = {} });
+        }, .{ .forever = {} }, priv.core_app.io);
 
         // Call the parent activate method.
         gio.Application.virtual_methods.activate.call(
@@ -1767,7 +1777,7 @@ pub const Application = extern struct {
                     continue;
                 }
 
-                if (lib.cutPrefix(u8, str, "--command=")) |v| {
+                if (std.mem.cutPrefix(u8, str, "--command=")) |v| {
                     var cmd: configpkg.Command = undefined;
                     cmd.parseCLI(alloc, v) catch |err| {
                         log.warn("unable to parse command: {t}", .{err});
@@ -1776,14 +1786,14 @@ pub const Application = extern struct {
                     command = cmd;
                     continue;
                 }
-                if (lib.cutPrefix(u8, str, "--working-directory=")) |v| {
+                if (std.mem.cutPrefix(u8, str, "--working-directory=")) |v| {
                     working_directory = alloc.dupeZ(u8, std.mem.trim(u8, v, &std.ascii.whitespace)) catch |err| wd: {
                         log.warn("unable to duplicate working directory: {t}", .{err});
                         break :wd null;
                     };
                     continue;
                 }
-                if (lib.cutPrefix(u8, str, "--title=")) |v| {
+                if (std.mem.cutPrefix(u8, str, "--title=")) |v| {
                     title = alloc.dupeZ(u8, std.mem.trim(u8, v, &std.ascii.whitespace)) catch |err| t: {
                         log.warn("unable to duplicate title: {t}", .{err});
                         break :t null;
@@ -1813,7 +1823,8 @@ pub const Application = extern struct {
         _: ?*glib.Variant,
         self: *Self,
     ) callconv(.c) void {
-        _ = self.core().mailbox.push(.open_config, .forever);
+        const core_app = self.core();
+        _ = core_app.mailbox.push(.open_config, .forever, core_app.io);
     }
 
     fn actionPresentSurface(
@@ -1836,9 +1847,10 @@ pub const Application = extern struct {
         // notification so we don't focus any surface.
         const surface_id = parameter.getUint64();
         if (surface_id == 0) return;
-        const surface = self.core().findSurfaceByID(surface_id) orelse return;
+        const core_app = self.core();
+        const surface = core_app.findSurfaceByID(surface_id) orelse return;
 
-        _ = self.core().mailbox.push(
+        _ = core_app.mailbox.push(
             .{
                 .surface_message = .{
                     .surface = surface,
@@ -1846,6 +1858,7 @@ pub const Application = extern struct {
                 },
             },
             .forever,
+            core_app.io,
         );
     }
 
@@ -1866,12 +1879,8 @@ pub const Application = extern struct {
         fn init(class: *Class) callconv(.c) void {
             // Register our compiled resources exactly once.
             {
-                const c = @cImport({
-                    // generated header files
-                    @cInclude("ghostty_resources.h");
-                });
-                if (c.ghostty_get_resource()) |ptr| {
-                    gio.resourcesRegister(@ptrCast(@alignCast(ptr)));
+                if (ghostty_get_resource()) |resource| {
+                    gio.resourcesRegister(resource);
                 } else {
                     // If we fail to load resources then things will
                     // probably look really bad but it shouldn't stop our
@@ -1897,8 +1906,10 @@ pub const Application = extern struct {
         // Fallback to the minimal cross-platform way of opening a URL.
         // This is always a safe fallback and enables for example Windows
         // to open URLs (GTK on Windows via WSL is a thing).
+        const core_app = self.core();
         internal_os.open(
-            self.allocator(),
+            core_app.io,
+            core_app.environ.*,
             kind,
             url,
         ) catch |err| log.warn("unable to open url: {}", .{err});
@@ -2331,7 +2342,12 @@ const Action = struct {
     pub fn openConfig(self: *Application) bool {
         // Get the config file path
         const alloc = self.allocator();
-        const path = configpkg.edit.openPath(alloc) catch |err| {
+        const core_app = self.core();
+        const path = configpkg.edit.openPath(
+            alloc,
+            core_app.io,
+            core_app.environ,
+        ) catch |err| {
             log.warn("error getting config file path: {}", .{err});
             return false;
         };
@@ -2444,11 +2460,13 @@ const Action = struct {
         target: apprt.Target,
         opts: apprt.action.ReloadConfig,
     ) !void {
+        const core_app = self.core();
+
         // Tell systemd that reloading has started.
-        systemd.notify.reloading();
+        systemd.notify.reloading(core_app.io, core_app.environ);
 
         // When we exit this function tell systemd that reloading has finished.
-        defer systemd.notify.ready();
+        defer systemd.notify.ready(core_app.environ);
 
         // Get our config object.
         const config: *Config = config: {
@@ -2460,7 +2478,12 @@ const Action = struct {
 
             // Hard reload, load a new config completely.
             const alloc = self.allocator();
-            var config = try CoreConfig.load(alloc);
+            var config = try CoreConfig.load(
+                alloc,
+                core_app.io,
+                core_app.args,
+                core_app.environ,
+            );
             defer config.deinit();
             break :config try .new(alloc, &config);
         };
@@ -2915,36 +2938,34 @@ fn setGtkEnv(config: *const CoreConfig) error{NoSpaceLeft}!void {
 
     {
         var buf: [1024]u8 = undefined;
-        var fmt = std.io.fixedBufferStream(&buf);
-        const writer = fmt.writer();
+        var writer: std.Io.Writer = .fixed(&buf);
         var first: bool = true;
         inline for (@typeInfo(@TypeOf(gdk_debug)).@"struct".fields) |field| {
             if (@field(gdk_debug, field.name)) {
-                if (!first) try writer.writeAll(",");
-                try writer.writeAll(field.name);
+                if (!first) writer.writeAll(",") catch return error.NoSpaceLeft;
+                writer.writeAll(field.name) catch return error.NoSpaceLeft;
                 first = false;
             }
         }
-        try writer.writeByte(0);
-        const value = fmt.getWritten();
+        writer.writeByte(0) catch return error.NoSpaceLeft;
+        const value = writer.buffered();
         log.warn("setting GDK_DEBUG={s}", .{value[0 .. value.len - 1]});
         _ = internal_os.setenv("GDK_DEBUG", value[0 .. value.len - 1 :0]);
     }
 
     {
         var buf: [1024]u8 = undefined;
-        var fmt = std.io.fixedBufferStream(&buf);
-        const writer = fmt.writer();
+        var writer: std.Io.Writer = .fixed(&buf);
         var first: bool = true;
         inline for (@typeInfo(@TypeOf(gdk_disable)).@"struct".fields) |field| {
             if (@field(gdk_disable, field.name)) {
-                if (!first) try writer.writeAll(",");
-                try writer.writeAll(field.name);
+                if (!first) writer.writeAll(",") catch return error.NoSpaceLeft;
+                writer.writeAll(field.name) catch return error.NoSpaceLeft;
                 first = false;
             }
         }
-        try writer.writeByte(0);
-        const value = fmt.getWritten();
+        writer.writeByte(0) catch return error.NoSpaceLeft;
+        const value = writer.buffered();
         log.warn("setting GDK_DISABLE={s}", .{value[0 .. value.len - 1]});
         _ = internal_os.setenv("GDK_DISABLE", value[0 .. value.len - 1 :0]);
     }

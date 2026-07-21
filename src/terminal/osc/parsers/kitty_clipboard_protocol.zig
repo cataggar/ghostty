@@ -100,7 +100,7 @@ pub const Option = enum {
                 if (!std.mem.startsWith(u8, metadata[pos..], @tagName(key))) {
                     // this isn't the key we are looking for, skip to the next option, or bail if
                     // there is no next option
-                    pos = std.mem.indexOfScalarPos(u8, metadata, pos, ':') orelse return null;
+                    pos = std.mem.findScalarPos(u8, metadata, pos, ':') orelse return null;
                     pos += 1;
                     continue;
                 }
@@ -113,7 +113,7 @@ pub const Option = enum {
                 // a valid option has an '='
                 if (metadata[pos] != '=') return null;
                 // the end of the value is bounded by a ':' or the end of the metadata
-                const end = std.mem.indexOfScalarPos(u8, metadata, pos, ':') orelse metadata.len;
+                const end = std.mem.findScalarPos(u8, metadata, pos, ':') orelse metadata.len;
                 const start = pos + 1;
                 // strip any leading or trailing whitespace
                 break :value std.mem.trim(u8, metadata[start..end], &std.ascii.whitespace);
@@ -160,7 +160,7 @@ pub fn parse(parser: *Parser, terminator_ch: ?u8) ?*Command {
     const data = cap.trailing();
 
     const metadata: []const u8, const payload: ?[]const u8 = result: {
-        const start = std.mem.indexOfScalar(u8, data, ';') orelse break :result .{ data, null };
+        const start = std.mem.findScalar(u8, data, ';') orelse break :result .{ data, null };
         break :result .{ data[0..start], data[start + 1 .. data.len] };
     };
 
