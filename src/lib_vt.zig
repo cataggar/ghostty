@@ -12,6 +12,12 @@ const lib = @This();
 const std = @import("std");
 const builtin = @import("builtin");
 
+// Zig 0.16's full panic handler references a macOS-only dyld symbol on iOS.
+pub const panic = if (builtin.os.tag == .ios)
+    std.debug.no_panic
+else
+    std.debug.FullPanic(std.debug.defaultPanic);
+
 // The public API below reproduces a lot of terminal/main.zig but
 // is separate because (1) we need our root file to be in `src/`
 // so we can access other directories and (2) we may want to withhold

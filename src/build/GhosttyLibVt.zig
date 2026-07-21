@@ -313,13 +313,15 @@ fn initLib(
 }
 
 /// Combine multiple static archives into a single fat archive.
-/// Uses libtool on Darwin and ar MRI scripts on other platforms.
+/// Uses libtool for native Darwin builds and ar MRI scripts otherwise.
 fn combineArchives(
     b: *std.Build,
     target: std.Build.ResolvedTarget,
     sources: []const std.Build.LazyPath,
 ) struct { step: *std.Build.Step, output: std.Build.LazyPath } {
-    if (target.result.os.tag.isDarwin()) {
+    if (target.result.os.tag.isDarwin() and
+        comptime builtin.os.tag.isDarwin())
+    {
         const libtool = LibtoolStep.create(b, .{
             .name = "ghostty-vt",
             .out_name = "libghostty-vt.a",
