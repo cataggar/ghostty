@@ -68,17 +68,20 @@
     forAllPlatforms = f: lib.genAttrs platforms (s: f legacyPackages.${s});
     forBuildablePlatforms = f: lib.genAttrs buildablePlatforms (s: f legacyPackages.${s});
 
-    mkPkgArgs = optimize: {
+    zigPackage = pkgs:
+      if pkgs.stdenv.hostPlatform.isDarwin
+      then zig.packages.${pkgs.stdenv.hostPlatform.system}.brew."0.16.0"
+      else zig.packages.${pkgs.stdenv.hostPlatform.system}."0.16.0";
+
+    mkPkgArgs = pkgs: optimize: {
       inherit optimize;
       revision = self.shortRev or self.dirtyShortRev or "dirty";
+      zig = zigPackage pkgs;
     };
   in {
     devShells = forAllPlatforms (pkgs: {
       default = pkgs.callPackage ./nix/devShell.nix {
-        zig =
-          if pkgs.stdenv.hostPlatform.isDarwin
-          then zig.packages.${pkgs.stdenv.hostPlatform.system}.brew."0.16.0"
-          else zig.packages.${pkgs.stdenv.hostPlatform.system}."0.16.0";
+        zig = zigPackage pkgs;
         wraptest = pkgs.callPackage ./nix/pkgs/wraptest.nix {};
         zon2nix = zon2nix;
 
@@ -101,23 +104,25 @@
         (
           forAllPlatforms (pkgs: rec {
             # Deps are needed for environmental setup on macOS
-            deps = pkgs.callPackage ./build.zig.zon.nix {};
+            deps = pkgs.callPackage ./build.zig.zon.nix {
+              zig = zigPackage pkgs;
+            };
 
-            libghostty-vt-debug = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs "Debug");
-            libghostty-vt-releasesafe = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs "ReleaseSafe");
-            libghostty-vt-releasefast = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs "ReleaseFast");
-            libghostty-vt-debug-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs "Debug") // {simd = false;});
-            libghostty-vt-releasesafe-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs "ReleaseSafe") // {simd = false;});
-            libghostty-vt-releasefast-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs "ReleaseFast") // {simd = false;});
+            libghostty-vt-debug = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs pkgs "Debug");
+            libghostty-vt-releasesafe = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs pkgs "ReleaseSafe");
+            libghostty-vt-releasefast = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs pkgs "ReleaseFast");
+            libghostty-vt-debug-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs pkgs "Debug") // {simd = false;});
+            libghostty-vt-releasesafe-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs pkgs "ReleaseSafe") // {simd = false;});
+            libghostty-vt-releasefast-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs pkgs "ReleaseFast") // {simd = false;});
 
             libghostty-vt = libghostty-vt-releasefast;
           })
         )
         (
           forBuildablePlatforms (pkgs: rec {
-            ghostty-debug = pkgs.callPackage ./nix/package.nix (mkPkgArgs "Debug");
-            ghostty-releasesafe = pkgs.callPackage ./nix/package.nix (mkPkgArgs "ReleaseSafe");
-            ghostty-releasefast = pkgs.callPackage ./nix/package.nix (mkPkgArgs "ReleaseFast");
+            ghostty-debug = pkgs.callPackage ./nix/package.nix (mkPkgArgs pkgs "Debug");
+            ghostty-releasesafe = pkgs.callPackage ./nix/package.nix (mkPkgArgs pkgs "ReleaseSafe");
+            ghostty-releasefast = pkgs.callPackage ./nix/package.nix (mkPkgArgs pkgs "ReleaseFast");
 
             ghostty = ghostty-releasefast;
             default = ghostty;
@@ -163,10 +168,10 @@
     overlays = {
       default = self.overlays.releasefast;
       releasefast = final: prev: {
-        ghostty = final.callPackage ./nix/package.nix (mkPkgArgs "ReleaseFast");
+        ghostty = final.callPackage ./nix/package.nix (mkPkgArgs final "ReleaseFast");
       };
       debug = final: prev: {
-        ghostty = final.callPackage ./nix/package.nix (mkPkgArgs "Debug");
+        ghostty = final.callPackage ./nix/package.nix (mkPkgArgs final "Debug");
       };
     };
   };

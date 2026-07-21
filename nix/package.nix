@@ -10,7 +10,7 @@
   git,
   ncurses,
   pkg-config,
-  zig_0_16,
+  zig,
   pandoc,
   revision ? "dirty",
   optimize ? "Debug",
@@ -55,7 +55,10 @@ in
       );
     };
 
-    deps = callPackage ../build.zig.zon.nix {name = "ghostty-cache-${finalAttrs.version}";};
+    deps = callPackage ../build.zig.zon.nix {
+      inherit zig;
+      name = "ghostty-cache-${finalAttrs.version}";
+    };
 
     nativeBuildInputs =
       [
@@ -63,7 +66,7 @@ in
         ncurses
         pandoc
         pkg-config
-        zig_0_16
+        zig
         gobject-introspection
         wrapGAppsHook4
         blueprint-compiler

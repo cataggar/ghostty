@@ -5,7 +5,7 @@
   fetchurl,
   fetchgit,
   runCommandLocal,
-  zig_0_16,
+  zig,
   name ? "zig-packages",
 }: let
   unpackZigArtifact = {
@@ -14,7 +14,7 @@
   }:
     runCommandLocal name
     {
-      nativeBuildInputs = [zig_0_16];
+      nativeBuildInputs = [zig];
     }
     ''
       # Work around https://codeberg.org/ziglang/zig/issues/31866.
