@@ -1458,7 +1458,7 @@ pub const ReadThread = struct {
         };
         defer gather_thread.join();
         if (comptime !builtin.os.tag.isDarwin()) {
-            gather_thread.setName("io-gather") catch {};
+            gather_thread.setName(stdio, "io-gather") catch {};
         }
 
         // This thread is the parse stage. We consume batches in ring
