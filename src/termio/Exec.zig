@@ -1495,7 +1495,7 @@ pub const ReadThread = struct {
                 // delivers what it has instead of sleeping out the
                 // timeout while we sit idle.
                 if (wake) {
-                    _ = posix.write(pipeline.idle_write_fd, "i") catch {};
+                    _ = std.c.write(pipeline.idle_write_fd, "i", 1);
                 }
             }
 
