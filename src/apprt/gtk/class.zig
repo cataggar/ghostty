@@ -155,7 +155,7 @@ pub fn Common(
                     types[0] = *ClassInstance(T);
 
                     return @Fn(
-                        types,
+                        &types,
                         &attrs,
                         fn_info.return_type.?,
                         .{

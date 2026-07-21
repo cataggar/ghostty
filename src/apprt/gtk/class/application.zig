@@ -44,6 +44,8 @@ const OpenURI = @import("../portal.zig").OpenURI;
 
 const log = std.log.scoped(.gtk_ghostty_application);
 
+extern fn ghostty_get_resource() ?*gio.Resource;
+
 /// Function used to funnel GLib/GObject/GTK log messages into Zig's logging
 /// system rather than just getting dumped directly to stderr.
 fn glibLogWriterFunction(
@@ -279,7 +281,7 @@ pub const Application = extern struct {
             const old_language = old_language: {
                 const env = core_app.environ;
                 const result = env.get("LANG") orelse break :old_language null;
-                break :old_language alloc.dupeZ(u8, result.value) catch break :old_language null;
+                break :old_language alloc.dupeZ(u8, result) catch break :old_language null;
             };
 
             if (config.language) |language| _ = internal_os.setenv("LANG", language);
@@ -1871,12 +1873,8 @@ pub const Application = extern struct {
         fn init(class: *Class) callconv(.c) void {
             // Register our compiled resources exactly once.
             {
-                const c = @cImport({
-                    // generated header files
-                    @cInclude("ghostty_resources.h");
-                });
-                if (c.ghostty_get_resource()) |ptr| {
-                    gio.resourcesRegister(@ptrCast(@alignCast(ptr)));
+                if (ghostty_get_resource()) |resource| {
+                    gio.resourcesRegister(resource);
                 } else {
                     // If we fail to load resources then things will
                     // probably look really bad but it shouldn't stop our
