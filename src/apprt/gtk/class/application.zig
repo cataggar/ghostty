@@ -254,7 +254,12 @@ pub const Application = extern struct {
         adw_version.logVersion();
 
         // Load our configuration.
-        var config = CoreConfig.load(alloc) catch |err| err: {
+        var config = CoreConfig.load(
+            alloc,
+            core_app.io,
+            core_app.args,
+            core_app.environ,
+        ) catch |err| err: {
             // If we fail to load the configuration, then we should log
             // the error in the diagnostics so it can be shown to the user.
             // We can still load a default which only fails for OOM, allowing
@@ -539,7 +544,7 @@ pub const Application = extern struct {
         }
 
         // Tell systemd that we are ready.
-        systemd.notify.ready();
+        systemd.notify.ready(priv.core_app.environ);
 
         log.debug("entering runloop", .{});
         defer log.debug("exiting runloop", .{});
@@ -2444,11 +2449,13 @@ const Action = struct {
         target: apprt.Target,
         opts: apprt.action.ReloadConfig,
     ) !void {
+        const core_app = self.core();
+
         // Tell systemd that reloading has started.
-        systemd.notify.reloading();
+        systemd.notify.reloading(core_app.io, core_app.environ);
 
         // When we exit this function tell systemd that reloading has finished.
-        defer systemd.notify.ready();
+        defer systemd.notify.ready(core_app.environ);
 
         // Get our config object.
         const config: *Config = config: {
@@ -2460,7 +2467,12 @@ const Action = struct {
 
             // Hard reload, load a new config completely.
             const alloc = self.allocator();
-            var config = try CoreConfig.load(alloc);
+            var config = try CoreConfig.load(
+                alloc,
+                core_app.io,
+                core_app.args,
+                core_app.environ,
+            );
             defer config.deinit();
             break :config try .new(alloc, &config);
         };
