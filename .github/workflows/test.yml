@@ -1038,18 +1038,35 @@ jobs:
           name: ghostty
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
-      - name: get the Zig deps
-        id: deps
-        run: nix build -L .#deps && echo "deps=$(readlink ./result)" >> $GITHUB_OUTPUT
-
       - name: test
         run: nix develop -c zig build -Dapp-runtime=none test
 
       - name: Test GTK Build
         run: nix develop -c zig build -Dapp-runtime=gtk -Demit-docs -Demit-webdata
 
+      - name: Unpack Zig dependencies
+        id: deps
+        run: |
+          deps="${RUNNER_TEMP}/zig-deps"
+          mkdir -p "${deps}"
+
+          shopt -s nullglob
+          archives=("${ZIG_GLOBAL_CACHE_DIR}"/p/*.tar.gz)
+          if (( ${#archives[@]} == 0 )); then
+            echo "No cached Zig dependencies found" >&2
+            exit 1
+          fi
+
+          for archive in "${archives[@]}"; do
+            name="$(basename "${archive}" .tar.gz)"
+            mkdir -p "${deps}/${name}"
+            tar -xzf "${archive}" --directory "${deps}/${name}" --strip-components=1
+          done
+
+          echo "path=${deps}" >> "${GITHUB_OUTPUT}"
+
       - name: Test System Build
-        run: nix develop -c zig build --system ${{ steps.deps.outputs.deps }}
+        run: nix develop -c zig build --system ${{ steps.deps.outputs.path }}
 
   test-lib-vt:
     if: needs.skip.outputs.skip != 'true'
