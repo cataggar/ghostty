@@ -364,7 +364,7 @@ in
       path = fetchZigArtifact {
         name = "zig_wayland";
         url = "https://codeberg.org/ifreund/zig-wayland/archive/4a150a04f76f7329e80280661355c04328369d1f.tar.gz";
-        hash = "sha256-VBkZPsaDNEd2EgoyIz/XMhFs9BZWha+JYooWRMSA0ag=";
+        hash = "sha256-43GP9iDCNERWJMbo6LXYr5lC/KqCj2qreyQm61ejgCQ=";
       };
     }
     {
