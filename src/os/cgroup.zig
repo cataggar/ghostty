@@ -12,7 +12,7 @@ pub fn current(io: std.Io, buf: []u8, pid: u32) ?[]const u8 {
     // The cgroup path is the third field.
     const path = std.fmt.bufPrint(&path_buf, "/proc/{}/cgroup", .{pid}) catch return null;
     const file = std.Io.Dir.openFileAbsolute(io, path, .{}) catch return null;
-    defer file.close();
+    defer file.close(io);
 
     var read_buf: [64]u8 = undefined;
     var file_reader = file.reader(io, &read_buf);

@@ -790,7 +790,7 @@ const Compression = struct {
         // frame without changing terminal contents and must not starve this
         // timer indefinitely.
         if (thread.state.mutex.tryLock()) {
-            defer thread.state.mutex.unlock();
+            defer thread.state.mutex.unlock(thread.app_mailbox.io);
             const activity = thread.state.terminal.compressionActivity();
             if (self.activity == activity) return;
             self.activity = activity;
@@ -849,7 +849,7 @@ const Compression = struct {
 
         const state = thread.state;
         if (!state.mutex.tryLock()) return idle_interval;
-        defer state.mutex.unlock();
+        defer state.mutex.unlock(thread.app_mailbox.io);
 
         const activity = state.terminal.compressionActivity();
         if (self.activity != activity) {

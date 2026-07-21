@@ -1346,15 +1346,15 @@ pub const ReadThread = struct {
     /// stage at a time, so buffer contents need no locking. Only the
     /// ring metadata is guarded by the mutex.
     const Pipeline = struct {
-        mutex: std.Thread.Mutex = .{},
+        mutex: std.Io.Mutex = .init,
 
         /// Signaled when a batch is published or the gather stage is
         /// done. Waited on by the parse stage.
-        batch_ready: std.Thread.Condition = .{},
+        batch_ready: std.Io.Condition = .init,
 
         /// Signaled when a batch has been consumed. Waited on by the
         /// gather stage when all buffers are in flight (backpressure).
-        slot_free: std.Thread.Condition = .{},
+        slot_free: std.Io.Condition = .init,
 
         /// The number of valid bytes in each buffer. Set at publish
         /// time by the gather stage, read by the parse stage.
@@ -1446,7 +1446,7 @@ pub const ReadThread = struct {
         const gather_thread = std.Thread.spawn(
             .{},
             gatherMainPosix,
-            .{ fd, quit, &pipeline },
+            .{ fd, stdio, quit, &pipeline },
         ) catch |err| {
             // If we can't spawn a thread the process is already
             // doomed (every surface spawns several), so don't try
@@ -1464,11 +1464,11 @@ pub const ReadThread = struct {
         // the ring is drained.
         while (true) {
             const batch: []const u8 = batch: {
-                pipeline.mutex.lock();
-                defer pipeline.mutex.unlock();
+                pipeline.mutex.lockUncancelable(stdio);
+                defer pipeline.mutex.unlock(stdio);
                 while (pipeline.count == 0) {
                     if (pipeline.done) return;
-                    pipeline.batch_ready.wait(&pipeline.mutex);
+                    pipeline.batch_ready.waitUncancelable(stdio, &pipeline.mutex);
                 }
                 const slot = pipeline.tail;
                 break :batch pipeline.bufs[slot][0..pipeline.lens[slot]];
@@ -1479,14 +1479,14 @@ pub const ReadThread = struct {
             io.processOutput(stdio, batch);
 
             {
-                pipeline.mutex.lock();
+                pipeline.mutex.lockUncancelable(stdio);
                 pipeline.tail = (pipeline.tail + 1) % buffer_count;
                 pipeline.count -= 1;
                 const wake = pipeline.count == 0 and
                     pipeline.bridging and
                     pipeline.idle_write_fd >= 0;
-                pipeline.mutex.unlock();
-                pipeline.slot_free.signal();
+                pipeline.mutex.unlock(stdio);
+                pipeline.slot_free.signal(stdio);
 
                 // We ran out of batches while the gather stage is
                 // bridging a refill gap: interrupt its poll so it
@@ -1507,7 +1507,12 @@ pub const ReadThread = struct {
     /// bridging the kernel queue's refill gaps for saturated streams,
     /// and publishes each batch to the parse stage. This thread owns
     /// all fd monitoring, including the quit fd.
-    fn gatherMainPosix(fd: posix.fd_t, quit: posix.fd_t, pipeline: *Pipeline) void {
+    fn gatherMainPosix(
+        fd: posix.fd_t,
+        stdio: std.Io,
+        quit: posix.fd_t,
+        pipeline: *Pipeline,
+    ) void {
         if (builtin.os.tag.isDarwin()) {
             internal_os.macos.pthread_setname_np(&"io-gather".*);
             setQosClass();
@@ -1516,10 +1521,10 @@ pub const ReadThread = struct {
         // However we exit, tell the parse stage the stream is over so
         // it drains the ring and joins us.
         defer {
-            pipeline.mutex.lock();
+            pipeline.mutex.lockUncancelable(stdio);
             pipeline.done = true;
-            pipeline.mutex.unlock();
-            pipeline.batch_ready.signal();
+            pipeline.mutex.unlock(stdio);
+            pipeline.batch_ready.signal(stdio);
         }
 
         // The fds we poll: data on the pty, our quit notification,
@@ -1538,16 +1543,16 @@ pub const ReadThread = struct {
             // we should stop reading and let the kernel queue exert
             // backpressure on the child.
             const buf: *[buffer_capacity]u8 = buf: {
-                pipeline.mutex.lock();
-                defer pipeline.mutex.unlock();
+                pipeline.mutex.lockUncancelable(stdio);
+                defer pipeline.mutex.unlock(stdio);
                 while (pipeline.count == buffer_count) {
-                    pipeline.slot_free.wait(&pipeline.mutex);
+                    pipeline.slot_free.waitUncancelable(stdio, &pipeline.mutex);
                 }
                 break :buf &pipeline.bufs[pipeline.head];
             };
 
             var total: usize = 0;
-            var bridge_start: ?std.time.Instant = null;
+            var bridge_start: ?std.Io.Timestamp = null;
             var spins: usize = 0;
             var fatal = false;
 
@@ -1576,10 +1581,9 @@ pub const ReadThread = struct {
 
                         // Still dry, so we want to sleep in poll for
                         // the next refill, within our latency budget.
-                        const now = std.time.Instant.now() catch
-                            break :gather;
+                        const now = std.Io.Timestamp.now(stdio, .awake);
                         if (bridge_start) |start| {
-                            if (now.since(start) >= gather_budget_ns)
+                            if (start.durationTo(now).toNanoseconds() >= gather_budget_ns)
                                 break :gather;
                         } else bridge_start = now;
 
@@ -1597,8 +1601,8 @@ pub const ReadThread = struct {
                         // the idle wake so it can interrupt our poll
                         // the moment that changes.
                         {
-                            pipeline.mutex.lock();
-                            defer pipeline.mutex.unlock();
+                            pipeline.mutex.lockUncancelable(stdio);
+                            defer pipeline.mutex.unlock(stdio);
                             if (pipeline.count == 0) break :gather;
                             pipeline.bridging = true;
                         }
@@ -1607,11 +1611,11 @@ pub const ReadThread = struct {
                             &pollfds,
                             bridge_poll_timeout_ms,
                         ) catch |poll_err| {
-                            clearBridging(pipeline);
+                            clearBridging(stdio, pipeline);
                             log.warn("bridge poll failed err={}", .{poll_err});
                             break :gather;
                         };
-                        clearBridging(pipeline);
+                        clearBridging(stdio, pipeline);
 
                         // Quiet for a full timeout means the burst
                         // ended.
@@ -1681,12 +1685,12 @@ pub const ReadThread = struct {
             // Publish the batch (if any) to the parse stage and rotate
             // to the next buffer.
             if (total > 0) {
-                pipeline.mutex.lock();
+                pipeline.mutex.lockUncancelable(stdio);
                 pipeline.lens[pipeline.head] = total;
                 pipeline.head = (pipeline.head + 1) % buffer_count;
                 pipeline.count += 1;
-                pipeline.mutex.unlock();
-                pipeline.batch_ready.signal();
+                pipeline.mutex.unlock(stdio);
+                pipeline.batch_ready.signal(stdio);
             }
 
             if (fatal) return;
@@ -1719,9 +1723,9 @@ pub const ReadThread = struct {
 
     /// Clears the bridging flag armed before a bridge poll, closing
     /// the window in which the parse stage writes idle wakes.
-    fn clearBridging(pipeline: *Pipeline) void {
-        pipeline.mutex.lock();
-        defer pipeline.mutex.unlock();
+    fn clearBridging(stdio: std.Io, pipeline: *Pipeline) void {
+        pipeline.mutex.lockUncancelable(stdio);
+        defer pipeline.mutex.unlock(stdio);
         pipeline.bridging = false;
     }
 
@@ -1740,25 +1744,29 @@ pub const ReadThread = struct {
 
     /// Sets the fd to non-blocking mode. Returns false on failure.
     fn setNonblock(fd: posix.fd_t) bool {
-        const flags = posix.fcntl(
-            fd,
-            posix.F.GETFL,
-            0,
-        ) catch |err| {
-            log.warn("read thread failed to get flags err={}", .{err});
-            return false;
+        const flags: usize = while (true) {
+            const rc = posix.system.fcntl(fd, posix.F.GETFL, @as(usize, 0));
+            switch (posix.errno(rc)) {
+                .SUCCESS => break @intCast(rc),
+                .INTR => continue,
+                else => |err| {
+                    log.warn("read thread failed to get flags errno={}", .{err});
+                    return false;
+                },
+            }
         };
 
-        _ = posix.fcntl(
-            fd,
-            posix.F.SETFL,
-            flags | @as(u32, @bitCast(posix.O{ .NONBLOCK = true })),
-        ) catch |err| {
-            log.warn("read thread failed to set flags err={}", .{err});
-            return false;
-        };
-
-        return true;
+        const nonblock = @as(usize, 1 << @bitOffsetOf(posix.O, "NONBLOCK"));
+        while (true) {
+            switch (posix.errno(posix.system.fcntl(fd, posix.F.SETFL, flags | nonblock))) {
+                .SUCCESS => return true,
+                .INTR => continue,
+                else => |err| {
+                    log.warn("read thread failed to set flags errno={}", .{err});
+                    return false;
+                },
+            }
+        }
     }
 
     fn threadMainWindows(fd: posix.fd_t, stdio: std.Io, io: *termio.Termio, quit: posix.fd_t) void {
