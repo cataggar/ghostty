@@ -30,6 +30,14 @@ pub const FlatpakHostCommand = struct {
     const fd_t = posix.fd_t;
     const EnvMap = std.process.Environ.Map;
     const c = @cImport({
+        // Zig 0.16 translate-c cannot handle GLib's _Pragma macros.
+        @cDefine("__GLIB_H_INSIDE__", "1");
+        @cInclude("glib/gmacros.h");
+        @cUndef("__GLIB_H_INSIDE__");
+        @cUndef("G_GNUC_BEGIN_IGNORE_DEPRECATIONS");
+        @cUndef("G_GNUC_END_IGNORE_DEPRECATIONS");
+        @cDefine("G_GNUC_BEGIN_IGNORE_DEPRECATIONS", "");
+        @cDefine("G_GNUC_END_IGNORE_DEPRECATIONS", "");
         @cInclude("gio/gio.h");
         @cInclude("gio/gunixfdlist.h");
     });

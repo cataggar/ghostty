@@ -58,9 +58,9 @@ pub inline fn atLeast(
 /// is affected by the version check. For checks which would affect code
 /// generation, use `atLeast`.
 pub inline fn runtimeAtLeast(
-    comptime major: usize,
-    comptime minor: usize,
-    comptime micro: usize,
+    major: usize,
+    minor: usize,
+    micro: usize,
 ) bool {
     // We use the functions instead of the compile-time version
     // because the function gets the actual runtime version.
@@ -75,20 +75,34 @@ pub inline fn runtimeAtLeast(
 test "versionAtLeast" {
     const testing = std.testing;
 
-    const funs = &.{ atLeast, runtimeAtLeast };
-    inline for (funs) |fun| {
-        try testing.expect(fun(comptime_version.major, comptime_version.minor, comptime_version.patch));
-        try testing.expect(!fun(comptime_version.major, comptime_version.minor, comptime_version.patch + 1));
-        try testing.expect(!fun(comptime_version.major, comptime_version.minor + 1, comptime_version.patch));
-        try testing.expect(!fun(comptime_version.major + 1, comptime_version.minor, comptime_version.patch));
-        if (comptime_version.major > 0) {
-            try testing.expect(fun(comptime_version.major - 1, comptime_version.minor, comptime_version.patch));
-            try testing.expect(fun(comptime_version.major - 1, comptime_version.minor + 1, comptime_version.patch));
-            try testing.expect(fun(comptime_version.major - 1, comptime_version.minor, comptime_version.patch + 1));
-        }
-        if (comptime_version.minor > 0)
-            try testing.expect(fun(comptime_version.major, comptime_version.minor - 1, comptime_version.patch + 1));
+    try testing.expect(comptime atLeast(comptime_version.major, comptime_version.minor, comptime_version.patch));
+    try testing.expect(!comptime atLeast(comptime_version.major, comptime_version.minor, comptime_version.patch + 1));
+    try testing.expect(!comptime atLeast(comptime_version.major, comptime_version.minor + 1, comptime_version.patch));
+    try testing.expect(!comptime atLeast(comptime_version.major + 1, comptime_version.minor, comptime_version.patch));
+    if (comptime_version.major > 0) {
+        try testing.expect(comptime atLeast(comptime_version.major - 1, comptime_version.minor, comptime_version.patch));
+        try testing.expect(comptime atLeast(comptime_version.major - 1, comptime_version.minor + 1, comptime_version.patch));
+        try testing.expect(comptime atLeast(comptime_version.major - 1, comptime_version.minor, comptime_version.patch + 1));
     }
+    if (comptime_version.minor > 0)
+        try testing.expect(comptime atLeast(comptime_version.major, comptime_version.minor - 1, comptime_version.patch + 1));
+}
+
+test "runtimeAtLeast" {
+    const testing = std.testing;
+    const runtime_version = getRuntimeVersion();
+
+    try testing.expect(runtimeAtLeast(runtime_version.major, runtime_version.minor, runtime_version.patch));
+    try testing.expect(!runtimeAtLeast(runtime_version.major, runtime_version.minor, runtime_version.patch + 1));
+    try testing.expect(!runtimeAtLeast(runtime_version.major, runtime_version.minor + 1, runtime_version.patch));
+    try testing.expect(!runtimeAtLeast(runtime_version.major + 1, runtime_version.minor, runtime_version.patch));
+    if (runtime_version.major > 0) {
+        try testing.expect(runtimeAtLeast(runtime_version.major - 1, runtime_version.minor, runtime_version.patch));
+        try testing.expect(runtimeAtLeast(runtime_version.major - 1, runtime_version.minor + 1, runtime_version.patch));
+        try testing.expect(runtimeAtLeast(runtime_version.major - 1, runtime_version.minor, runtime_version.patch + 1));
+    }
+    if (runtime_version.minor > 0)
+        try testing.expect(runtimeAtLeast(runtime_version.major, runtime_version.minor - 1, runtime_version.patch + 1));
 }
 
 // Whether AdwDialog, AdwAlertDialog, etc. are supported (1.5+)
