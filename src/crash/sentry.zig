@@ -47,7 +47,11 @@ pub threadlocal var thread_state: ?ThreadState = null;
 /// crash reports and logs, but we only store them locally (see Transport).
 /// It is up to the user to grab the logs and manually send them to us
 /// (or they own Sentry instance) if they want to.
-pub fn init(gpa: Allocator, env: *const std.process.Environ.Map) !void {
+pub fn init(
+    gpa: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+) !void {
     if (comptime !build_options.sentry) return;
 
     // Not supported on Windows currently, doesn't build.
@@ -72,13 +76,17 @@ pub fn init(gpa: Allocator, env: *const std.process.Environ.Map) !void {
     const thr = try std.Thread.spawn(
         .{},
         initThread,
-        .{ gpa, env },
+        .{ gpa, io, env },
     );
-    thr.setName("sentry-init") catch {};
+    thr.setName(io, "sentry-init") catch {};
     init_thread = thr;
 }
 
-fn initThread(gpa: Allocator, env: *const std.process.Environ.Map) !void {
+fn initThread(
+    gpa: Allocator,
+    io: std.Io,
+    env: *const std.process.Environ.Map,
+) !void {
     if (comptime !build_options.sentry) return;
 
     // Right now, on Darwin, `std.Thread.setName` can only name the current
@@ -127,6 +135,8 @@ fn initThread(gpa: Allocator, env: *const std.process.Environ.Map) !void {
 
         break :cache_dir try internal_os.xdg.cache(
             alloc,
+            io,
+            env,
             .{ .subdir = "ghostty/sentry" },
         );
     };
@@ -262,6 +272,7 @@ pub const Transport = struct {
         const alloc = arena.allocator();
 
         var io_threaded: std.Io.Threaded = .init_single_threaded;
+        defer io_threaded.deinit();
         const io = io_threaded.io();
 
         // Parse into an envelope structure
@@ -302,7 +313,7 @@ pub const Transport = struct {
         const file = try std.Io.Dir.cwd().createFile(io, path, .{});
         defer file.close(io);
         var buf: [4096]u8 = undefined;
-        var file_writer = file.writer(&buf);
+        var file_writer = file.writer(io, &buf);
         try file_writer.interface.writeAll(json);
         try file_writer.end();
 

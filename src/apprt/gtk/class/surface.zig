@@ -1708,7 +1708,7 @@ pub const Surface = extern struct {
             item.key,
             item.value,
         );
-        for (env_to_remove.items) |key| _ = env_map.remove(key);
+        for (env_to_remove.items) |key| _ = env_map.swapRemove(key);
     }
 
     pub fn clipboardRequest(

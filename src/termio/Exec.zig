@@ -956,6 +956,7 @@ const Subprocess = struct {
                 const dev_null = try std.Io.Dir.cwd().openFile(io, "/dev/null", .{ .mode = .read_write });
                 defer dev_null.close(io);
                 var cmd: internal_os.FlatpakHostCommand = .{
+                    .io = io,
                     .argv = &[_][]const u8{
                         "/bin/sh",
                         "-c",
@@ -992,6 +993,7 @@ const Subprocess = struct {
 
             // Flatpak command must have a stable pointer.
             self.process = .{ .flatpak = .{
+                .io = io,
                 .argv = self.args,
                 .cwd = cwd,
                 .env = if (self.env) |*env| env else null,

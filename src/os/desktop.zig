@@ -112,48 +112,33 @@ pub fn desktopEnvironment(env: *const std.process.Environ.Map) DesktopEnvironmen
 
 test "desktop environment" {
     const testing = std.testing;
+    var env = try testing.environ.createMap(testing.allocator);
+    defer env.deinit();
 
     switch (builtin.os.tag) {
-        .macos => try testing.expectEqual(.macos, desktopEnvironment(std.testing.environ)),
-        .windows => try testing.expectEqual(.windows, desktopEnvironment(std.testing.environ)),
+        .macos => try testing.expectEqual(.macos, desktopEnvironment(&env)),
+        .windows => try testing.expectEqual(.windows, desktopEnvironment(&env)),
         .linux, .freebsd => {
-            const getenv = std.posix.getenv;
-            const setenv = @import("env.zig").setenv;
-            const unsetenv = @import("env.zig").unsetenv;
+            _ = env.swapRemove("XDG_CURRENT_DESKTOP");
+            _ = env.swapRemove("XDG_SESSION_DESKTOP");
 
-            const xdg_current_desktop = getenv("XDG_CURRENT_DESKTOP");
-            defer if (xdg_current_desktop) |v| {
-                _ = setenv("XDG_CURRENT_DESKTOP", v);
-            } else {
-                _ = unsetenv("XDG_CURRENT_DESKTOP");
-            };
-            _ = unsetenv("XDG_CURRENT_DESKTOP");
+            try env.put("XDG_SESSION_DESKTOP", "gnome");
+            try testing.expectEqual(.gnome, desktopEnvironment(&env));
+            try env.put("XDG_SESSION_DESKTOP", "gnome-xorg");
+            try testing.expectEqual(.gnome, desktopEnvironment(&env));
+            try env.put("XDG_SESSION_DESKTOP", "foobar");
+            try testing.expectEqual(.other, desktopEnvironment(&env));
 
-            const xdg_session_desktop = getenv("XDG_SESSION_DESKTOP");
-            defer if (xdg_session_desktop) |v| {
-                _ = setenv("XDG_SESSION_DESKTOP", v);
-            } else {
-                _ = unsetenv("XDG_SESSION_DESKTOP");
-            };
-            _ = unsetenv("XDG_SESSION_DESKTOP");
+            _ = env.swapRemove("XDG_SESSION_DESKTOP");
+            try testing.expectEqual(.other, desktopEnvironment(&env));
 
-            _ = setenv("XDG_SESSION_DESKTOP", "gnome");
-            try testing.expectEqual(.gnome, desktopEnvironment());
-            _ = setenv("XDG_SESSION_DESKTOP", "gnome-xorg");
-            try testing.expectEqual(.gnome, desktopEnvironment());
-            _ = setenv("XDG_SESSION_DESKTOP", "foobar");
-            try testing.expectEqual(.other, desktopEnvironment());
-
-            _ = unsetenv("XDG_SESSION_DESKTOP");
-            try testing.expectEqual(.other, desktopEnvironment());
-
-            _ = setenv("XDG_CURRENT_DESKTOP", "GNOME");
-            try testing.expectEqual(.gnome, desktopEnvironment());
-            _ = setenv("XDG_CURRENT_DESKTOP", "FOOBAR");
-            try testing.expectEqual(.other, desktopEnvironment());
-            _ = unsetenv("XDG_CURRENT_DESKTOP");
-            try testing.expectEqual(.other, desktopEnvironment());
+            try env.put("XDG_CURRENT_DESKTOP", "GNOME");
+            try testing.expectEqual(.gnome, desktopEnvironment(&env));
+            try env.put("XDG_CURRENT_DESKTOP", "FOOBAR");
+            try testing.expectEqual(.other, desktopEnvironment(&env));
+            _ = env.swapRemove("XDG_CURRENT_DESKTOP");
+            try testing.expectEqual(.other, desktopEnvironment(&env));
         },
-        else => try testing.expectEqual(.other, DesktopEnvironment()),
+        else => try testing.expectEqual(.other, desktopEnvironment(&env)),
     }
 }

@@ -208,12 +208,11 @@ pub const Shaper = struct {
         errdefer cf_release_thread.deinit();
 
         // Start the CF release thread.
-        var cf_release_thr = try std.Thread.spawn(
+        const cf_release_thr = try std.Thread.spawn(
             .{},
             CFReleaseThread.threadMain,
             .{cf_release_thread},
         );
-        cf_release_thr.setName("cf_release") catch {};
 
         return .{
             .alloc = alloc,

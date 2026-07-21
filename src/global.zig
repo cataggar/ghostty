@@ -157,7 +157,11 @@ pub const GlobalState = struct {
         self.rlimits = .init();
 
         // Initialize our crash reporting.
-        crash.init(self.alloc, &self.environ_map) catch |err| {
+        crash.init(
+            self.alloc,
+            self.io_threaded.io(),
+            &self.environ_map,
+        ) catch |err| {
             std.log.warn(
                 "sentry init failed, no crash capture available err={}",
                 .{err},

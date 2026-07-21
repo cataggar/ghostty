@@ -69,6 +69,7 @@ pub fn get(alloc: Allocator, io: std.Io) !Entry {
         var pty = try Pty.open(.{});
         defer pty.deinit();
         var cmd: internal_os.FlatpakHostCommand = .{
+            .io = io,
             .argv = &[_][]const u8{
                 "/bin/sh",
                 "-l",

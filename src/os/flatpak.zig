@@ -48,6 +48,9 @@ pub const FlatpakHostCommand = struct {
     /// the command to execute.
     argv: []const []const u8,
 
+    /// I/O implementation used for synchronization and thread naming.
+    io: std.Io,
+
     /// The cwd for the new process. If this is not set then it will use
     /// the current cwd of the calling process.
     cwd: ?[:0]const u8 = null,
@@ -120,14 +123,16 @@ pub const FlatpakHostCommand = struct {
     /// Precondition: The self pointer MUST be stable.
     pub fn spawn(self: *FlatpakHostCommand, alloc: Allocator) !u32 {
         const thread = try std.Thread.spawn(.{}, threadMain, .{ self, alloc });
-        thread.setName("flatpak-host-command") catch {};
+        thread.setName(self.io, "flatpak-host-command") catch {};
         // We don't track this thread, it will terminate on its own on command exit
         thread.detach();
 
         // Wait for the process to start or error.
-        self.state_mutex.lock();
-        defer self.state_mutex.unlock();
-        while (self.state == .init) self.state_cv.wait(&self.state_mutex);
+        self.state_mutex.lockUncancelable(self.io);
+        defer self.state_mutex.unlock(self.io);
+        while (self.state == .init) {
+            self.state_cv.waitUncancelable(self.io, &self.state_mutex);
+        }
 
         return switch (self.state) {
             .init => unreachable,
@@ -140,8 +145,8 @@ pub const FlatpakHostCommand = struct {
     /// Wait for the process to end and return the exit status. This
     /// can only be called ONCE. Once this returns, the state is reset.
     pub fn wait(self: *FlatpakHostCommand) !u8 {
-        self.state_mutex.lock();
-        defer self.state_mutex.unlock();
+        self.state_mutex.lockUncancelable(self.io);
+        defer self.state_mutex.unlock(self.io);
 
         while (true) {
             switch (self.state) {
@@ -150,12 +155,12 @@ pub const FlatpakHostCommand = struct {
                 .started => {},
                 .exited => |v| {
                     self.state = .{ .init = {} };
-                    self.state_cv.broadcast();
+                    self.state_cv.broadcast(self.io);
                     return v.status;
                 },
             }
 
-            self.state_cv.wait(&self.state_mutex);
+            self.state_cv.waitUncancelable(self.io, &self.state_mutex);
         }
     }
 
@@ -174,8 +179,8 @@ pub const FlatpakHostCommand = struct {
             r: WaitError!u8,
         ) void,
     ) void {
-        self.state_mutex.lock();
-        defer self.state_mutex.unlock();
+        self.state_mutex.lockUncancelable(self.io);
+        defer self.state_mutex.unlock(self.io);
 
         completion.* = .{
             .callback = (struct {
@@ -234,8 +239,8 @@ pub const FlatpakHostCommand = struct {
     /// command is not in the started state.
     pub fn signal(self: *FlatpakHostCommand, sig: u8, pg: bool) !void {
         const pid = pid: {
-            self.state_mutex.lock();
-            defer self.state_mutex.unlock();
+            self.state_mutex.lockUncancelable(self.io);
+            defer self.state_mutex.unlock(self.io);
             switch (self.state) {
                 .started => |v| break :pid v.pid,
                 else => return,
@@ -447,9 +452,9 @@ pub const FlatpakHostCommand = struct {
 
     /// Helper to update the state and notify waiters via the cv.
     fn updateState(self: *FlatpakHostCommand, state: State) void {
-        self.state_mutex.lock();
-        defer self.state_mutex.unlock();
-        defer self.state_cv.broadcast();
+        self.state_mutex.lockUncancelable(self.io);
+        defer self.state_mutex.unlock(self.io);
+        defer self.state_cv.broadcast(self.io);
         self.state = state;
     }
 
@@ -464,8 +469,8 @@ pub const FlatpakHostCommand = struct {
     ) callconv(.c) void {
         const self = @as(*FlatpakHostCommand, @ptrCast(@alignCast(ud)));
         const state = state: {
-            self.state_mutex.lock();
-            defer self.state_mutex.unlock();
+            self.state_mutex.lockUncancelable(self.io);
+            defer self.state_mutex.unlock(self.io);
             break :state self.state.started;
         };
 

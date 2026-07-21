@@ -282,7 +282,7 @@ const PosixPty = struct {
                         const linux = std.os.linux;
                         var pgrp: i32 = undefined;
                         const rc = linux.tcgetpgrp(self.master, &pgrp);
-                        switch (linux.E.init(rc)) {
+                        switch (linux.errno(rc)) {
                             .SUCCESS => return @intCast(pgrp),
                             else => return null,
                         }

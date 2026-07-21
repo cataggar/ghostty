@@ -38,7 +38,7 @@ pub fn open(
     // can be problematic, so let's drop it from the env
     var env = env_map;
     if (comptime build_config.snap) {
-        env.remove("LD_LIBRARY_PATH");
+        _ = env.swapRemove("LD_LIBRARY_PATH");
     }
 
     // Spawn the process so we can detect failure quickly.

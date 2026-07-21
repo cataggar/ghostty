@@ -11,7 +11,7 @@ pub fn resourcesDir(
 ) !internal_os.ResourcesDir {
     if (comptime build_config.flatpak) {
         // Only consult Flatpak runtime data for host case.
-        if (internal_os.isFlatpak()) {
+        if (internal_os.isFlatpak(io)) {
             var result: internal_os.ResourcesDir = .{
                 .app_path = try alloc.dupe(u8, "/app/share/ghostty"),
             };
