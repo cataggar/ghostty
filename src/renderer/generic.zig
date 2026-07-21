@@ -980,7 +980,7 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             //
             // This will mark them as defunct so that they
             // can't be double-freed or used in draw calls.
-            self.swap_chain.deinit();
+            self.swap_chain.deinit(io);
             self.shaders.deinit(self.alloc);
         }
 

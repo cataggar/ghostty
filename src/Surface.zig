@@ -2441,7 +2441,7 @@ pub fn setFontSize(self: *Surface, size: font.face.DesiredSize) !void {
         &self.config.font,
         self.font_size,
     );
-    errdefer self.app.font_grid_set.deref(font_grid_key);
+    errdefer self.app.font_grid_set.deref(self.app.io, font_grid_key);
 
     // Set our cell size
     try self.setCellSize(.{

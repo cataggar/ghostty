@@ -1592,7 +1592,7 @@ pub const Surface = extern struct {
     pub fn defaultTermioEnv(self: *Self) !std.process.Environ.Map {
         const app = Application.default();
         const alloc = app.allocator();
-        var env = try internal_os.getEnvMap(alloc);
+        var env = try app.core().environ.clone(alloc);
         errdefer env.deinit();
 
         if (app.savedLanguage()) |language| {
@@ -2123,7 +2123,7 @@ pub const Surface = extern struct {
             &derived_config,
             font_size,
         ) catch return;
-        defer app.core().font_grid_set.deref(font_grid_key);
+        defer app.core().font_grid_set.deref(app.core().io, font_grid_key);
 
         const cell = font_grid.cellSize();
 

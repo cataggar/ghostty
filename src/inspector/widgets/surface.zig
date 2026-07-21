@@ -443,7 +443,7 @@ fn mouseTable(
                 if (state != .press) continue;
                 const button: input.MouseButton = @enumFromInt(i);
                 cimgui.c.ImGui_SameLine();
-                cimgui.c.ImGui_Text("%s", (switch (button) {
+                const label: [*:0]const u8 = switch (button) {
                     .unknown => "?",
                     .left => "L",
                     .middle => "M",
@@ -456,7 +456,8 @@ fn mouseTable(
                     .nine => "{9}",
                     .ten => "{10}",
                     .eleven => "{11}",
-                }).ptr);
+                };
+                cimgui.c.ImGui_Text("%s", label);
             }
         }
     }

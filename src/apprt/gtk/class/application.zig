@@ -5,6 +5,7 @@ const adw = @import("adw");
 const gdk = @import("gdk");
 const gio = @import("gio");
 const glib = @import("glib");
+const glibunix = @import("glibunix");
 const gobject = @import("gobject");
 const gtk = @import("gtk");
 
@@ -344,7 +345,7 @@ pub const Application = extern struct {
             // I'm unsure of any scenario where this happens. Because we don't
             // want to litter null checks everywhere, we just exit here.
             log.warn("gdk display is null, exiting", .{});
-            std.posix.exit(1);
+            std.process.exit(1);
         };
 
         // Setup our windowing protocol logic
@@ -1407,7 +1408,7 @@ pub const Application = extern struct {
     fn startupSignals(self: *Self) void {
         const priv = self.private();
         assert(priv.signal_source == null);
-        priv.signal_source = glib.unixSignalAdd(
+        priv.signal_source = glibunix.signalAdd(
             std.posix.SIG.USR2,
             handleSigusr2,
             self,
