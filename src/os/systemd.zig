@@ -121,7 +121,7 @@ pub const notify = struct {
                 std.os.linux.SOCK.DGRAM | std.os.linux.SOCK.CLOEXEC,
                 0,
             );
-            switch (std.os.linux.E.init(rc)) {
+            switch (std.os.linux.errno(rc)) {
                 .SUCCESS => break :socket @intCast(rc),
                 else => |e| {
                     log.warn("creating socket failed: {s}", .{@tagName(e)});
@@ -138,7 +138,7 @@ pub const notify = struct {
                 &socket_address,
                 @offsetOf(std.os.linux.sockaddr.un, "path") + socket_address.path.len,
             );
-            switch (std.os.linux.E.init(rc)) {
+            switch (std.os.linux.errno(rc)) {
                 .SUCCESS => break :connect,
                 else => |e| {
                     log.warn("unable to connect to notify socket: {s}", .{@tagName(e)});
@@ -149,7 +149,7 @@ pub const notify = struct {
 
         write: {
             const rc = std.os.linux.write(socket, message.ptr, message.len);
-            switch (std.os.linux.E.init(rc)) {
+            switch (std.os.linux.errno(rc)) {
                 .SUCCESS => {
                     const written = rc;
                     if (written < message.len) {
@@ -181,7 +181,7 @@ pub const notify = struct {
         if (comptime builtin.os.tag != .linux) return;
 
         const ts: std.Io.Timestamp = .now(io, .awake);
-        const now = ts.sec * std.time.us_per_s + @divFloor(ts.nsec, std.time.ns_per_us);
+        const now = ts.toMicroseconds();
 
         var buffer: [64]u8 = undefined;
         const message = std.fmt.bufPrint(&buffer, "RELOADING=1\nMONOTONIC_USEC={d}", .{now}) catch |err| {

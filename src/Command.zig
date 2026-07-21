@@ -36,7 +36,7 @@ const apprt = @import("apprt.zig");
 /// Function prototype for a function executed /in the child process/ after the
 /// fork, but before exec'ing the command. If the function returns a u8, the
 /// child process will be exited with that error code.
-const PreExecFn = fn (*Command) ?u8;
+const PreExecFn = fn (*Command, std.Io) ?u8;
 
 /// Allowable set of errors that can be returned by a post fork function. Any
 /// errors will result in the failure to create the surface.
@@ -44,7 +44,7 @@ pub const PostForkError = error{PostForkError};
 
 /// Function prototype for a function executed /in the parent process/
 /// after the fork.
-const PostForkFn = fn (*Command) PostForkError!void;
+const PostForkFn = fn (*Command, std.Io) PostForkError!void;
 
 /// Path to the command to run. This doesn't have to be an absolute path,
 /// because use exec functions that search the PATH, if necessary.
@@ -192,7 +192,7 @@ fn startPosix(self: *Command, arena: Allocator, io: std.Io) !void {
     if (pid != 0) {
         // Parent, return immediately.
         self.pid = @intCast(pid);
-        if (self.rt_post_fork) |f| try f(self);
+        if (self.rt_post_fork) |f| try f(self, io);
         return;
     }
 
@@ -221,8 +221,8 @@ fn startPosix(self: *Command, arena: Allocator, io: std.Io) !void {
     global_state.rlimits.restore();
 
     // If there are pre exec callbacks, call them now.
-    if (self.os_pre_exec) |f| if (f(self)) |exitcode| std.process.exit(exitcode);
-    if (self.rt_pre_exec) |f| if (f(self)) |exitcode| std.process.exit(exitcode);
+    if (self.os_pre_exec) |f| if (f(self, io)) |exitcode| std.process.exit(exitcode);
+    if (self.rt_pre_exec) |f| if (f(self, io)) |exitcode| std.process.exit(exitcode);
 
     // Finally, replace our process.
     // Note: we must use the "p"-variant of exec because we
@@ -660,7 +660,7 @@ test "Command: os pre exec 1" {
         .path = "/bin/sh",
         .args = &.{ "/bin/sh", "-v" },
         .os_pre_exec = (struct {
-            fn do(_: *Command) ?u8 {
+            fn do(_: *Command, _: std.Io) ?u8 {
                 // This runs in the child, so we can exit and it won't
                 // kill the test runner.
                 std.process.exit(42);
@@ -685,7 +685,7 @@ test "Command: os pre exec 2" {
         .path = "/bin/sh",
         .args = &.{ "/bin/sh", "-v" },
         .os_pre_exec = (struct {
-            fn do(_: *Command) ?u8 {
+            fn do(_: *Command, _: std.Io) ?u8 {
                 // This runs in the child, so we can exit and it won't
                 // kill the test runner.
                 return 42;
@@ -711,7 +711,7 @@ test "Command: rt pre exec 1" {
         .args = &.{ "/bin/sh", "-v" },
         .os_pre_exec = null,
         .rt_pre_exec = (struct {
-            fn do(_: *Command) ?u8 {
+            fn do(_: *Command, _: std.Io) ?u8 {
                 // This runs in the child, so we can exit and it won't
                 // kill the test runner.
                 std.process.exit(42);
@@ -736,7 +736,7 @@ test "Command: rt pre exec 2" {
         .args = &.{ "/bin/sh", "-v" },
         .os_pre_exec = null,
         .rt_pre_exec = (struct {
-            fn do(_: *Command) ?u8 {
+            fn do(_: *Command, _: std.Io) ?u8 {
                 // This runs in the child, so we can exit and it won't
                 // kill the test runner.
                 return 42;
@@ -762,7 +762,7 @@ test "Command: rt post fork 1" {
         .os_pre_exec = null,
         .rt_pre_exec = null,
         .rt_post_fork = (struct {
-            fn do(_: *Command) PostForkError!void {
+            fn do(_: *Command, _: std.Io) PostForkError!void {
                 return error.PostForkError;
             }
         }).do,

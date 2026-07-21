@@ -21,6 +21,6 @@ pub fn current(io: std.Io, buf: []u8, pid: u32) ?[]const u8 {
     const contents = buf[0..len];
 
     // Find the last ':'
-    const idx = std.mem.rfindScalar(u8, contents, ':') orelse return null;
+    const idx = std.mem.findScalarLast(u8, contents, ':') orelse return null;
     return std.mem.trimEnd(u8, contents[idx + 1 ..], " \r\n");
 }

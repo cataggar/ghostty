@@ -1028,7 +1028,7 @@ const Subprocess = struct {
                 .windows => null,
                 else => f: {
                     const f = struct {
-                        fn callback(cmd: *Command) ?u8 {
+                        fn callback(cmd: *Command, _: std.Io) ?u8 {
                             const sp = cmd.getData(Subprocess) orelse unreachable;
                             sp.childPreExec() catch |err| log.err(
                                 "error initializing child: {}",

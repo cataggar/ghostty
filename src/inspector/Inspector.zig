@@ -116,6 +116,7 @@ pub fn render(
 ) void {
     // Draw the UI
     self.gui.draw(
+        surface.app.io,
         surface,
         self.mouse,
     );

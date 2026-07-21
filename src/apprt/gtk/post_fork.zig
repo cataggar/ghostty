@@ -35,7 +35,7 @@ pub const PostForkInfo = struct {
 ///
 /// If we are configured to hard fail, log an error message and return an error
 /// code if we don't detect the move in time.
-pub fn postFork(cmd: *Command) Command.PostForkError!void {
+pub fn postFork(cmd: *Command, io: std.Io) Command.PostForkError!void {
     switch (cmd.rt_post_fork_info.linux_cgroup) {
         .always => {},
         .never => return,
@@ -85,12 +85,12 @@ pub fn postFork(cmd: *Command) Command.PostForkError!void {
         return;
     };
 
-    const start = std.Io.Timestamp.now() catch unreachable;
+    const start = std.Io.Timestamp.now(io, .awake);
 
     loop: while (true) {
-        const now = std.Io.Timestamp.now() catch unreachable;
+        const now = std.Io.Timestamp.now(io, .awake);
 
-        if (now.since(start) > 250 * std.time.ns_per_ms) {
+        if (start.durationTo(now).nanoseconds > 250 * std.time.ns_per_ms) {
             if (cmd.rt_pre_exec_info.linux_cgroup_hard_fail) {
                 log.err("transition to new transient systemd scope {s} took too long", .{expected_cgroup});
                 return error.PostForkError;
@@ -103,11 +103,12 @@ pub fn postFork(cmd: *Command) Command.PostForkError!void {
             var current_cgroup_buf: [4096]u8 = undefined;
 
             const current_cgroup_raw = internal_os.cgroup.current(
+                io,
                 &current_cgroup_buf,
                 @intCast(pid),
             ) orelse break :not_found;
 
-            const index = std.mem.rfindScalar(u8, current_cgroup_raw, '/') orelse break :not_found;
+            const index = std.mem.findScalarLast(u8, current_cgroup_raw, '/') orelse break :not_found;
             const current_cgroup = current_cgroup_raw[index + 1 ..];
 
             if (std.mem.eql(u8, current_cgroup, expected_cgroup)) {
@@ -116,6 +117,6 @@ pub fn postFork(cmd: *Command) Command.PostForkError!void {
             }
         }
 
-        std.Thread.sleep(25 * std.time.ns_per_ms);
+        io.sleep(.fromNanoseconds(25 * std.time.ns_per_ms), .awake) catch unreachable;
     }
 }

@@ -10,8 +10,10 @@ pub const TokenBuffer = [token_hex_len + 1]u8;
 const token_format = std.fmt.comptimePrint("{{x:0>{}}}", .{token_hex_len});
 
 /// Generate a token suitable for use in requests to the XDG Desktop Portal
-pub fn generateToken() usize {
-    return std.crypto.random.int(usize);
+pub fn generateToken(io: std.Io) usize {
+    var token: usize = undefined;
+    io.random(std.mem.asBytes(&token));
+    return token;
 }
 
 /// Format a request token consistently for use in portal object paths and payloads.
@@ -59,7 +61,7 @@ fn buildRequestPath(alloc: Allocator, unique_name: []const u8, token: usize) All
 
 /// Try and parse the token out of a request path.
 pub fn parseRequestPathToken(request_path: []const u8) ?usize {
-    const index = std.mem.rfindScalar(u8, request_path, '/') orelse return null;
+    const index = std.mem.findScalarLast(u8, request_path, '/') orelse return null;
     const token = request_path[index + 1 ..];
     return std.fmt.parseUnsigned(usize, token, 16) catch return null;
 }

@@ -1470,7 +1470,7 @@ pub const Application = extern struct {
         const priv = self.private();
         _ = priv.core_app.mailbox.push(.{
             .new_window = .{},
-        }, .{ .forever = {} });
+        }, .{ .forever = {} }, priv.core_app.io);
 
         // Call the parent activate method.
         gio.Application.virtual_methods.activate.call(
@@ -1820,7 +1820,8 @@ pub const Application = extern struct {
         _: ?*glib.Variant,
         self: *Self,
     ) callconv(.c) void {
-        _ = self.core().mailbox.push(.open_config, .forever);
+        const core_app = self.core();
+        _ = core_app.mailbox.push(.open_config, .forever, core_app.io);
     }
 
     fn actionPresentSurface(
@@ -1843,9 +1844,10 @@ pub const Application = extern struct {
         // notification so we don't focus any surface.
         const surface_id = parameter.getUint64();
         if (surface_id == 0) return;
-        const surface = self.core().findSurfaceByID(surface_id) orelse return;
+        const core_app = self.core();
+        const surface = core_app.findSurfaceByID(surface_id) orelse return;
 
-        _ = self.core().mailbox.push(
+        _ = core_app.mailbox.push(
             .{
                 .surface_message = .{
                     .surface = surface,
@@ -1853,6 +1855,7 @@ pub const Application = extern struct {
                 },
             },
             .forever,
+            core_app.io,
         );
     }
 
@@ -1900,8 +1903,10 @@ pub const Application = extern struct {
         // Fallback to the minimal cross-platform way of opening a URL.
         // This is always a safe fallback and enables for example Windows
         // to open URLs (GTK on Windows via WSL is a thing).
+        const core_app = self.core();
         internal_os.open(
-            self.allocator(),
+            core_app.io,
+            core_app.environ.*,
             kind,
             url,
         ) catch |err| log.warn("unable to open url: {}", .{err});
@@ -2334,7 +2339,12 @@ const Action = struct {
     pub fn openConfig(self: *Application) bool {
         // Get the config file path
         const alloc = self.allocator();
-        const path = configpkg.edit.openPath(alloc) catch |err| {
+        const core_app = self.core();
+        const path = configpkg.edit.openPath(
+            alloc,
+            core_app.io,
+            core_app.environ,
+        ) catch |err| {
             log.warn("error getting config file path: {}", .{err});
             return false;
         };
@@ -2929,12 +2939,12 @@ fn setGtkEnv(config: *const CoreConfig) error{NoSpaceLeft}!void {
         var first: bool = true;
         inline for (@typeInfo(@TypeOf(gdk_debug)).@"struct".fields) |field| {
             if (@field(gdk_debug, field.name)) {
-                if (!first) try writer.writeAll(",");
-                try writer.writeAll(field.name);
+                if (!first) writer.writeAll(",") catch return error.NoSpaceLeft;
+                writer.writeAll(field.name) catch return error.NoSpaceLeft;
                 first = false;
             }
         }
-        try writer.writeByte(0);
+        writer.writeByte(0) catch return error.NoSpaceLeft;
         const value = writer.buffered();
         log.warn("setting GDK_DEBUG={s}", .{value[0 .. value.len - 1]});
         _ = internal_os.setenv("GDK_DEBUG", value[0 .. value.len - 1 :0]);
@@ -2946,12 +2956,12 @@ fn setGtkEnv(config: *const CoreConfig) error{NoSpaceLeft}!void {
         var first: bool = true;
         inline for (@typeInfo(@TypeOf(gdk_disable)).@"struct".fields) |field| {
             if (@field(gdk_disable, field.name)) {
-                if (!first) try writer.writeAll(",");
-                try writer.writeAll(field.name);
+                if (!first) writer.writeAll(",") catch return error.NoSpaceLeft;
+                writer.writeAll(field.name) catch return error.NoSpaceLeft;
                 first = false;
             }
         }
-        try writer.writeByte(0);
+        writer.writeByte(0) catch return error.NoSpaceLeft;
         const value = writer.buffered();
         log.warn("setting GDK_DISABLE={s}", .{value[0 .. value.len - 1]});
         _ = internal_os.setenv("GDK_DISABLE", value[0 .. value.len - 1 :0]);

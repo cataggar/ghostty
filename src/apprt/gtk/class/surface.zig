@@ -2119,6 +2119,7 @@ pub const Surface = extern struct {
         defer derived_config.deinit();
 
         const font_grid_key, const font_grid = app.core().font_grid_set.ref(
+            app.core().io,
             &derived_config,
             font_size,
         ) catch return;
@@ -2503,7 +2504,12 @@ pub const Surface = extern struct {
             // any stale MediaFile and returns the current slot value (possibly
             // null if the path is now inaccessible), so priv.bell_media never
             // dangles.
-            priv.bell_media = media.bellMediaFile(priv.bell_media, path, required);
+            priv.bell_media = media.bellMediaFile(
+                Application.default().core().io,
+                priv.bell_media,
+                path,
+                required,
+            );
             const media_file = priv.bell_media orelse break :audio;
             media.playBell(media_file, volume);
         }
@@ -3267,7 +3273,7 @@ pub const Surface = extern struct {
         // If we don't, we'll initialize it on the first resize so we have
         // our proper initial dimensions.
         if (priv.core_surface) |v| realize: {
-            v.renderer.displayRealized() catch |err| {
+            v.renderer.displayRealized(Application.default().core().io) catch |err| {
                 log.warn("core displayRealized failed err={}", .{err});
                 break :realize;
             };
@@ -3308,7 +3314,7 @@ pub const Surface = extern struct {
                 return;
             }
 
-            surface.renderer.displayUnrealized();
+            surface.renderer.displayUnrealized(Application.default().core().io);
         }
 
         // Unset our input method
@@ -3354,7 +3360,7 @@ pub const Surface = extern struct {
         const priv = self.private();
         const surface = priv.core_surface orelse return 1;
 
-        surface.renderer.drawFrame(true) catch |err| {
+        surface.renderer.drawFrame(Application.default().core().io, true) catch |err| {
             log.warn("failed to draw frame err={}", .{err});
             return 0;
         };
@@ -3467,7 +3473,7 @@ pub const Surface = extern struct {
         if (priv.overrides.working_directory) |wd| {
             const config_alloc = config.arenaAlloc();
             var wd_val: configpkg.WorkingDirectory = .{ .path = try config_alloc.dupe(u8, wd) };
-            try wd_val.finalize(config_alloc);
+            try wd_val.finalize(config_alloc, app.core().io, app.core().environ);
             config.@"working-directory" = wd_val;
         }
 
@@ -3476,7 +3482,7 @@ pub const Surface = extern struct {
         if (priv.pwd) |pwd| {
             const config_alloc = config.arenaAlloc();
             var wd_val: configpkg.WorkingDirectory = .{ .path = try config_alloc.dupe(u8, pwd) };
-            try wd_val.finalize(config_alloc);
+            try wd_val.finalize(config_alloc, app.core().io, app.core().environ);
             config.@"working-directory" = wd_val;
         }
 

@@ -627,9 +627,11 @@ const Token = [16]u8;
 fn generateToken(buf: *Token) [:0]const u8 {
     // u28 takes up 7 bytes in hex, 8 bytes for "ghostty_" and 1 byte for NUL
     // 7 + 8 + 1 = 16
+    var value: u32 = undefined;
+    Application.default().core().io.random(std.mem.asBytes(&value));
     return std.fmt.bufPrintZ(
         buf,
         "ghostty_{x:0<7}",
-        .{std.crypto.random.int(u28)},
+        .{@as(u28, @truncate(value))},
     ) catch unreachable;
 }

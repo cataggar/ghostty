@@ -122,9 +122,10 @@ pub fn setDbusConnection(self: *OpenURI, dbus: ?*gio.DBusConnection) void {
 
 pub fn deinit(self: *OpenURI) void {
     const alloc = self.app.app.allocator();
+    const io = self.app.app.core().io;
 
-    self.mutex.lock();
-    defer self.mutex.unlock();
+    self.mutex.lockUncancelable(io);
+    defer self.mutex.unlock(io);
 
     if (!self.alive) return;
     self.alive = false;
@@ -145,9 +146,10 @@ pub fn deinit(self: *OpenURI) void {
 /// method call will be reported asynchronously.
 pub fn start(self: *OpenURI, value: apprt.action.OpenUrl) (Allocator.Error || Errors)!void {
     const alloc = self.app.app.allocator();
+    const io = self.app.app.core().io;
     const dbus = self.dbus orelse return error.DBusConnectionRequired;
 
-    const token = portal.generateToken();
+    const token = portal.generateToken(io);
     const request_path = try portal.getRequestPath(alloc, dbus, token);
     defer alloc.free(request_path);
 
@@ -157,8 +159,8 @@ pub fn start(self: *OpenURI, value: apprt.action.OpenUrl) (Allocator.Error || Er
         alloc.destroy(request);
     }
 
-    self.mutex.lock();
-    defer self.mutex.unlock();
+    self.mutex.lockUncancelable(io);
+    defer self.mutex.unlock(io);
 
     // Create an entry that is used to track the results of the D-Bus method
     // call.
@@ -166,7 +168,7 @@ pub fn start(self: *OpenURI, value: apprt.action.OpenUrl) (Allocator.Error || Er
         const entry = try alloc.create(Entry);
         errdefer alloc.destroy(entry);
         entry.* = .{
-            .start = std.Io.Timestamp.now() catch return error.TimerUnavailable,
+            .start = std.Io.Timestamp.now(io, .awake),
             .token = token,
             .kind = value.kind,
             .uri = try alloc.dupeZ(u8, value.url),
@@ -235,8 +237,9 @@ fn destroyEntry(alloc: Allocator, entry: *Entry) void {
 }
 
 fn failRequest(self: *OpenURI, token: usize) ?*Entry {
-    self.mutex.lock();
-    defer self.mutex.unlock();
+    const io = self.app.app.core().io;
+    self.mutex.lockUncancelable(io);
+    defer self.mutex.unlock(io);
 
     if (!self.alive) return null;
 
@@ -422,8 +425,9 @@ fn requestCallback(
         return;
     }
 
-    self.mutex.lock();
-    defer self.mutex.unlock();
+    const io = self.app.app.core().io;
+    self.mutex.lockUncancelable(io);
+    defer self.mutex.unlock(io);
 
     if (!self.alive) return;
 
@@ -461,8 +465,9 @@ fn responseReceived(
         return;
     };
 
-    self.mutex.lock();
-    defer self.mutex.unlock();
+    const io = self.app.app.core().io;
+    self.mutex.lockUncancelable(io);
+    defer self.mutex.unlock(io);
 
     if (!self.alive) return;
 
@@ -534,22 +539,18 @@ fn cleanup(ud: ?*anyopaque) callconv(.c) c_int {
 
     const alloc = self.app.app.allocator();
 
-    self.mutex.lock();
-    defer self.mutex.unlock();
+    const io = self.app.app.core().io;
+    self.mutex.lockUncancelable(io);
+    defer self.mutex.unlock(io);
 
     self.cleanup_timer = null;
     if (!self.alive) return @intFromBool(glib.SOURCE_REMOVE);
 
-    const now = std.Io.Timestamp.now() catch {
-        // `now()` should never fail, but if it does, don't crash, just return.
-        // This might cause a small memory leak in rare circumstances but it
-        // should get cleaned up the next time a URL is clicked.
-        return @intFromBool(glib.SOURCE_REMOVE);
-    };
+    const now = std.Io.Timestamp.now(io, .awake);
 
     loop: while (true) {
         for (self.entries.entries.items(.value)) |entry| {
-            if (now.since(entry.start) > cleanup_timeout * std.time.ns_per_s) {
+            if (entry.start.durationTo(now).nanoseconds > cleanup_timeout * std.time.ns_per_s) {
                 log.warn("open uri request timed out token={x}", .{entry.token});
                 self.unsubscribeFromResponse(entry);
                 _ = self.entries.swapRemove(entry.token);

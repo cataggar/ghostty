@@ -29,10 +29,10 @@
     "url": "https://deps.files.ghostty.org/glslang-12201278a1a05c0ce0b6eb6026c65cd3e9247aa041b1c260324bf29cee559dd23ba1.tar.gz",
     "hash": "sha256-FKLtu1Ccs+UamlPj9eQ12/WXFgS0uDPmPmB26MCpl7U="
   },
-  "gobject-0.3.1-Skun7HhMnwBOgnunKXpCmltm6076SYIDU3KGVgNdobJC": {
+  "gobject-0.3.1-Skun7CCNogB9kSZJzqLTf_TwzMPW3-Rqdw86UgxADV-z": {
     "name": "gobject",
-    "url": "https://github.com/ghostty-org/zig-gobject/releases/download/0.8.0-2026-04-13-24-1/ghostty-gobject-0.8.0-2026-04-13-24-1.tar.zst",
-    "hash": "sha256-5sTA+APmlMDiF+LZA7kS0z5naNmlKaD1MQTu1ckqeik="
+    "url": "https://github.com/ghostty-org/zig-gobject/releases/download/0.9.0-2026-05-22-28-1/ghostty-gobject-0.9.0-2026-05-22-28-1.tar.zst",
+    "hash": "sha256-rJu/xJxvFoPsvtgyMVdjeTVCe9dXl61RaRP95K3VBso="
   },
   "N-V-__8AALiNBAA-_0gprYr92CjrMj1I5bqNu0TSJOnjFNSr": {
     "name": "gtk4_layer_shell",
