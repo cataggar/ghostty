@@ -1,6 +1,5 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const global_state = &@import("../global.zig").state;
 const Allocator = std.mem.Allocator;
 const posix = std.posix;
 const isFlatpak = @import("flatpak.zig").isFlatpak;
@@ -34,7 +33,7 @@ pub fn getEnvMapC(alloc: Allocator) std.process.Environ.Map {
         env.putWindowsBlock(.{
             .ptr = peb.ProcessParameters.Environment,
         }) catch {};
-    } else {
+    } else if (comptime builtin.os.tag != .freestanding) {
         const posix_block: std.process.Environ.PosixBlock = .{
             .slice = std.mem.sliceTo(std.c.environ, null),
         };

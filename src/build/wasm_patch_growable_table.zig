@@ -27,16 +27,17 @@ pub fn main(init: std.process.Init) !void {
     const output: []const u8 = try patchTableGrowable(
         alloc,
         try std.Io.Dir.cwd().readFileAlloc(
+            init.io,
             args[1],
             alloc,
-            .none,
+            .unlimited,
         ),
     );
 
     // Write our output
-    const out_file = try std.Io.Dir.cwd().createFile(args[2], .{});
-    defer out_file.close();
-    try out_file.writeAll(output);
+    const out_file = try std.Io.Dir.cwd().createFile(init.io, args[2], .{});
+    defer out_file.close(init.io);
+    try out_file.writePositionalAll(init.io, output, 0);
 }
 
 /// Patch the WASM binary's table section to remove the maximum size

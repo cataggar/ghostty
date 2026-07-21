@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
@@ -27,7 +28,7 @@ pub fn build(b: *std.Build) !void {
     }
     lib.root_module.addIncludePath(b.path("vendor"));
 
-    if (target.result.os.tag.isDarwin()) {
+    if (builtin.os.tag.isDarwin() and target.result.os.tag.isDarwin()) {
         const apple_sdk = @import("apple_sdk");
         try apple_sdk.addPaths(b, lib);
     }

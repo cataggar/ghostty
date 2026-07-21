@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 const build_options = @import("terminal_options");
 const lib = @import("../lib.zig");
@@ -31,6 +32,7 @@ const Result = @import("result.zig").Result;
 const Handler = @import("../stream_terminal.zig").Handler;
 
 const log = std.log.scoped(.terminal_c);
+const TerminalIo = if (builtin.os.tag == .freestanding) void else std.Io.Threaded;
 
 /// Wrapper around ZigTerminal that tracks additional state for C API usage,
 /// such as the persistent VT stream needed to handle escape sequences split
@@ -40,7 +42,7 @@ const TerminalWrapper = struct {
     stream: Stream,
     effects: Effects = .{},
     tracked_grid_refs: std.AutoArrayHashMapUnmanaged(*grid_ref_tracked_c.TrackedGridRef, void) = .{},
-    io: std.Io.Threaded,
+    io: TerminalIo,
     env: std.process.Environ.Map,
 };
 
@@ -153,21 +155,21 @@ const Effects = struct {
 
     fn writePtyTrampoline(handler: *Handler, data: [:0]const u8) void {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.write_pty orelse return;
         func(@ptrCast(wrapper), wrapper.effects.userdata, data.ptr, data.len);
     }
 
     fn bellTrampoline(handler: *Handler) void {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.bell orelse return;
         func(@ptrCast(wrapper), wrapper.effects.userdata);
     }
 
     fn clipboardWriteTrampoline(handler: *Handler, write: clipboard.Write) clipboard.WriteResult {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.clipboard_write orelse return .unsupported;
 
         // Most protocols currently produce one representation, so keep that
@@ -205,7 +207,7 @@ const Effects = struct {
 
     fn colorSchemeTrampoline(handler: *Handler) ?device_status.ColorScheme {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.color_scheme orelse return null;
         var scheme: device_status.ColorScheme = undefined;
         if (func(@ptrCast(wrapper), wrapper.effects.userdata, &scheme)) return scheme;
@@ -214,7 +216,7 @@ const Effects = struct {
 
     fn deviceAttributesTrampoline(handler: *Handler) device_attributes.Attributes {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.device_attributes_cb orelse return .{};
 
         // Get our attributes from the callback.
@@ -245,7 +247,7 @@ const Effects = struct {
 
     fn enquiryTrampoline(handler: *Handler) []const u8 {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.enquiry orelse return "";
         const result = func(@ptrCast(wrapper), wrapper.effects.userdata);
         if (result.len == 0) return "";
@@ -254,7 +256,7 @@ const Effects = struct {
 
     fn xtversionTrampoline(handler: *Handler) []const u8 {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.xtversion orelse return "";
         const result = func(@ptrCast(wrapper), wrapper.effects.userdata);
         if (result.len == 0) return "";
@@ -263,21 +265,21 @@ const Effects = struct {
 
     fn titleChangedTrampoline(handler: *Handler) void {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.title_changed orelse return;
         func(@ptrCast(wrapper), wrapper.effects.userdata);
     }
 
     fn pwdChangedTrampoline(handler: *Handler) void {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.pwd_changed orelse return;
         func(@ptrCast(wrapper), wrapper.effects.userdata);
     }
 
     fn sizeTrampoline(handler: *Handler) ?size_report.Size {
         const stream_ptr: *Stream = @fieldParentPtr("handler", handler);
-        const wrapper: *TerminalWrapper = @fieldParentPtr("stream", stream_ptr);
+        const wrapper: *TerminalWrapper = @alignCast(@fieldParentPtr("stream", stream_ptr));
         const func = wrapper.effects.size_cb orelse return null;
         var s: size_report.Size = undefined;
         if (func(@ptrCast(wrapper), wrapper.effects.userdata, &s)) return s;
@@ -344,14 +346,21 @@ fn new_(
     // Initialize the env and io directly in the wrapper so that the
     // pointer we pass to Terminal.init remains stable for the lifetime
     // of the wrapper.
-    wrapper.io = .init_single_threaded;
+    const io: std.Io = if (comptime builtin.os.tag == .freestanding) io: {
+        wrapper.io = {};
+        break :io undefined;
+    } else io: {
+        wrapper.io = .init_single_threaded;
+        break :io wrapper.io.io();
+    };
+    errdefer if (comptime builtin.os.tag != .freestanding) wrapper.io.deinit();
     wrapper.env = internal_os.getEnvMapC(alloc);
     errdefer wrapper.env.deinit();
 
     // Setup our terminal
     t.* = try .init(
         alloc,
-        wrapper.io.io(),
+        io,
         &wrapper.env,
         .{
             .cols = opts.cols,
@@ -988,6 +997,7 @@ pub fn free(terminal_: Terminal) callconv(lib.calling_conv) void {
     wrapper.stream.deinit();
     t.deinit(alloc);
     wrapper.env.deinit();
+    if (comptime builtin.os.tag != .freestanding) wrapper.io.deinit();
     alloc.destroy(t);
     alloc.destroy(wrapper);
 }

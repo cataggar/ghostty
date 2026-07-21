@@ -101,6 +101,11 @@ pub const LoadingImage = struct {
             return result;
         }
 
+        // Freestanding targets have no filesystem or shared memory.
+        if (comptime builtin.os.tag == .freestanding) {
+            return error.UnsupportedMedium;
+        }
+
         // Verify our capabilities and limits allow this.
         {
             // Special case if we don't support decoding PNGs and the format
@@ -180,7 +185,11 @@ pub const LoadingImage = struct {
         var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
         const pathz = std.fmt.bufPrintZ(&buf, "{s}", .{path}) catch return error.InvalidData;
 
-        const fd = std.c.shm_open(pathz, @as(c_int, @bitCast(std.c.O{ .ACCMODE = .RDONLY })), 0);
+        const fd = std.c.shm_open(
+            pathz,
+            @as(c_int, @bitCast(std.c.O{ .ACCMODE = .RDONLY })),
+            @as(std.c.mode_t, 0),
+        );
         switch (std.posix.errno(fd)) {
             .SUCCESS => {},
             else => |err| {

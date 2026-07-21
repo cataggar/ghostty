@@ -52,11 +52,11 @@ const GenerationCounter = if (@bitSizeOf(usize) >= 64) struct {
         return self.value.fetchAdd(1, .monotonic) + 1;
     }
 } else struct {
-    mutex: std.Thread.Mutex = .{},
+    mutex: std.atomic.Mutex = .unlocked,
     value: u64 = 0,
 
     fn next(self: *@This()) u64 {
-        self.mutex.lock();
+        while (!self.mutex.tryLock()) std.atomic.spinLoopHint();
         defer self.mutex.unlock();
         self.value += 1;
         return self.value;
