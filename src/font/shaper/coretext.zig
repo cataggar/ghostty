@@ -20,6 +20,7 @@ const SharedGrid = font.SharedGrid;
 const Style = font.Style;
 const Presentation = font.Presentation;
 const CFReleaseThread = os.CFReleaseThread;
+const global_state = &@import("../../global.zig").state;
 
 const log = std.log.scoped(.font_shaper);
 
@@ -284,7 +285,7 @@ pub const Shaper = struct {
         if (self.cf_release_thread.mailbox.push(.{ .release = .{
             .refs = items,
             .alloc = self.alloc,
-        } }, .{ .forever = {} }) != 0) {
+        } }, .{ .forever = {} }, global_state.io()) != 0) {
             self.cf_release_thread.wakeup.notify() catch |err| {
                 log.warn(
                     "error notifying cf release thread to wake up, may stall err={}",
@@ -605,8 +606,8 @@ pub const Shaper = struct {
             //
             // Because of this, we only acquire the read lock to grab the
             // face and set it up, then release it.
-            grid.lock.lockShared();
-            defer grid.lock.unlockShared();
+            grid.lock.lockSharedUncancelable(global_state.io());
+            defer grid.lock.unlockShared(global_state.io());
 
             const face = try grid.resolver.collection.getFace(index);
             const original = face.font;

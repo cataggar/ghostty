@@ -223,7 +223,7 @@ pub fn logFn(
 /// Formats each message as "[level](scope): message\n". Can be passed
 /// directly to ghostty_sys_set(GHOSTTY_SYS_OPT_LOG, &ghostty_sys_log_stderr).
 ///
-/// Uses std.debug.lockStderrWriter for thread-safe, mutex-protected output.
+/// Uses thread-safe, mutex-protected output where the target supports it.
 /// On freestanding/wasm targets this is a no-op (no stderr available).
 pub fn logStderr(
     _: ?*anyopaque,
@@ -245,6 +245,23 @@ pub fn logStderr(
         .debug => "debug",
     };
 
+    if (comptime builtin.os.tag == .ios) {
+        var buffer: [4096]u8 = undefined;
+        const line = if (scope.len > 0)
+            std.fmt.bufPrint(&buffer, "[{s}]({s}): {s}\n", .{
+                level_text,
+                scope,
+                message,
+            }) catch return
+        else
+            std.fmt.bufPrint(&buffer, "[{s}]: {s}\n", .{
+                level_text,
+                message,
+            }) catch return;
+        _ = write(STDERR_FILENO, line.ptr, line.len);
+        return;
+    }
+
     var buffer: [64]u8 = undefined;
     var stderr = std.debug.lockStderr(&buffer);
     defer std.debug.unlockStderr();
@@ -256,6 +273,9 @@ pub fn logStderr(
         writer.print("[{s}]: {s}\n", .{ level_text, message }) catch {};
     }
 }
+
+const STDERR_FILENO = 2;
+extern "c" fn write(fd: c_int, buf: [*]const u8, count: usize) isize;
 
 test "set decode_png with null clears" {
     // Start from a known state.

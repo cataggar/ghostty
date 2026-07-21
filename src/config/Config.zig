@@ -4139,7 +4139,7 @@ pub fn loadDefaultFiles(self: *Config, alloc: Allocator, io: std.Io, env: *const
 
     // On macOS load the app support directory as well
     if (comptime builtin.os.tag == .macos) {
-        const legacy_app_support_path = try file_load.legacyDefaultAppSupportPath(alloc, io);
+        const legacy_app_support_path = try file_load.legacyDefaultAppSupportPath(alloc);
         defer alloc.free(legacy_app_support_path);
         const app_support_path = try file_load.preferredAppSupportPath(alloc, io);
         defer alloc.free(app_support_path);

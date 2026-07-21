@@ -2135,6 +2135,7 @@ pub const CAPI = struct {
             _ = surface.renderer_thread.mailbox.push(
                 .{ .macos_display_id = display_id },
                 .{ .forever = {} },
+                global_state.io(),
             );
             surface.renderer_thread.wakeup.notify() catch {};
         }
@@ -2156,8 +2157,8 @@ pub const CAPI = struct {
             // read the font face. It should not be deferred since
             // we're loading the primary face.
             const grid = ptr.core_surface.renderer.font_grid;
-            grid.lock.lockShared();
-            defer grid.lock.unlockShared();
+            grid.lock.lockSharedUncancelable(global_state.io());
+            defer grid.lock.unlockShared(global_state.io());
 
             const collection = &grid.resolver.collection;
             const face = collection.getFace(.{}) catch return null;
@@ -2231,8 +2232,8 @@ pub const CAPI = struct {
             descriptor: objc.c.id,
         ) void {
             return ptr.renderMetal(
-                .fromId(command_buffer),
                 global_state.io(),
+                .fromId(command_buffer),
                 .fromId(descriptor),
             ) catch |err| {
                 log.err("error rendering inspector err={}", .{err});

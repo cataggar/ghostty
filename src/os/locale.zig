@@ -22,7 +22,7 @@ pub fn ensureLocale(env: *const std.process.Environ.Map) !void {
     // process.
     if (comptime builtin.target.os.tag.isDarwin()) {
         // Set the lang if it is not set or if its empty.
-        if (lang == null or lang.?.value.len == 0) {
+        if (lang == null or lang.?.len == 0) {
             setLangFromCocoa();
         }
     }
