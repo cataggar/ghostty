@@ -595,6 +595,18 @@ pub fn add(
         }
     }
 
+    // Flatpak host commands use GIO directly for D-Bus.
+    if (self.config.flatpak) {
+        step.root_module.linkSystemLibrary("gio-2.0", dynamic_link_opts);
+        if (b.lazyDependency("gobject", .{
+            .target = step.root_module.resolved_target.?,
+            .optimize = step.root_module.optimize.?,
+        })) |gobject| {
+            step.root_module.addImport("gio", gobject.module("gio2"));
+            step.root_module.addImport("glib", gobject.module("glib2"));
+        }
+    }
+
     // If we're building an exe then we have additional dependencies.
     if (step.kind != .lib) {
         // We always statically compile glad
@@ -603,10 +615,6 @@ pub fn add(
             .file = b.path("vendor/glad/src/gl.c"),
             .flags = &.{},
         });
-
-        // When we're targeting flatpak we ALWAYS link GTK so we
-        // get access to glib for dbus.
-        if (self.config.flatpak) step.root_module.linkSystemLibrary("gtk4", dynamic_link_opts);
 
         switch (self.config.app_runtime) {
             .none => {},
@@ -638,8 +646,6 @@ fn addGtkNg(
         const gobject_imports = .{
             .{ "adw", "adw1" },
             .{ "gdk", "gdk4" },
-            .{ "gio", "gio2" },
-            .{ "glib", "glib2" },
             .{ "glibunix", "glibunix2" },
             .{ "gobject", "gobject2" },
             .{ "gtk", "gtk4" },
@@ -648,6 +654,16 @@ fn addGtkNg(
         inline for (gobject_imports) |import| {
             const name, const module = import;
             step.root_module.addImport(name, gobject.module(module));
+        }
+        if (!self.config.flatpak) {
+            const gio_imports = .{
+                .{ "gio", "gio2" },
+                .{ "glib", "glib2" },
+            };
+            inline for (gio_imports) |import| {
+                const name, const module = import;
+                step.root_module.addImport(name, gobject.module(module));
+            }
         }
     }
 
