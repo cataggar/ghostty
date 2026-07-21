@@ -1070,7 +1070,7 @@ pub const Application = extern struct {
         }
     }
 
-    fn loadCustomCss(self: *Self) (std.Io.File.ReadError || Allocator.Error)!void {
+    fn loadCustomCss(self: *Self) std.Io.Reader.LimitedAllocError!void {
         const priv: *Private = self.private();
         const alloc = self.allocator();
         const display = gdk.Display.getDefault() orelse {
@@ -1104,16 +1104,18 @@ pub const Application = extern struct {
                 }
                 continue;
             };
-            defer file.close();
+            defer file.close(io);
 
             const css_file_size_limit = 5 * 1024 * 1024; // 5MB
 
             log.info("loading gtk-custom-css path={s}", .{path});
-            const contents = file.readToEndAlloc(
+            var read_buf: [4096]u8 = undefined;
+            var reader = file.reader(io, &read_buf);
+            const contents = reader.interface.allocRemaining(
                 alloc,
-                css_file_size_limit,
+                .limited(css_file_size_limit),
             ) catch |err| switch (err) {
-                error.FileTooBig => {
+                error.StreamTooLong => {
                     log.warn("gtk-custom-css file {s} was larger than {Bi}", .{ path, css_file_size_limit });
                     continue;
                 },
@@ -1409,7 +1411,7 @@ pub const Application = extern struct {
         const priv = self.private();
         assert(priv.signal_source == null);
         priv.signal_source = glibunix.signalAdd(
-            std.posix.SIG.USR2,
+            @intCast(@intFromEnum(std.posix.SIG.USR2)),
             handleSigusr2,
             self,
         );

@@ -1598,23 +1598,23 @@ pub const Surface = extern struct {
         if (app.savedLanguage()) |language| {
             try env.put("LANG", language);
         } else {
-            env.remove("LANG");
+            _ = env.swapRemove("LANG");
         }
 
         // Don't leak these GTK environment variables to child processes.
-        env.remove("GDK_DEBUG");
-        env.remove("GDK_DISABLE");
-        env.remove("GSK_RENDERER");
+        _ = env.swapRemove("GDK_DEBUG");
+        _ = env.swapRemove("GDK_DISABLE");
+        _ = env.swapRemove("GSK_RENDERER");
 
         // Remove some environment variables that are set when Ghostty is launched
         // from a `.desktop` file, by D-Bus activation, or systemd.
-        env.remove("GIO_LAUNCHED_DESKTOP_FILE");
-        env.remove("GIO_LAUNCHED_DESKTOP_FILE_PID");
-        env.remove("DBUS_STARTER_ADDRESS");
-        env.remove("DBUS_STARTER_BUS_TYPE");
-        env.remove("INVOCATION_ID");
-        env.remove("JOURNAL_STREAM");
-        env.remove("NOTIFY_SOCKET");
+        _ = env.swapRemove("GIO_LAUNCHED_DESKTOP_FILE");
+        _ = env.swapRemove("GIO_LAUNCHED_DESKTOP_FILE_PID");
+        _ = env.swapRemove("DBUS_STARTER_ADDRESS");
+        _ = env.swapRemove("DBUS_STARTER_BUS_TYPE");
+        _ = env.swapRemove("INVOCATION_ID");
+        _ = env.swapRemove("JOURNAL_STREAM");
+        _ = env.swapRemove("NOTIFY_SOCKET");
 
         // Unset environment varies set by snaps if we're running in a snap.
         // This allows Ghostty to further launch additional snaps.
