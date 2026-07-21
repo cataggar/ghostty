@@ -1429,18 +1429,20 @@ pub const ReadThread = struct {
         // can't create it we still run correctly, bridge polls are
         // just bounded by their timeout instead of being interrupted
         // when the parse stage goes idle.
-        if (posix.pipe2(.{
-            .CLOEXEC = true,
-            .NONBLOCK = true,
-        })) |fds| {
-            pipeline.idle_read_fd = fds[0];
-            pipeline.idle_write_fd = fds[1];
+        if (internal_os.pipe()) |fds| {
+            if (setNonblock(fds[0]) and setNonblock(fds[1])) {
+                pipeline.idle_read_fd = fds[0];
+                pipeline.idle_write_fd = fds[1];
+            } else {
+                _ = std.c.close(fds[0]);
+                _ = std.c.close(fds[1]);
+            }
         } else |err| {
             log.warn("read thread failed to create idle pipe err={}", .{err});
         }
         defer if (pipeline.idle_read_fd >= 0) {
-            posix.close(pipeline.idle_read_fd);
-            posix.close(pipeline.idle_write_fd);
+            _ = std.c.close(pipeline.idle_read_fd);
+            _ = std.c.close(pipeline.idle_write_fd);
         };
 
         const gather_thread = std.Thread.spawn(
