@@ -5,7 +5,7 @@
   fetchurl,
   fetchgit,
   runCommandLocal,
-  zig_0_15,
+  zig_0_16,
   name ? "zig-packages",
 }: let
   unpackZigArtifact = {
@@ -14,12 +14,15 @@
   }:
     runCommandLocal name
     {
-      nativeBuildInputs = [zig_0_15];
+      nativeBuildInputs = [zig_0_16];
     }
     ''
-      hash="$(cd "$TMPDIR" && zig fetch --global-cache-dir "$TMPDIR" ${artifact})"
-      mv "$TMPDIR/p/$hash" "$out"
-      chmod 755 "$out"
+      # Work around https://codeberg.org/ziglang/zig/issues/31866.
+      mkdir "$TMPDIR/src" "$TMPDIR/cache"
+      touch "$TMPDIR/src/build.zig"
+      hash="$(cd "$TMPDIR/src" && zig fetch --global-cache-dir "$TMPDIR/cache" ${artifact})"
+      mkdir "$out"
+      tar xzf "$TMPDIR/cache/p/$hash.tar.gz" --directory "$out" --strip-components=1
     '';
 
   fetchZig = {
@@ -56,6 +59,7 @@
     name,
     url,
     hash,
+    unpack ? false,
   }: let
     parts = lib.splitString "://" url;
     proto = builtins.elemAt parts 0;

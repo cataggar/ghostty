@@ -27,7 +27,7 @@
   wasmtime,
   wraptest,
   zig,
-  zig_0_15,
+  zig_0_16,
   zip,
   llvmPackages_latest,
   bzip2,
