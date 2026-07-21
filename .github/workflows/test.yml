@@ -1038,15 +1038,18 @@ jobs:
           name: ghostty
           authToken: "${{ secrets.CACHIX_AUTH_TOKEN }}"
 
+      - name: get the Zig deps
+        id: deps
+        run: nix build -L .#deps && echo "deps=$(readlink ./result)" >> $GITHUB_OUTPUT
+
       - name: test
         run: nix develop -c zig build -Dapp-runtime=none test
 
       - name: Test GTK Build
         run: nix develop -c zig build -Dapp-runtime=gtk -Demit-docs -Demit-webdata
 
-      # This relies on the cache being populated by the commands above.
       - name: Test System Build
-        run: nix develop -c zig build --system ${ZIG_GLOBAL_CACHE_DIR}/p
+        run: nix develop -c zig build --system ${{ steps.deps.outputs.deps }}
 
   test-lib-vt:
     if: needs.skip.outputs.skip != 'true'
