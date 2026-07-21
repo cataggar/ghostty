@@ -48,7 +48,9 @@ pub fn main(init: std.process.Init) !void {
     const alloc = init.arena.allocator();
     const action_ = try cli.action.detectArgs(Action, alloc, init.minimal.args);
     const action = action_ orelse return error.NoAction;
-    try mainAction(alloc, action, init.io, .cli);
+    try mainAction(alloc, action, init.io, init.environ_map, .{
+        .cli = init.minimal.args,
+    });
 }
 
 /// Arguments that can be passed to the benchmark.
