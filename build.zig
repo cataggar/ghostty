@@ -198,17 +198,23 @@ pub fn build(b: *std.Build) !void {
         const lib_shared = try buildpkg.GhosttyLib.initShared(b, &deps);
         const lib_static = try buildpkg.GhosttyLib.initStatic(b, &deps);
 
-        // We shouldn't have this guard but we don't currently
-        // build on macOS this way ironically so we need to fix that.
-        if (!config.target.result.os.tag.isDarwin()) {
-            lib_shared.installHeader(); // Only need one header
-            if (config.target.result.os.tag == .windows) {
+        lib_shared.installHeader(); // Only need one header
+        switch (config.target.result.os.tag) {
+            .windows => {
                 lib_shared.install("ghostty-internal.dll");
                 lib_static.install("ghostty-internal-static.lib");
-            } else {
+            },
+            // On Darwin GhosttyLib.initStatic runs the sources through
+            // libtool into a single fat archive, so the static output is
+            // already self-contained and safe to install directly.
+            .macos, .ios, .tvos, .watchos, .visionos => {
+                lib_shared.install("libghostty-internal.dylib");
+                lib_static.install("libghostty-internal.a");
+            },
+            else => {
                 lib_shared.install("ghostty-internal.so");
                 lib_static.install("ghostty-internal.a");
-            }
+            },
         }
     }
 
