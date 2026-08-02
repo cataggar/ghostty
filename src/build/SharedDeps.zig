@@ -444,7 +444,13 @@ pub fn add(
         step.root_module.addImport("opengl", dep.module("opengl"));
     }
     if (b.lazyDependency("vaxis", .{})) |dep| {
-        step.root_module.addImport("vaxis", dep.module("vaxis"));
+        const vaxis_mod = dep.module("vaxis");
+        // vaxis pulls in uucode itself, which would put a second uucode
+        // module over the same files into the compilation. Point it at ours.
+        if (self.uucodeModule(b, target, optimize)) |mod| {
+            vaxis_mod.addImport("uucode", mod);
+        }
+        step.root_module.addImport("vaxis", vaxis_mod);
     }
     if (b.lazyDependency("wuffs", .{
         .target = target,
@@ -964,14 +970,45 @@ pub fn addUucode(
     target: std.Build.ResolvedTarget,
     optimize: std.builtin.OptimizeMode,
 ) void {
-    if (b.lazyDependency("uucode", .{
+    if (self.uucodeModule(b, target, optimize)) |mod| {
+        module.addImport("uucode", mod);
+    }
+}
+
+/// Cache of uucode modules keyed by target/optimize.
+///
+/// `b.lazyDependency` can't dedupe our uucode instantiation because the
+/// `tables_path` and `build_config_path` arguments are `LazyPath`s, so every
+/// call builds a fresh `Dependency`. `add` runs once per compile step and the
+/// dependency modules it mutates (notably vaxis) are shared across all of
+/// them, so without memoizing here a single compilation can end up with two
+/// uucode modules rooted at the same file, which Zig rejects.
+var uucode_modules: std.StringHashMapUnmanaged(*std.Build.Module) = .empty;
+
+fn uucodeModule(
+    self: *const SharedDeps,
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.builtin.OptimizeMode,
+) ?*std.Build.Module {
+    const key = b.fmt("{s}-{s}-{s}-{s}", .{
+        @tagName(target.result.cpu.arch),
+        @tagName(target.result.os.tag),
+        @tagName(target.result.abi),
+        @tagName(optimize),
+    });
+    if (uucode_modules.get(key)) |mod| return mod;
+
+    const dep = b.lazyDependency("uucode", .{
         .target = target,
         .optimize = optimize,
         .tables_path = self.uucode_tables,
         .build_config_path = b.path("src/build/uucode_config.zig"),
-    })) |dep| {
-        module.addImport("uucode", dep.module("uucode"));
-    }
+    }) orelse return null;
+
+    const mod = dep.module("uucode");
+    uucode_modules.put(b.allocator, key, mod) catch @panic("OOM");
+    return mod;
 }
 
 // For dynamic linking, we prefer dynamic linking and to search by
