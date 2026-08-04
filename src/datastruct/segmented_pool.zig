@@ -26,17 +26,31 @@ pub fn SegmentedPool(comptime T: type, comptime prealloc: usize) type {
         segments: std.ArrayList(Segment) = .empty,
         prealloc_segment: [prealloc]T = undefined,
 
+        /// Maps a ring slot to the value that lives in it. Growth has to
+        /// reorder the ring (see `grow`), so after the first growth this
+        /// mapping is no longer the identity and has to be materialized.
+        /// It stays empty until then so that a pool is still usable when
+        /// it is initialized without an allocator.
+        ring: std.ArrayList(*T) = .empty,
+
         pub fn deinit(self: *Self, alloc: Allocator) void {
             for (self.segments.items) |seg| {
                 alloc.destroy(seg);
             }
             self.segments.deinit(alloc);
+            self.ring.deinit(alloc);
             self.* = undefined;
         }
 
-        /// Get a pointer to the element at index `idx` across
-        /// all segments (prealloc + dynamic).
+        /// Get a pointer to the value in ring slot `idx`.
         fn at(self: *Self, idx: usize) *T {
+            if (self.ring.items.len > 0) return self.ring.items[idx];
+            return self.storageAt(idx);
+        }
+
+        /// Get a pointer to the `idx`th value we have allocated, in
+        /// allocation order rather than ring order.
+        fn storageAt(self: *Self, idx: usize) *T {
             if (idx < prealloc) {
                 return &self.prealloc_segment[idx];
             }
@@ -67,6 +81,12 @@ pub fn SegmentedPool(comptime T: type, comptime prealloc: usize) type {
         }
 
         fn grow(self: *Self, alloc: Allocator) !void {
+            // We only ever grow when nothing is available, which means every
+            // value is checked out and the oldest one of them is the value in
+            // the slot the head points at. Rebuilding the ring below relies on
+            // that.
+            assert(self.available == 0);
+
             // We need to add enough segments to double the total length.
             const new_len = self.len * 2;
             const new_segs_needed = (new_len - 1) / prealloc - self.segments.items.len;
@@ -74,6 +94,28 @@ pub fn SegmentedPool(comptime T: type, comptime prealloc: usize) type {
             const new = try self.segments.addManyAsSlice(alloc, new_segs_needed);
             for (new) |*s| s.* = try alloc.create([prealloc]T);
 
+            // Rebuild the ring so that the values that are still checked out
+            // come first, oldest first, followed by the values we just
+            // created. Values are put back in the order they were handed out,
+            // so once the new values have been handed out the head has to wrap
+            // around to the oldest checked out value. Leaving the ring alone
+            // and resetting the head to `self.len` would instead wrap it to
+            // slot 0, which is only the oldest checked out value when the head
+            // happened to be aligned to the start of the ring, and otherwise
+            // hands a caller a value that is still in use.
+            var ring: std.ArrayList(*T) = .empty;
+            errdefer ring.deinit(alloc);
+            try ring.ensureTotalCapacityPrecise(alloc, new_len);
+            const head = @mod(self.i, self.len);
+            for (0..self.len) |n| {
+                ring.appendAssumeCapacity(self.at(@mod(head + n, self.len)));
+            }
+            for (self.len..new_len) |idx| {
+                ring.appendAssumeCapacity(self.storageAt(idx));
+            }
+
+            self.ring.deinit(alloc);
+            self.ring = ring;
             self.i = self.len;
             self.available = self.len;
             self.len = new_len;
@@ -117,6 +159,54 @@ test "SegmentedPool" {
 
     // Put a value back
     list.put();
-    try testing.expect(v1 == try list.get());
+    try testing.expect(v2 == try list.get());
     try testing.expectError(error.OutOfValues, list.get());
+}
+
+test "SegmentedPool: growth does not hand out a checked out value" {
+    var pool: SegmentedPool(u8, 2) = .{};
+    defer pool.deinit(testing.allocator);
+
+    // Walk the head off of slot 0 so that growth has an order to preserve.
+    const v1 = try pool.get();
+    const v2 = try pool.get();
+    pool.put(); // returns v1, the oldest
+    try testing.expectEqual(v1, try pool.get());
+    // Checked out, oldest first: v2, v1
+
+    // Grow. Everything handed out so far is still checked out, so the two
+    // values this hands out have to be brand new ones.
+    const v3 = try pool.getGrow(testing.allocator);
+    const v4 = try pool.get();
+    try testing.expect(v3 != v1 and v3 != v2);
+    try testing.expect(v4 != v1 and v4 != v2 and v4 != v3);
+    try testing.expectError(error.OutOfValues, pool.get());
+    // Checked out, oldest first: v2, v1, v3, v4
+
+    // One value comes back. Values are put back in the order they were
+    // handed out, so that is v2, and v2 is the only value free to hand out.
+    pool.put();
+    const reused = try pool.get();
+    try testing.expectEqual(v2, reused);
+}
+
+test "SegmentedPool: never hands out a value that is still checked out" {
+    var pool: SegmentedPool(usize, 4) = .{};
+    defer pool.deinit(testing.allocator);
+
+    var checked_out: std.ArrayList(*usize) = .empty;
+    defer checked_out.deinit(testing.allocator);
+
+    // Hand out two values for every one put back. This is the shape a busy
+    // pty write queue has: it forces repeated growth while earlier values are
+    // still in flight, and it keeps the ring head away from slot 0.
+    for (0..1024) |n| {
+        const v = try pool.getGrow(testing.allocator);
+        for (checked_out.items) |other| try testing.expect(other != v);
+        try checked_out.append(testing.allocator, v);
+
+        if (n % 2 == 0) continue;
+        _ = checked_out.orderedRemove(0);
+        pool.put();
+    }
 }
