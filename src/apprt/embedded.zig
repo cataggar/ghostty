@@ -798,15 +798,24 @@ pub const Surface = struct {
         // We are an embedded API so the caller can send us all sorts of
         // garbage. We want to make sure that the float values are valid
         // and we don't want to support fractional scaling below 1.
-        const x_scaled = @max(1, if (std.math.isNan(x)) 1 else x);
-        const y_scaled = @max(1, if (std.math.isNan(y)) 1 else y);
+        const x_scaled = @max(1, if (std.math.isFinite(x)) x else 1);
+        const y_scaled = @max(1, if (std.math.isFinite(y)) y else 1);
 
-        self.content_scale = .{
+        const content_scale: apprt.ContentScale = .{
             .x = @floatCast(x_scaled),
             .y = @floatCast(y_scaled),
         };
 
-        self.core_surface.contentScaleCallback(self.content_scale) catch |err| {
+        // Metal surface sizing and IOSurface validation read the owned layer's
+        // contentsScale, so update it before any DPI-sensitive core work.
+        if (comptime builtin.target.os.tag == .macos) switch (self.platform) {
+            .macos => self.core_surface.renderer.updateContentScale(content_scale.x),
+            .ios => {},
+        };
+
+        self.content_scale = content_scale;
+
+        self.core_surface.contentScaleCallback(content_scale) catch |err| {
             log.err("error in content scale callback err={}", .{err});
             return;
         };
