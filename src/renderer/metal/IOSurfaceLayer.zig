@@ -47,6 +47,42 @@ pub fn release(self: *IOSurfaceLayer) void {
     self.layer.release();
 }
 
+/// Synchronously updates the layer's content scale on the main thread.
+pub fn setContentScale(self: *IOSurfaceLayer, scale: f64) void {
+    var block = SetContentScaleBlock.init(.{
+        .layer = self.layer.value,
+        .scale = scale,
+    }, &setContentScaleCallback);
+
+    const NSThread = objc.getClass("NSThread").?;
+    if (NSThread.msgSend(bool, "isMainThread", .{})) {
+        setContentScaleCallback(&block);
+    } else {
+        macos.dispatch.dispatch_sync(
+            @ptrCast(macos.dispatch.queue.getMain()),
+            @ptrCast(&block),
+        );
+    }
+}
+
+const SetContentScaleBlock = objc.Block(struct {
+    layer: objc.c.id,
+    scale: f64,
+}, .{}, void);
+
+fn setContentScaleCallback(
+    block: *const SetContentScaleBlock.Context,
+) callconv(.c) void {
+    const layer = objc.Object.fromId(block.layer);
+    if (layer.getProperty(f64, "contentsScale") == block.scale) return;
+
+    const CATransaction = objc.getClass("CATransaction").?;
+    CATransaction.msgSend(void, "begin", .{});
+    defer CATransaction.msgSend(void, "commit", .{});
+    CATransaction.msgSend(void, "setDisableActions:", .{true});
+    layer.setProperty("contentsScale", block.scale);
+}
+
 /// Sets the layer's `contents` to the provided IOSurface.
 ///
 /// Makes sure to do so on the main thread to avoid visual artifacts.
@@ -184,4 +220,26 @@ fn getSubclass() error{ObjCFailed}!objc.Class {
     Subclass = subclass;
 
     return subclass;
+}
+
+test "content scale updates synchronously and idempotently" {
+    const testing = std.testing;
+
+    const pool = objc.AutoreleasePool.init();
+    defer pool.deinit();
+
+    var layer = try IOSurfaceLayer.init();
+    defer layer.release();
+
+    layer.setContentScale(2);
+    try testing.expectEqual(2, layer.layer.getProperty(f64, "contentsScale"));
+
+    layer.setContentScale(1);
+    try testing.expectEqual(1, layer.layer.getProperty(f64, "contentsScale"));
+
+    layer.setContentScale(1);
+    try testing.expectEqual(1, layer.layer.getProperty(f64, "contentsScale"));
+
+    layer.setContentScale(2);
+    try testing.expectEqual(2, layer.layer.getProperty(f64, "contentsScale"));
 }

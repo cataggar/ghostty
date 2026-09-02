@@ -875,6 +875,12 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
             }
         }
 
+        pub fn updateContentScale(self: *Self, scale: f64) void {
+            if (@hasDecl(GraphicsAPI, "updateContentScale")) {
+                self.api.updateContentScale(scale);
+            }
+        }
+
         /// Callback called by renderer.Thread when it begins.
         pub fn threadEnter(self: *const Self, surface: *apprt.Surface) !void {
             // If our API has to do things on thread enter, let it.

@@ -140,7 +140,7 @@ pub fn init(alloc: Allocator, opts: rendererpkg.Options) !Metal {
     // Ensure that our layer has a content scale set to
     // match the scale factor of the window. This avoids
     // magnification issues leading to blurry rendering.
-    layer.layer.setProperty("contentsScale", info.scaleFactor);
+    layer.setContentScale(info.scaleFactor);
 
     // This makes it so that our display callback will actually be called.
     layer.layer.setProperty("needsDisplayOnBoundsChange", true);
@@ -159,6 +159,10 @@ pub fn deinit(self: *Metal) void {
     self.queue.release();
     self.device.release();
     self.layer.release();
+}
+
+pub fn updateContentScale(self: *Metal, scale: f64) void {
+    self.layer.setContentScale(scale);
 }
 
 pub fn loopEnter(self: *Metal) void {
