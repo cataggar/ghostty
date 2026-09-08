@@ -150,12 +150,7 @@ pub fn threadMain(self: *Thread, io: *termio.Termio) void {
         },
     };
     defer {
-        io.mailbox.close();
-        if (cb.data.backend_initialized) io.threadExit(&cb.data);
-        // Destroy the event loop before releasing any callback/buffer storage,
-        // including when an event-loop error prevents normal cancellation.
-        self.loop.deinit();
-        self.loop_deinitialized = true;
+        self.finishLoop(io, &cb.data);
         if (cb.data.backend_initialized) cb.data.deinit();
     }
     io.mailbox.spsc.wakeup.wait(&self.loop, &self.wakeup_c, CallbackData, &cb, wakeupCallback);
@@ -260,6 +255,17 @@ pub fn threadMain(self: *Thread, io: *termio.Termio) void {
             log.err("failed to start xev loop for draining err={}", .{err});
         };
     }
+}
+
+/// Called only after run has returned and no more callbacks will dispatch.
+fn finishLoop(self: *Thread, io: *termio.Termio, data: *termio.Termio.ThreadData) void {
+    io.mailbox.close();
+    // There is now exactly one reaper: either the process watcher already
+    // reported exit, or threadExit stops and reaps the remaining child.
+    if (data.backend_initialized) io.threadExit(data);
+    self.loop.deinit();
+    self.loop_deinitialized = true;
+    if (data.backend_initialized) data.backend.exec.writerLoopDeinitialized();
 }
 
 fn threadMain_(self: *Thread, cb: *CallbackData) !void {
@@ -575,6 +581,7 @@ const TestPty = struct {
     cb: CallbackData,
     mutex: std.Io.Mutex = .init,
     render_state: renderer.State,
+    child_subprocess: bool = false,
 
     fn create() !*TestPty {
         const alloc = std.testing.allocator;
@@ -582,6 +589,7 @@ const TestPty = struct {
         errdefer alloc.destroy(self);
         self.* = undefined;
         self.mutex = .init;
+        self.child_subprocess = false;
         self.pty = try Pty.open(.{});
         errdefer self.pty.deinit();
         errdefer _ = std.posix.system.close(self.pty.slave);
@@ -666,9 +674,30 @@ const TestPty = struct {
     fn destroy(self: *TestPty) void {
         // Deinitialize the loop before freeing any callback storage even on
         // assertion failure. No callback may run after this point.
+        if (!self.thread.loop_deinitialized) {
+            self.cb.data.backend.exec.stopWrites(&self.thread.loop);
+            const start = std.Io.Timestamp.now(global.io(), .awake);
+            while (!self.thread.loop.stopped()) {
+                self.thread.loop.run(.no_wait) catch @panic("PTY fixture shutdown failed");
+                if (start.untilNow(global.io(), .awake).toMilliseconds() > 5000)
+                    @panic("PTY fixture shutdown timed out");
+            }
+        }
+        if (self.cb.data.backend_initialized) {
+            if (!self.thread.loop_deinitialized)
+                self.thread.finishLoop(&self.io, &self.cb.data);
+            self.cb.data.deinit();
+        } else {
+            if (!self.thread.loop_deinitialized) {
+                self.thread.loop.deinit();
+                self.thread.loop_deinitialized = true;
+            }
+            self.cb.data.backend.exec.writerLoopDeinitialized();
+            self.cb.data.backend.exec.write_pool.deinit(std.testing.allocator);
+            self.cb.data.backend.exec.termios_timer.deinit();
+        }
         self.thread.deinit();
-        self.cb.data.backend.exec.write_pool.deinit(std.testing.allocator);
-        self.cb.data.backend.exec.termios_timer.deinit();
+        if (self.child_subprocess) self.io.backend.exec.deinit();
         self.io.terminal_stream.deinit();
         self.io.terminal.deinit(std.testing.allocator);
         self.io.renderer_mailbox.destroy(std.testing.allocator);
@@ -836,8 +865,163 @@ test "input quiescence full mailbox and teardown while writer pending" {
         if (start.untilNow(global.io(), .awake).toMilliseconds() > 5000)
             return error.CancellationTimeout;
     }
+    f.thread.loop.deinit();
+    f.thread.loop_deinitialized = true;
+    f.cb.data.backend.exec.writerLoopDeinitialized();
     try testing.expectEqual(0, f.cb.data.backend.exec.write_pending);
     try testing.expect(!f.cb.data.backend.exec.write_cancel_pending);
     try testing.expectEqual(.failed, input.status(token));
     try testing.expect(!input.resumeInput(token));
+}
+
+test "input quiescence real child writer teardown" {
+    if (comptime builtin.os.tag != .macos) return error.SkipZigTest;
+    try testChildWriterTeardown();
+}
+
+test "input quiescence real child writer teardown Linux epoll" {
+    if (comptime builtin.os.tag != .linux) return error.SkipZigTest;
+    const old = xev.backend;
+    defer xev.backend = old;
+    xev.backend = .epoll;
+    try testChildWriterTeardown();
+}
+
+test "input quiescence real child writer teardown Linux io_uring" {
+    if (comptime builtin.os.tag != .linux) return error.SkipZigTest;
+    if (!@import("xev").IO_Uring.available()) return error.SkipZigTest;
+    const old = xev.backend;
+    defer xev.backend = old;
+    xev.backend = .io_uring;
+    try testChildWriterTeardown();
+}
+
+fn testChildWriterTeardown() !void {
+    const testing = std.testing;
+    const apprt = @import("../apprt.zig");
+    const App = @import("../App.zig");
+    const c = TestPty.c;
+    if (comptime @import("../build_config.zig").app_runtime != .none)
+        return error.SkipZigTest;
+
+    // Exercise ordinary, unopted shutdown too. Starting the production
+    // backend before its loop lets the fixture establish backpressure without
+    // reading mutable writer state concurrently or using a readiness timer.
+    for ([_]bool{ false, true }) |quiesce| {
+        var rt_app: apprt.App = .{};
+        var surface: @import("../Surface.zig") = undefined;
+        const app_queue = try App.Mailbox.Queue.create(testing.allocator);
+        defer app_queue.destroy(testing.allocator);
+        const f = try TestPty.create();
+        defer f.destroy();
+        f.io.surface_mailbox = .{
+            .surface = &surface,
+            .app = .{ .rt_app = &rt_app, .mailbox = app_queue },
+        };
+        f.io.terminal_stream.handler.surface_mailbox = f.io.surface_mailbox;
+        f.io.thread_enter_state = null;
+        f.io.backend.exec.subprocess = .{
+            .arena = .init(testing.allocator),
+            .cwd = null,
+            .env = null,
+            .args = &.{ "/bin/sleep", "30" },
+            .grid_size = .{ .columns = 80, .rows = 24 },
+            .screen_size = .{ .width = 640, .height = 384 },
+            .rt_pre_exec_info = .{},
+            .rt_post_fork_info = .{},
+        };
+        f.child_subprocess = true;
+        const placeholder = f.cb.data.backend;
+        f.io.threadEnter(&f.thread, &f.cb.data) catch |err| {
+            f.cb.data.backend = placeholder;
+            return err;
+        };
+        var placeholder_timer = placeholder.exec.termios_timer;
+        placeholder_timer.deinit();
+        const exec = &f.cb.data.backend.exec;
+        try testing.expect(exec.process != null);
+        try testing.expectEqual(.active, exec.process_wait_c.state());
+        const pid = f.io.backend.exec.subprocess.process.?.fork_exec.pid.?;
+        const fd = f.io.backend.exec.subprocess.pty.?.master;
+        var attrs: c.termios = undefined;
+        try testing.expectEqual(0, c.tcgetattr(fd, &attrs));
+        c.cfmakeraw(&attrs);
+        try testing.expectEqual(0, c.tcsetattr(fd, c.TCSANOW, &attrs));
+        const flags = c.fcntl(fd, c.F_GETFL);
+        try testing.expect(flags >= 0);
+        try testing.expectEqual(0, c.fcntl(fd, c.F_SETFL, flags | c.O_NONBLOCK));
+
+        const bytes = try testing.allocator.alloc(u8, 256 * 1024);
+        defer testing.allocator.free(bytes);
+        @memset(bytes, 'P');
+        const fill_start = std.Io.Timestamp.now(global.io(), .awake);
+        while (true) {
+            switch (std.posix.errno(std.posix.system.write(fd, bytes.ptr, bytes.len))) {
+                .SUCCESS => {},
+                .AGAIN => break,
+                .INTR => continue,
+                else => return error.PtyFillFailed,
+            }
+            if (fill_start.untilNow(global.io(), .awake).toMilliseconds() > 5000)
+                return error.PtyBackpressureTimeout;
+        }
+        f.io.queueMessage(try termio.Message.writeReq(testing.allocator, bytes), .unlocked);
+        try f.drainMailbox();
+        try testing.expectEqual(4096, exec.write_pending);
+        const token = if (quiesce) f.io.mailbox.quiesce() else 0;
+        try f.drainMailbox();
+        if (quiesce) try testing.expectEqual(.pending, exec.input.status(token));
+
+        f.io.mailbox.spsc.wakeup.wait(&f.thread.loop, &f.thread.wakeup_c, CallbackData, &f.cb, wakeupCallback);
+        f.thread.stop.wait(&f.thread.loop, &f.thread.stop_c, CallbackData, &f.cb, stopCallback);
+        // Submit the real process watch and write before requesting stop.
+        try f.thread.loop.run(.no_wait);
+        try testing.expect(exec.write_pending > 0);
+        const epoll_write_fd: ?std.posix.fd_t = if (comptime builtin.os.tag == .linux)
+            if (xev.backend == .epoll)
+                exec.write_queue.value.epoll.head.?.completion.flags.dup_fd
+            else
+                null
+        else
+            null;
+        const Worker = struct {
+            fixture: *TestPty,
+            done: std.atomic.Value(bool) = .init(false),
+
+            fn run(self: *@This()) void {
+                defer self.done.store(true, .release);
+                defer self.fixture.thread.finishLoop(&self.fixture.io, &self.fixture.cb.data);
+                self.fixture.thread.loop.run(.until_done) catch
+                    @panic("real-child writer event loop failed");
+            }
+        };
+        var worker: Worker = .{ .fixture = f };
+        const thread = try std.Thread.spawn(.{}, Worker.run, .{&worker});
+        defer thread.join();
+        f.thread.stop.notify() catch @panic("writer stop notification failed");
+        const start = std.Io.Timestamp.now(global.io(), .awake);
+        while (!worker.done.load(.acquire)) {
+            if (start.untilNow(global.io(), .awake).toMilliseconds() > 5000) {
+                // Abort rather than hanging the runner in join. The child is
+                // fixture-owned, and also has a finite lifetime as a fallback.
+                std.posix.kill(pid, .KILL) catch {};
+                @panic("real-child writer shutdown exceeded five seconds");
+            }
+            try std.Io.sleep(global.io(), .fromMilliseconds(1), .awake);
+        }
+        try testing.expect(f.thread.loop_deinitialized);
+        try testing.expectEqual(0, exec.write_pending);
+        try testing.expect(!exec.write_cancel_pending);
+        try testing.expect(f.io.backend.exec.subprocess.process == null);
+        try testing.expectEqual(.CHILD, std.posix.errno(
+            std.posix.system.waitpid(pid, null, std.c.W.NOHANG),
+        ));
+        if (epoll_write_fd) |dup_fd| {
+            try testing.expectEqual(-1, c.fcntl(dup_fd, c.F_GETFD));
+        }
+        if (quiesce) {
+            try testing.expectEqual(.failed, exec.input.status(token));
+            try testing.expect(!exec.input.resumeInput(token));
+        }
+    }
 }

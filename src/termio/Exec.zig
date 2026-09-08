@@ -580,10 +580,10 @@ pub const ThreadData = struct {
         }
     }
 
-    /// Only the queue head has been submitted to libxev. Discard unscheduled
-    /// requests and cancel the head, retaining its buffer AND cancellation
-    /// completion until both callbacks run. This is teardown, not quiescence.
+    /// Stop the writer without stopping/reaping the child while its process
+    /// watcher can still run. This is teardown, not quiescence.
     pub fn stopWrites(self: *ThreadData, loop: *xev.Loop) void {
+        if (self.write_stopping) return;
         self.write_stopping = true;
         self.input.fail();
         if (self.write_pending == 0) {
@@ -619,6 +619,18 @@ pub const ThreadData = struct {
         queue: *api.WriteQueue,
         cancel: *api.Completion,
     ) void {
+        if (comptime api.backend == .epoll or api.backend == .kqueue) {
+            // These backends write synchronously during dispatch, with no
+            // thread pool. Pinned libxev cancellation doesn't always deliver
+            // the target callback (epoll; kqueue's not-yet-submitted writes).
+            // Stop dispatch instead, retaining ALL requests until run returns
+            // and the loop fd is closed, including any partial-write requeues.
+            loop.stop();
+            return;
+        }
+
+        // Only the head is submitted. The remaining requests have no kernel
+        // or callback ownership and can be returned to the pool immediately.
         const head = queue.pop().?;
         while (queue.pop()) |req| {
             const w: *Write = @ptrCast(@alignCast(req.userdata.?));
@@ -639,7 +651,18 @@ pub const ThreadData = struct {
                 ) xev.CallbackAction {
                     const exec: *ThreadData = @ptrCast(@alignCast(userdata.?));
                     _ = result.cancel catch |err| {
-                        log.warn("error canceling PTY write err={}", .{err});
+                        if (comptime api.backend == .io_uring) switch (err) {
+                            // A completed partial write can be waiting in the
+                            // CQ while its remainder has not yet been submitted.
+                            // Retry cancellation, retaining the same request,
+                            // until the writer callback or cancellation wins.
+                            error.NotFound, error.ExpirationInProgress => {
+                                if (exec.write_pending != 0) return .rearm;
+                            },
+                            else => log.warn("error canceling PTY write err={}", .{err}),
+                        } else {
+                            log.warn("error canceling PTY write err={}", .{err});
+                        }
                     };
                     exec.write_cancel_pending = false;
                     if (exec.write_pending == 0) l.stop();
@@ -650,11 +673,47 @@ pub const ThreadData = struct {
         loop.add(cancel);
     }
 
+    /// The event loop must already be deinitialized, with no dispatcher or
+    /// kernel operation able to reference its completions. In particular,
+    /// readiness-based backends retain writes until this point rather than
+    /// waiting for target callbacks their cancellation APIs may not deliver.
+    pub fn writerLoopDeinitialized(self: *ThreadData) void {
+        if (comptime !xev.dynamic) {
+            self.retireWrites(xev, &self.write_queue);
+        } else switch (xev.backend) {
+            inline else => |tag| {
+                self.write_queue.ensureTag(tag);
+                self.retireWrites(
+                    (comptime xev.superset(tag)).Api(),
+                    &@field(self.write_queue.value, @tagName(tag)),
+                );
+            },
+        }
+        assert(self.write_pending == 0);
+    }
+
+    fn retireWrites(self: *ThreadData, comptime api: type, queue: *api.WriteQueue) void {
+        while (queue.pop()) |req| {
+            if (comptime api.backend == .epoll) {
+                // Stream duplicates the fd when registering an epoll watch.
+                // Closing the loop does not close that duplicate. A queued
+                // (or partially requeued) request has no active duplicate.
+                const c = &req.completion;
+                if (c.flags.state == .active and c.flags.dup)
+                    _ = posix.system.close(c.flags.dup_fd);
+            }
+            const w: *Write = @ptrCast(@alignCast(req.userdata.?));
+            self.write_pool.destroy(w);
+            assert(self.write_pending > 0);
+            self.write_pending -= 1;
+        }
+    }
+
     pub fn deinit(self: *ThreadData, alloc: Allocator) void {
         _ = posix.system.close(self.read_thread_pipe);
 
-        // The writer loop has stopped; on normal shutdown stopWrites also
-        // waited for the active write and its cancellation callback.
+        // The loop is deinitialized and all writes have been retired, either
+        // by their callbacks or after synchronous dispatch has stopped.
         self.write_pool.deinit(alloc);
 
         // Stop our process watcher
@@ -669,10 +728,9 @@ pub const ThreadData = struct {
 };
 
 pub fn stopWriter(self: *Exec, td: *termio.Termio.ThreadData) void {
-    // Stop the child as part of normal teardown before cancellation. A partial
-    // write racing cancellation can then finish with EOF rather than blocking.
-    if (td.backend.exec.exited) self.subprocess.externalExit();
-    self.subprocess.stop();
+    _ = self;
+    // threadExit owns subprocess shutdown after the loop stops. Reaping here
+    // would race the still-active pidfd process watcher on Linux.
     td.backend.exec.stopWrites(td.loop);
 }
 
@@ -2424,6 +2482,25 @@ test "execCommand windows: direct command is passed through unchanged" {
 test "input quiescence real PTY partial write completion" {
     if (comptime builtin.os.tag == .windows or builtin.os.tag == .ios)
         return error.SkipZigTest;
+    try testPartialWrite(false);
+}
+
+test "input quiescence real PTY partial write teardown" {
+    if (comptime builtin.os.tag == .windows or builtin.os.tag == .ios)
+        return error.SkipZigTest;
+    try testPartialWrite(true);
+}
+
+test "input quiescence real PTY partial write teardown Linux io_uring" {
+    if (comptime builtin.os.tag != .linux) return error.SkipZigTest;
+    if (!@import("xev").IO_Uring.available()) return error.SkipZigTest;
+    const old = xev.backend;
+    defer xev.backend = old;
+    xev.backend = .io_uring;
+    try testPartialWrite(true);
+}
+
+fn testPartialWrite(stop_after_partial: bool) !void {
     const testing = std.testing;
     const c = @cImport({
         @cInclude("termios.h");
@@ -2458,7 +2535,15 @@ test "input quiescence real PTY partial write completion" {
     defer testing.allocator.free(bytes);
     var loop = try xev.Loop.init(.{});
     defer {
+        exec.stopWrites(&loop);
+        const stop_start = std.Io.Timestamp.now(global.io(), .awake);
+        while (!loop.stopped()) {
+            loop.run(.no_wait) catch @panic("partial-write fixture shutdown failed");
+            if (stop_start.untilNow(global.io(), .awake).toMilliseconds() > 5000)
+                @panic("partial-write fixture shutdown timed out");
+        }
         loop.deinit();
+        exec.writerLoopDeinitialized();
         exec.write_pool.deinit(testing.allocator);
     }
     @memset(bytes, 'P');
@@ -2492,6 +2577,20 @@ test "input quiescence real PTY partial write completion" {
         if (received > 0 and exec.write_pending != 0) {
             saw_partial = true;
             try testing.expectEqual(.pending, input_state.status(token));
+            if (stop_after_partial) {
+                // The completion may already be in the CQ, or its remaining
+                // buffer may be resubmitted. Stop without draining the slave
+                // again: shutdown must cancel rather than require a reader.
+                exec.stopWrites(&loop);
+                while (!loop.stopped()) {
+                    try loop.run(.no_wait);
+                    if (start.untilNow(global.io(), .awake).toMilliseconds() > 5000)
+                        return error.PartialWriteCancellationTimeout;
+                }
+                try testing.expect(!exec.write_cancel_pending);
+                try testing.expectEqual(.failed, input_state.status(token));
+                return;
+            }
         }
         if (start.untilNow(global.io(), .awake).toMilliseconds() > 5000)
             return error.PartialWriteTimeout;

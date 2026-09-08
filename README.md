@@ -187,6 +187,13 @@ indefinitely. Cancellation leaves input closed; transport failures fail closed.
 See [`include/ghostty.h`](include/ghostty.h) for the token, lifetime, threading,
 clipboard, and failure contract.
 
+Run the headless barrier and PTY shutdown regressions with
+`zig build test -Dapp-runtime=none -Dtest-filter='input quiescence'`.
+On Linux these explicitly exercise epoll and io_uring, including a real child,
+registered process watcher, backpressured writes, and bounded writer shutdown.
+The io_uring cases skip if that backend is unavailable; validating both Linux
+backends requires a runner where those cases execute rather than skip.
+
 #### Ghostty-only Terminal Control Sequences
 
 We want and believe that terminal applications can and should be able
