@@ -2491,12 +2491,19 @@ test "input quiescence real PTY partial write teardown" {
     try testPartialWrite(true);
 }
 
-test "input quiescence real PTY partial write teardown Linux io_uring" {
+test "input quiescence real PTY partial write teardown Linux epoll" {
     if (comptime builtin.os.tag != .linux) return error.SkipZigTest;
-    if (!@import("xev").IO_Uring.available()) return error.SkipZigTest;
     const old = xev.backend;
     defer xev.backend = old;
-    xev.backend = .io_uring;
+    if (!xev.prefer(.epoll)) return error.EpollBackendUnavailable;
+    try testPartialWrite(true);
+}
+
+test "input quiescence real PTY partial write teardown Linux io_uring" {
+    if (comptime builtin.os.tag != .linux) return error.SkipZigTest;
+    const old = xev.backend;
+    defer xev.backend = old;
+    if (!xev.prefer(.io_uring)) return error.IoUringBackendUnavailable;
     try testPartialWrite(true);
 }
 

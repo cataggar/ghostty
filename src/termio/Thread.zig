@@ -742,6 +742,26 @@ const TestPty = struct {
 test "input quiescence real PTY backpressure, mailbox generations, and output" {
     if (comptime builtin.os.tag == .windows or builtin.os.tag == .ios)
         return error.SkipZigTest;
+    try testPtyInputBarrier();
+}
+
+test "input quiescence real PTY barrier Linux epoll" {
+    if (comptime builtin.os.tag != .linux) return error.SkipZigTest;
+    const old = xev.backend;
+    defer xev.backend = old;
+    if (!xev.prefer(.epoll)) return error.EpollBackendUnavailable;
+    try testPtyInputBarrier();
+}
+
+test "input quiescence real PTY barrier Linux io_uring" {
+    if (comptime builtin.os.tag != .linux) return error.SkipZigTest;
+    const old = xev.backend;
+    defer xev.backend = old;
+    if (!xev.prefer(.io_uring)) return error.IoUringBackendUnavailable;
+    try testPtyInputBarrier();
+}
+
+fn testPtyInputBarrier() !void {
     const testing = std.testing;
     const f = try TestPty.create();
     defer f.destroy();
@@ -883,16 +903,15 @@ test "input quiescence real child writer teardown Linux epoll" {
     if (comptime builtin.os.tag != .linux) return error.SkipZigTest;
     const old = xev.backend;
     defer xev.backend = old;
-    xev.backend = .epoll;
+    if (!xev.prefer(.epoll)) return error.EpollBackendUnavailable;
     try testChildWriterTeardown();
 }
 
 test "input quiescence real child writer teardown Linux io_uring" {
     if (comptime builtin.os.tag != .linux) return error.SkipZigTest;
-    if (!@import("xev").IO_Uring.available()) return error.SkipZigTest;
     const old = xev.backend;
     defer xev.backend = old;
-    xev.backend = .io_uring;
+    if (!xev.prefer(.io_uring)) return error.IoUringBackendUnavailable;
     try testChildWriterTeardown();
 }
 

@@ -191,8 +191,20 @@ Run the headless barrier and PTY shutdown regressions with
 `zig build test -Dapp-runtime=none -Dtest-filter='input quiescence'`.
 On Linux these explicitly exercise epoll and io_uring, including a real child,
 registered process watcher, backpressured writes, and bounded writer shutdown.
-The io_uring cases skip if that backend is unavailable; validating both Linux
-backends requires a runner where those cases execute rather than skip.
+To select only one Linux backend with the pinned development shell:
+
+```sh
+nix develop -c zig build test -Dapp-runtime=none -Dtest-filter='Linux epoll' --summary all
+nix develop -c zig build test -Dapp-runtime=none -Dtest-filter='Linux io_uring' --summary all
+```
+
+Each selector runs three tests: barrier/backpressure and stale-generation
+admission, partial-write teardown, and real-child/process-watcher teardown
+(both ordinary and quiesced). These tests use libxev's `prefer` API before
+creating any handles and restore the preceding backend after teardown.
+An unavailable Linux backend fails explicitly rather than falling back or
+skipping; non-Linux hosts skip these platform-specific cases. No application
+backend configuration or new test-only selection API is needed.
 
 #### Ghostty-only Terminal Control Sequences
 
