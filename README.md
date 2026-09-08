@@ -169,6 +169,24 @@ We haven't tagged libghostty with a version yet and we're still working
 on a better docs experience, but our [Doxygen website](https://libghostty.tip.ghostty.org/)
 is a good resource for the C API.
 
+##### Embedded PTY input quiescence
+
+Embedders can opt into a per-surface asynchronous input barrier using
+`ghostty_surface_input_quiesce`, `ghostty_surface_input_status`,
+`ghostty_surface_input_resume`, and `ghostty_surface_input_cancel`.
+The surface, child, PTY output, rendering, and local copy/scroll remain live.
+Input is discarded while gated, including delayed clipboard completions from
+an older input epoch; no automatic input policy is enabled.
+
+`READY` means that older library-owned input cannot arrive at the PTY later,
+not that OS-accepted bytes have been consumed. Coordinate with the child:
+stop forwarding input, request quiescence, wait for writer readiness, drain or
+flush the child's PTY input and obtain its acknowledgement, then resume with
+the same token before reopening input. Backpressure can keep a request pending
+indefinitely. Cancellation leaves input closed; transport failures fail closed.
+See [`include/ghostty.h`](include/ghostty.h) for the token, lifetime, threading,
+clipboard, and failure contract.
+
 #### Ghostty-only Terminal Control Sequences
 
 We want and believe that terminal applications can and should be able

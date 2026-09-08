@@ -153,6 +153,7 @@ pub fn threadEnter(
         .read_thread_pipe = pipe[1],
         .read_thread_fd = pty_fds.read,
         .termios_timer = termios_timer,
+        .input = &io.mailbox.spsc.input,
     } };
 
     // Start our process watcher. If we have an xev.Process use it.
@@ -196,6 +197,7 @@ pub fn threadEnter(
 pub fn threadExit(self: *Exec, td: *termio.Termio.ThreadData) void {
     assert(td.backend == .exec);
     const exec = &td.backend.exec;
+    exec.input.fail();
 
     if (exec.exited) self.subprocess.externalExit();
     self.subprocess.stop();
@@ -275,6 +277,7 @@ fn processExitCommon(td: *termio.Termio.ThreadData, exit_code: u32) void {
     assert(td.backend == .exec);
     const execdata = &td.backend.exec;
     execdata.exited = true;
+    execdata.input.fail();
 
     // Determine how long the process was running for.
     const runtime_ms: u64 = @max(
@@ -411,7 +414,8 @@ pub fn queueWrite(
     const exec = &td.backend.exec;
 
     // If our process is exited then we don't send any more writes.
-    if (exec.exited) return;
+    if (exec.exited or exec.write_stopping) return;
+    errdefer exec.input.fail();
 
     // We go through and chunk the data if necessary to fit into
     // our cached buffers that we can queue to the stream.
@@ -456,6 +460,7 @@ pub fn queueWrite(
 
         //for (slice) |b| log.warn("write: {x}", .{b});
 
+        exec.write_pending += 1;
         exec.write_stream.queueWrite(
             td.loop,
             &exec.write_queue,
@@ -470,21 +475,35 @@ pub fn queueWrite(
 
 fn ttyWrite(
     w_: ?*ThreadData.Write,
-    _: *xev.Loop,
+    loop: *xev.Loop,
     _: *xev.Completion,
     _: xev.Stream,
-    _: xev.WriteBuffer,
+    buffer: xev.WriteBuffer,
     r: xev.WriteError!usize,
 ) xev.CallbackAction {
     const w = w_.?;
-    w.td.write_pool.destroy(w);
+    const exec = w.td;
+    exec.write_pool.destroy(w);
+    assert(exec.write_pending > 0);
+    exec.write_pending -= 1;
 
-    const d = r catch |err| {
-        log.err("write error: {}", .{err});
-        return .disarm;
-    };
-    _ = d;
-    //log.info("WROTE: {d}", .{d});
+    if (r) |written| {
+        // queueWrite's callback covers the FULL buffer, after all partial
+        // writes have completed. Treat a violated contract as a failure.
+        const expected = switch (buffer) {
+            .slice => |v| v.len,
+            .array => |v| v.len,
+        };
+        if (written != expected) exec.input.fail();
+    } else |err| {
+        exec.input.fail();
+        if (!exec.write_stopping) log.err("write error: {}", .{err});
+    }
+
+    if (exec.write_pending == 0) {
+        if (exec.write_barrier) |token| exec.input.ready(token);
+        if (exec.write_stopping and !exec.write_cancel_pending) loop.stop();
+    }
 
     return .disarm;
 }
@@ -523,6 +542,12 @@ pub const ThreadData = struct {
 
     /// The write queue for the data stream.
     write_queue: xev.WriteQueue = .{},
+    input: *termio.InputQuiescence,
+    write_pending: usize = 0,
+    write_barrier: ?u64 = null,
+    write_stopping: bool = false,
+    write_cancel_pending: bool = false,
+    write_cancel_c: xev.Completion = .{},
 
     /// This is used for both waiting for the process to exit and then
     /// subsequently to wait for the data_stream to close.
@@ -542,16 +567,94 @@ pub const ThreadData = struct {
     termios_timer_c: xev.Completion = .{},
     termios_timer_running: bool = true,
 
-    /// The last known termios mode. Used for change detection
-    /// to prevent unnecessary locking of expensive mutexes.
+    /// The last known termios mode. Used to prevent unnecessary locking.
     termios_mode: ptypkg.Mode = .{},
+
+    pub fn inputBarrier(self: *ThreadData, token: u64) void {
+        if (self.input.status(token) != .pending) return;
+        self.write_barrier = token;
+        if (self.exited or self.write_stopping) {
+            self.input.fail();
+        } else if (self.write_pending == 0) {
+            self.input.ready(token);
+        }
+    }
+
+    /// Only the queue head has been submitted to libxev. Discard unscheduled
+    /// requests and cancel the head, retaining its buffer AND cancellation
+    /// completion until both callbacks run. This is teardown, not quiescence.
+    pub fn stopWrites(self: *ThreadData, loop: *xev.Loop) void {
+        self.write_stopping = true;
+        self.input.fail();
+        if (self.write_pending == 0) {
+            loop.stop();
+            return;
+        }
+
+        if (comptime !xev.dynamic) return self.stopWritesBackend(
+            xev,
+            loop,
+            &self.write_queue,
+            &self.write_cancel_c,
+        );
+
+        switch (xev.backend) {
+            inline else => |tag| {
+                const api = (comptime xev.superset(tag)).Api();
+                self.write_cancel_c.ensureTag(tag);
+                self.stopWritesBackend(
+                    api,
+                    &@field(loop.backend, @tagName(tag)),
+                    &@field(self.write_queue.value, @tagName(tag)),
+                    &@field(self.write_cancel_c.value, @tagName(tag)),
+                );
+            },
+        }
+    }
+
+    fn stopWritesBackend(
+        self: *ThreadData,
+        comptime api: type,
+        loop: *api.Loop,
+        queue: *api.WriteQueue,
+        cancel: *api.Completion,
+    ) void {
+        const head = queue.pop().?;
+        while (queue.pop()) |req| {
+            const w: *Write = @ptrCast(@alignCast(req.userdata.?));
+            self.write_pool.destroy(w);
+            self.write_pending -= 1;
+        }
+        queue.push(head);
+        self.write_cancel_pending = true;
+        cancel.* = .{
+            .op = .{ .cancel = .{ .c = &head.completion } },
+            .userdata = self,
+            .callback = struct {
+                fn callback(
+                    userdata: ?*anyopaque,
+                    l: *api.Loop,
+                    _: *api.Completion,
+                    result: api.Result,
+                ) xev.CallbackAction {
+                    const exec: *ThreadData = @ptrCast(@alignCast(userdata.?));
+                    _ = result.cancel catch |err| {
+                        log.warn("error canceling PTY write err={}", .{err});
+                    };
+                    exec.write_cancel_pending = false;
+                    if (exec.write_pending == 0) l.stop();
+                    return .disarm;
+                }
+            }.callback,
+        };
+        loop.add(cancel);
+    }
 
     pub fn deinit(self: *ThreadData, alloc: Allocator) void {
         _ = posix.system.close(self.read_thread_pipe);
 
-        // Clear our write pool. We know we aren't ever going to do
-        // any more IO since we stop our data stream below so we can just
-        // drop this.
+        // The writer loop has stopped; on normal shutdown stopWrites also
+        // waited for the active write and its cancellation callback.
         self.write_pool.deinit(alloc);
 
         // Stop our process watcher
@@ -564,6 +667,14 @@ pub const ThreadData = struct {
         self.termios_timer.deinit();
     }
 };
+
+pub fn stopWriter(self: *Exec, td: *termio.Termio.ThreadData) void {
+    // Stop the child as part of normal teardown before cancellation. A partial
+    // write racing cancellation can then finish with EOF rather than blocking.
+    if (td.backend.exec.exited) self.subprocess.externalExit();
+    self.subprocess.stop();
+    td.backend.exec.stopWrites(td.loop);
+}
 
 pub const Config = struct {
     command: ?configpkg.Command = null,
@@ -1409,6 +1520,7 @@ pub const ReadThread = struct {
     };
 
     fn threadMainPosix(fd: posix.fd_t, io: *termio.Termio, quit: posix.fd_t) void {
+        defer io.mailbox.spsc.input.fail();
         // Always close our end of the pipe when we exit.
         defer _ = posix.system.close(quit);
 
@@ -1775,6 +1887,7 @@ pub const ReadThread = struct {
     }
 
     fn threadMainWindows(fd: posix.fd_t, io: *termio.Termio, quit: posix.fd_t) void {
+        defer io.mailbox.spsc.input.fail();
         // Always close our end of the pipe when we exit.
         defer _ = posix.system.close(quit);
 
@@ -2306,4 +2419,92 @@ test "execCommand windows: direct command is passed through unchanged" {
     try testing.expectEqual(2, result.len);
     try testing.expectEqualStrings("C:\\tools\\foo.exe", result[0]);
     try testing.expectEqualStrings("arg with spaces", result[1]);
+}
+
+test "input quiescence real PTY partial write completion" {
+    if (comptime builtin.os.tag == .windows or builtin.os.tag == .ios)
+        return error.SkipZigTest;
+    const testing = std.testing;
+    const c = @cImport({
+        @cInclude("termios.h");
+        @cInclude("fcntl.h");
+    });
+    var pty = try Pty.open(.{});
+    defer pty.deinit();
+    defer _ = posix.system.close(pty.slave);
+    var attrs: c.termios = undefined;
+    try testing.expectEqual(0, c.tcgetattr(pty.slave, &attrs));
+    c.cfmakeraw(&attrs);
+    try testing.expectEqual(0, c.tcsetattr(pty.slave, c.TCSANOW, &attrs));
+    for ([_]posix.fd_t{ pty.master, pty.slave }) |fd| {
+        const flags = c.fcntl(fd, c.F_GETFL);
+        try testing.expect(flags >= 0);
+        try testing.expectEqual(0, c.fcntl(fd, c.F_SETFL, flags | c.O_NONBLOCK));
+    }
+    var input_state: termio.InputQuiescence = .{};
+    var exec: ThreadData = .{
+        .start = .now(global.io(), .awake),
+        .write_stream = xev.Stream.initFd(pty.master),
+        .input = &input_state,
+        .process = null,
+        .read_thread = undefined,
+        .read_thread_pipe = undefined,
+        .read_thread_fd = pty.master,
+        .termios_timer = undefined,
+    };
+    // Deliberately submit one oversized request to force libxev to perform
+    // partial writes, using the very same completion/pool/barrier as Exec.
+    const bytes = try testing.allocator.alloc(u8, 128 * 1024);
+    defer testing.allocator.free(bytes);
+    var loop = try xev.Loop.init(.{});
+    defer {
+        loop.deinit();
+        exec.write_pool.deinit(testing.allocator);
+    }
+    @memset(bytes, 'P');
+    const w = try exec.write_pool.create(testing.allocator);
+    w.td = &exec;
+    exec.write_pending = 1;
+    exec.write_stream.queueWrite(
+        &loop,
+        &exec.write_queue,
+        &w.req,
+        .{ .slice = bytes },
+        ThreadData.Write,
+        w,
+        ttyWrite,
+    );
+    const token = input_state.begin();
+    exec.inputBarrier(token);
+
+    const start = std.Io.Timestamp.now(global.io(), .awake);
+    var received: usize = 0;
+    var saw_partial = false;
+    while (exec.write_pending != 0) {
+        try loop.run(.no_wait);
+        var buf: [1024]u8 = undefined;
+        const n = posix.read(pty.slave, &buf) catch |err| switch (err) {
+            error.WouldBlock => 0,
+            else => return err,
+        };
+        for (buf[0..n]) |byte| try testing.expectEqual(@as(u8, 'P'), byte);
+        received += n;
+        if (received > 0 and exec.write_pending != 0) {
+            saw_partial = true;
+            try testing.expectEqual(.pending, input_state.status(token));
+        }
+        if (start.untilNow(global.io(), .awake).toMilliseconds() > 5000)
+            return error.PartialWriteTimeout;
+    }
+    while (received < bytes.len) {
+        var buf: [8192]u8 = undefined;
+        const n = try posix.read(pty.slave, &buf);
+        if (n == 0) return error.UnexpectedEof;
+        for (buf[0..n]) |byte| try testing.expectEqual(@as(u8, 'P'), byte);
+        received += n;
+    }
+    try testing.expect(saw_partial);
+    try testing.expectEqual(bytes.len, received);
+    try testing.expectEqual(.ready, input_state.status(token));
+    try testing.expect(input_state.resumeInput(token));
 }

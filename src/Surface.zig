@@ -797,6 +797,7 @@ pub fn init(
 }
 
 pub fn deinit(self: *Surface) void {
+    self.io.mailbox.spsc.input.fail();
     // Stop search thread
     if (self.search) |*s| s.deinit();
 
@@ -885,6 +886,23 @@ fn queueIo(
     }
 
     self.io.queueMessage(msg, mutex);
+}
+
+/// Begin an opt-in input barrier without replacing the PTY or terminal.
+pub fn quiesceInput(self: *Surface) u64 {
+    const token = self.io.mailbox.quiesce();
+    // Sequenced bindings retain encoded keys outside the IO mailbox. Discard
+    // them on both transitions so no old or gated key can be flushed later.
+    self.endKeySequence(.drop, .retain);
+    self.pressed_key = null;
+    return token;
+}
+
+pub fn resumeInput(self: *Surface, token: u64) bool {
+    if (self.io.mailbox.spsc.input.status(token) != .ready) return false;
+    self.endKeySequence(.drop, .retain);
+    self.pressed_key = null;
+    return self.io.mailbox.spsc.input.resumeInput(token);
 }
 
 /// Forces the surface to render. This is useful for when the surface
@@ -991,14 +1009,15 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
             );
         },
 
-        .report_title => |style| report_title: {
+        .report_title => |report| report_title: {
+            if (!self.io.mailbox.spsc.input.accepts(report.input_epoch)) return;
             if (!self.config.title_report) {
                 log.info("report_title requested, but disabled via config", .{});
                 break :report_title;
             }
 
             const title: ?[:0]const u8 = self.rt_surface.getTitle();
-            const data = switch (style) {
+            const data = switch (report.style) {
                 .csi_21_t => try std.fmt.allocPrint(
                     self.alloc,
                     "\x1b]l{s}\x1b\\",
@@ -1052,13 +1071,14 @@ pub fn handleMessage(self: *Surface, msg: Message) !void {
             );
         },
 
-        .clipboard_read => |clipboard| {
+        .clipboard_read => |request| {
+            if (!self.io.mailbox.spsc.input.accepts(request.input_epoch)) return;
             if (self.config.clipboard_read == .deny) {
                 log.info("application attempted to read clipboard, but 'clipboard-read' is set to deny", .{});
                 return;
             }
 
-            _ = try self.startClipboardRequest(.standard, .{ .osc_52_read = clipboard });
+            _ = try self.startClipboardRequest(.standard, .{ .osc_52_read = request.clipboard });
         },
 
         .clipboard_write => |w| switch (w.req) {
@@ -2721,6 +2741,7 @@ pub fn keyCallback(
         event,
         if (insp_ev) |*ev| ev else null,
     )) |v| return v;
+    if (!self.io.mailbox.spsc.input.isOpen()) return .consumed;
     // If we allow KAM and KAM is enabled then we do nothing.
     if (self.config.vt_kam_allowed) {
         self.renderer_state.mutex.lockUncancelable(global.io());
@@ -5895,6 +5916,7 @@ fn startClipboardRequest(
     loc: apprt.Clipboard,
     req: apprt.ClipboardRequest,
 ) !bool {
+    if (!self.io.mailbox.spsc.input.isOpen()) return false;
     switch (req) {
         .paste => {}, // always allowed
         .osc_52_read => if (self.config.clipboard_read == .deny) {
@@ -5917,6 +5939,7 @@ fn completeClipboardPaste(
     data: []const u8,
     allow_unsafe: bool,
 ) !void {
+    if (!self.io.mailbox.spsc.input.isOpen()) return;
     if (data.len == 0) return;
 
     const encode_opts: input.paste.Options = encode_opts: {

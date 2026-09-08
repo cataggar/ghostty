@@ -1135,6 +1135,73 @@ GHOSTTY_API ghostty_surface_config_s ghostty_surface_inherited_config(ghostty_su
 GHOSTTY_API void ghostty_surface_update_config(ghostty_surface_t, ghostty_config_t);
 GHOSTTY_API bool ghostty_surface_needs_confirm_quit(ghostty_surface_t);
 GHOSTTY_API bool ghostty_surface_process_exited(ghostty_surface_t);
+
+/**
+ * Opt-in PTY input quiescence. These functions, like other surface mutation
+ * APIs, must be serialized on the app/surface thread, including clipboard
+ * completions. Do not call them reentrantly from runtime callbacks.
+ *
+ * A token is a nonzero, process-unique, non-reused value scoped to one live
+ * surface. It owns no memory. Zero is never a valid token. Freeing the surface
+ * invalidates every token; never query a freed surface pointer.
+ */
+typedef uint64_t ghostty_input_token_t;
+typedef enum {
+  GHOSTTY_INPUT_INVALID = 0,
+  GHOSTTY_INPUT_PENDING = 1,
+  GHOSTTY_INPUT_READY = 2,
+  GHOSTTY_INPUT_FAILED = 3,
+} ghostty_input_status_e;
+
+/**
+ * Immediately close PTY input admission and asynchronously request a writer
+ * barrier. A new request supersedes any previous token, even while pending.
+ * Returns zero for a null surface or exhausted token space (which permanently
+ * closes input). Otherwise poll input_status: queue/transport failure may
+ * already have made the returned token FAILED.
+ *
+ * Input not yet submitted to the backend may be discarded. Backend writes
+ * already submitted finish normally, including partial writes. READY means
+ * no older library-owned input can subsequently reach the PTY: the writer has
+ * observed the barrier and all its outstanding libxev writes have completed.
+ * It does NOT mean the child consumed any bytes or the OS PTY queue is empty.
+ * Backpressure may leave a request PENDING indefinitely.
+ *
+ * All PTY-bound producers are gated (keys, text, paste, mouse, focus, terminal
+ * replies). Input submitted while gated is discarded, never replayed. Late
+ * clipboard/confirmation completions from an older input epoch are discarded.
+ * PTY output, rendering, local copy/selection/scroll, and the child continue;
+ * no terminal, surface, or child is recreated. No automatic policy is enabled.
+ *
+ * Caller protocol: stop forwarding/authorizing input in the child, quiesce,
+ * wait for READY, have the child drain/flush its PTY input and acknowledge,
+ * then resume with that same token before reopening input. OS-accepted bytes,
+ * including partial paste framing, cannot be retracted by this API. The caller
+ * must discard/reset its own pending input/IME events across this transition.
+ */
+GHOSTTY_API ghostty_input_token_t ghostty_surface_input_quiesce(ghostty_surface_t);
+
+/** INVALID: null surface, zero, wrong surface, superseded or resumed token.
+ * FAILED: canceled request, queue failure, writer failure, or child exit.
+ * Writer/child failure is sticky and can revoke READY before resume.
+ * No callback or deadline is supplied; poll from the app event loop.
+ */
+GHOSTTY_API ghostty_input_status_e ghostty_surface_input_status(
+    ghostty_surface_t, ghostty_input_token_t);
+
+/** Reopen only for the current READY token. Success consumes the token;
+ * stale, pending, canceled, failed, and repeated resumes return false.
+ */
+GHOSTTY_API bool ghostty_surface_input_resume(
+    ghostty_surface_t, ghostty_input_token_t);
+
+/** Cancel the current PENDING/READY request, leaving input CLOSED. Does not
+ * cancel/free backend write buffers. To reopen, obtain a new READY token and
+ * perform the caller protocol above. Returns false for any other token/state.
+ */
+GHOSTTY_API bool ghostty_surface_input_cancel(
+    ghostty_surface_t, ghostty_input_token_t);
+
 GHOSTTY_API void ghostty_surface_refresh(ghostty_surface_t);
 GHOSTTY_API void ghostty_surface_draw(ghostty_surface_t);
 GHOSTTY_API void ghostty_surface_set_content_scale(ghostty_surface_t, double, double);
@@ -1178,6 +1245,12 @@ GHOSTTY_API void ghostty_surface_split_resize(ghostty_surface_t,
                                                  uint16_t);
 GHOSTTY_API void ghostty_surface_split_equalize(ghostty_surface_t);
 GHOSTTY_API bool ghostty_surface_binding_action(ghostty_surface_t, const char*, uintptr_t);
+/** Complete a read or confirmation on the surface thread. Requests from an
+ * older input epoch are consumed without pasting. A request awaiting
+ * confirmation retains its original epoch. All outstanding request pointers
+ * are freed with the surface: cancel host-side asynchronous work before
+ * freeing it, and never complete a request after surface destruction.
+ */
 GHOSTTY_API void ghostty_surface_complete_clipboard_request(ghostty_surface_t,
                                                                const char*,
                                                                void*,

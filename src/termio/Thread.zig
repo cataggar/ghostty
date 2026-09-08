@@ -31,6 +31,7 @@ const Coalesce = struct {
     const min_ms = 25;
 
     resize: ?renderer.Size = null,
+    input_epoch: u64 = 0,
 };
 
 /// The number of milliseconds before we reset the synchronized output flag
@@ -47,6 +48,7 @@ alloc: std.mem.Allocator,
 /// is always the allocator used to create the loop. This is a convenience
 /// so that users of the loop always have an allocator.
 loop: xev.Loop,
+loop_deinitialized: bool = false,
 
 /// The completion to use for the wakeup async handle that is present
 /// on the termio.Writer.
@@ -129,13 +131,39 @@ pub fn deinit(self: *Thread) void {
     self.coalesce.deinit();
     self.sync_reset.deinit();
     self.stop.deinit();
-    self.loop.deinit();
+    if (!self.loop_deinitialized) self.loop.deinit();
 }
 
 /// The main entrypoint for the thread.
 pub fn threadMain(self: *Thread, io: *termio.Termio) void {
+    // Callback storage must survive startup failure and the drain loop too.
+    var cb: CallbackData = .{
+        .self = self,
+        .io = io,
+        .data = .{
+            .alloc = self.alloc,
+            .loop = &self.loop,
+            .renderer_state = io.renderer_state,
+            .surface_mailbox = io.surface_mailbox,
+            .mailbox = &io.mailbox,
+            .backend = undefined,
+        },
+    };
+    defer {
+        io.mailbox.close();
+        if (cb.data.backend_initialized) io.threadExit(&cb.data);
+        // Destroy the event loop before releasing any callback/buffer storage,
+        // including when an event-loop error prevents normal cancellation.
+        self.loop.deinit();
+        self.loop_deinitialized = true;
+        if (cb.data.backend_initialized) cb.data.deinit();
+    }
+    io.mailbox.spsc.wakeup.wait(&self.loop, &self.wakeup_c, CallbackData, &cb, wakeupCallback);
+    self.stop.wait(&self.loop, &self.stop_c, CallbackData, &cb, stopCallback);
+
     // Call child function so we can use errors...
-    self.threadMain_(io) catch |err| {
+    self.threadMain_(&cb) catch |err| {
+        io.mailbox.spsc.input.fail();
         log.warn("error in io thread err={}", .{err});
 
         // Use an arena to simplify memory management below
@@ -234,7 +262,8 @@ pub fn threadMain(self: *Thread, io: *termio.Termio) void {
     }
 }
 
-fn threadMain_(self: *Thread, io: *termio.Termio) !void {
+fn threadMain_(self: *Thread, cb: *CallbackData) !void {
+    const io = cb.io;
     defer log.debug("IO thread exited", .{});
 
     // Right now, on Darwin, `std.Thread.setName` can only name the current
@@ -251,27 +280,8 @@ fn threadMain_(self: *Thread, io: *termio.Termio) !void {
     };
     defer crash.sentry.thread_state = null;
 
-    // Get the mailbox. This must be an SPSC mailbox for threading.
-    const mailbox = switch (io.mailbox) {
-        .spsc => |*v| v,
-        // else => return error.TermioUnsupportedMailbox,
-    };
-
-    // This is the data sent to xev callbacks. We want a pointer to both
-    // ourselves and the thread data so we can thread that through (pun intended).
-    var cb: CallbackData = .{ .self = self, .io = io };
-
-    // Run our thread start/end callbacks. This allows the implementation
-    // to hook into the event loop as needed. The thread data is created
-    // on the stack here so that it has a stable pointer throughout the
-    // lifetime of the thread.
+    // Cleanup is owned by threadMain, including partially completed startup.
     try io.threadEnter(self, &cb.data);
-    defer cb.data.deinit();
-    defer io.threadExit(&cb.data);
-
-    // Start the async handlers.
-    mailbox.wakeup.wait(&self.loop, &self.wakeup_c, CallbackData, &cb, wakeupCallback);
-    self.stop.wait(&self.loop, &self.stop_c, CallbackData, &cb, stopCallback);
 
     // Run
     log.debug("starting IO thread", .{});
@@ -306,12 +316,15 @@ fn drainMailbox(
     // expectation is that all our message handlers will be non-blocking
     // ENOUGH to not mess up throughput on producers.
     var redraw: bool = false;
-    while (mailbox.pop(global.io())) |message| {
+    while (mailbox.pop(global.io())) |envelope| {
+        const message = envelope.message;
+        data.input_epoch = envelope.input_epoch;
         // If we have a message we always redraw
         redraw = true;
 
         log.debug("mailbox message={s}", .{@tagName(message)});
         switch (message) {
+            .input_barrier => |token| data.backend.exec.inputBarrier(token),
             .color_scheme_report => |v| try io.colorSchemeReport(data, v.force),
             .visibility_report => |v| try io.visibilityReport(
                 data,
@@ -381,6 +394,7 @@ fn startSynchronizedOutput(self: *Thread, cb: *CallbackData) void {
 
 fn handleResize(self: *Thread, cb: *CallbackData, resize: renderer.Size) void {
     self.coalesce_data.resize = resize;
+    self.coalesce_data.input_epoch = cb.data.input_epoch;
 
     // If the timer is already active we just return. In the future we want
     // to reset the timer up to a maximum wait time but for now this ensures
@@ -435,7 +449,9 @@ fn coalesceCallback(
 
     if (cb.self.coalesce_data.resize) |v| {
         cb.self.coalesce_data.resize = null;
+        cb.data.input_epoch = cb.self.coalesce_data.input_epoch;
         cb.io.resize(&cb.data, v) catch |err| {
+            cb.io.mailbox.spsc.input.fail();
             log.warn("error during resize err={}", .{err});
         };
     }
@@ -450,6 +466,7 @@ fn wakeupCallback(
     r: xev.Async.WaitError!void,
 ) xev.CallbackAction {
     _ = r catch |err| {
+        if (cb_) |cb| cb.io.mailbox.spsc.input.fail();
         log.err("error in wakeup err={}", .{err});
         return .rearm;
     };
@@ -457,8 +474,10 @@ fn wakeupCallback(
     // When we wake up, we check the mailbox. Mailbox producers should
     // wake up our thread after publishing.
     const cb = cb_ orelse return .rearm;
-    cb.self.drainMailbox(cb) catch |err|
+    cb.self.drainMailbox(cb) catch |err| {
+        cb.io.mailbox.spsc.input.fail();
         log.err("error draining mailbox err={}", .{err});
+    };
 
     return .rearm;
 }
@@ -470,7 +489,11 @@ fn stopCallback(
     r: xev.Async.WaitError!void,
 ) xev.CallbackAction {
     _ = r catch unreachable;
-    cb_.?.self.loop.stop();
+    const cb = cb_.?;
+    cb.self.flags.drain = true;
+    if (cb.data.backend_initialized) {
+        cb.io.backend.exec.stopWriter(&cb.data);
+    } else cb.self.loop.stop();
     return .disarm;
 }
 
@@ -534,4 +557,287 @@ fn selectionScrollCallback(
     );
 
     return .disarm;
+}
+
+/// No GUI, child process, or timing-based readiness: the real PTY slave is
+/// deliberately unread until the test elects to relieve backpressure.
+const TestPty = struct {
+    const terminal = @import("../terminal/main.zig");
+    const Pty = @import("../pty.zig").Pty;
+    const c = @cImport({
+        @cInclude("termios.h");
+        @cInclude("fcntl.h");
+    });
+
+    pty: Pty,
+    thread: Thread,
+    io: termio.Termio,
+    cb: CallbackData,
+    mutex: std.Io.Mutex = .init,
+    render_state: renderer.State,
+
+    fn create() !*TestPty {
+        const alloc = std.testing.allocator;
+        const self = try alloc.create(TestPty);
+        errdefer alloc.destroy(self);
+        self.* = undefined;
+        self.mutex = .init;
+        self.pty = try Pty.open(.{});
+        errdefer self.pty.deinit();
+        errdefer _ = std.posix.system.close(self.pty.slave);
+        var attrs: c.termios = undefined;
+        try std.testing.expectEqual(0, c.tcgetattr(self.pty.slave, &attrs));
+        c.cfmakeraw(&attrs);
+        try std.testing.expectEqual(0, c.tcsetattr(self.pty.slave, c.TCSANOW, &attrs));
+        for ([_]std.posix.fd_t{ self.pty.master, self.pty.slave }) |fd| {
+            const flags = c.fcntl(fd, c.F_GETFL);
+            try std.testing.expect(flags >= 0);
+            try std.testing.expectEqual(0, c.fcntl(fd, c.F_SETFL, flags | c.O_NONBLOCK));
+        }
+        self.thread = try .init(alloc);
+        errdefer self.thread.deinit();
+        self.io.alloc = alloc;
+        self.io.mailbox = try .initSPSC(alloc);
+        errdefer self.io.mailbox.deinit(alloc);
+        self.io.backend = .{ .exec = .{ .subprocess = undefined } };
+        self.io.renderer_wakeup = try xev.Async.init();
+        errdefer self.io.renderer_wakeup.deinit();
+        self.io.renderer_mailbox = try renderer.Thread.Mailbox.create(alloc);
+        errdefer self.io.renderer_mailbox.destroy(alloc);
+        self.io.terminal = try terminal.Terminal.init(global.io(), alloc, .{
+            .cols = 80,
+            .rows = 24,
+        });
+        errdefer self.io.terminal.deinit(alloc);
+        self.render_state = .{
+            .mutex = &self.mutex,
+            .terminal = &self.io.terminal,
+        };
+        self.io.renderer_state = &self.render_state;
+        self.io.last_cursor_reset = null;
+        self.io.size = .{
+            .screen = .{ .width = 640, .height = 384 },
+            .cell = .{ .width = 8, .height = 16 },
+            .padding = .{},
+        };
+        self.io.config.conditional_state = .{};
+        self.io.terminal_stream = .init(.{
+            .allocator = alloc,
+            .handler = .{
+                .alloc = alloc,
+                .size = &self.io.size,
+                .terminal = &self.io.terminal,
+                .termio_mailbox = &self.io.mailbox,
+                .surface_mailbox = undefined,
+                .renderer_state = &self.render_state,
+                .renderer_mailbox = self.io.renderer_mailbox,
+                .renderer_wakeup = self.io.renderer_wakeup,
+                .enquiry_response = "",
+                .osc_color_report_format = .@"16-bit",
+                .clipboard_write = .deny,
+                .seen_title = true,
+            },
+        });
+        errdefer self.io.terminal_stream.deinit();
+        self.cb = .{
+            .self = &self.thread,
+            .io = &self.io,
+            .data = .{
+                .alloc = alloc,
+                .loop = &self.thread.loop,
+                .renderer_state = &self.render_state,
+                .surface_mailbox = undefined,
+                .mailbox = &self.io.mailbox,
+                .backend = .{ .exec = .{
+                    .start = .now(global.io(), .awake),
+                    .write_stream = xev.Stream.initFd(self.pty.master),
+                    .input = &self.io.mailbox.spsc.input,
+                    .process = null,
+                    .read_thread = undefined,
+                    .read_thread_pipe = undefined,
+                    .read_thread_fd = self.pty.master,
+                    .termios_timer = try xev.Timer.init(),
+                } },
+            },
+        };
+        return self;
+    }
+
+    fn destroy(self: *TestPty) void {
+        // Deinitialize the loop before freeing any callback storage even on
+        // assertion failure. No callback may run after this point.
+        self.thread.deinit();
+        self.cb.data.backend.exec.write_pool.deinit(std.testing.allocator);
+        self.cb.data.backend.exec.termios_timer.deinit();
+        self.io.terminal_stream.deinit();
+        self.io.terminal.deinit(std.testing.allocator);
+        self.io.renderer_mailbox.destroy(std.testing.allocator);
+        self.io.renderer_wakeup.deinit();
+        self.io.mailbox.deinit(std.testing.allocator);
+        _ = std.posix.system.close(self.pty.slave);
+        self.pty.deinit();
+        std.testing.allocator.destroy(self);
+    }
+
+    fn drainMailbox(self: *TestPty) !void {
+        try self.thread.drainMailbox(&self.cb);
+    }
+
+    fn read(self: *TestPty, expected: u8) !usize {
+        var buf: [8192]u8 = undefined;
+        var total: usize = 0;
+        while (true) {
+            const n = std.posix.read(self.pty.slave, &buf) catch |err| switch (err) {
+                error.WouldBlock => return total,
+                else => return err,
+            };
+            if (n == 0) return total;
+            for (buf[0..n]) |byte| try std.testing.expectEqual(expected, byte);
+            total += n;
+        }
+    }
+
+    fn finish(self: *TestPty, expected: u8) !usize {
+        const start = std.Io.Timestamp.now(global.io(), .awake);
+        var total: usize = 0;
+        while (self.cb.data.backend.exec.write_pending != 0) {
+            try self.thread.loop.run(.no_wait);
+            total += try self.read(expected);
+            if (start.untilNow(global.io(), .awake).toMilliseconds() > 5000)
+                return error.WriterTimeout;
+        }
+        return total + try self.read(expected);
+    }
+};
+
+test "input quiescence real PTY backpressure, mailbox generations, and output" {
+    if (comptime builtin.os.tag == .windows or builtin.os.tag == .ios)
+        return error.SkipZigTest;
+    const testing = std.testing;
+    const f = try TestPty.create();
+    defer f.destroy();
+    const input = &f.io.mailbox.spsc.input;
+
+    const paste = try testing.allocator.alloc(u8, 256 * 1024);
+    defer testing.allocator.free(paste);
+    @memset(paste, 'P');
+    f.io.queueMessage(try termio.Message.writeReq(testing.allocator, paste), .unlocked);
+    try f.drainMailbox();
+    try testing.expectEqual(4096, f.cb.data.backend.exec.write_pending);
+
+    // Fill the OS queue without reading the slave. The writer must remain
+    // pending even after the IO mailbox and barrier have been processed.
+    for (0..256) |_| try f.thread.loop.run(.no_wait);
+    try testing.expect(f.cb.data.backend.exec.write_pending > 0);
+    const old_epoch = input.snapshot();
+    f.io.queueMessage(.{ .write_stable = "mailbox-old" }, .unlocked);
+    const token = f.io.mailbox.quiesce();
+    const closed_epoch = input.snapshot();
+    f.io.queueMessage(.{ .write_stable = "gated" }, .unlocked);
+    try f.drainMailbox();
+    try testing.expectEqual(.pending, input.status(token));
+    try testing.expect(!input.resumeInput(token));
+
+    // Output parsing and local scroll still work. Its DSR response is gated.
+    f.io.processOutput("visible output\r\n\x1b[6n");
+    try testing.expectEqual(1, f.io.terminal.screens.active.cursor.y);
+    const screen = f.io.terminal.screens.active;
+    const selected = try screen.selectionString(testing.allocator, .{
+        .sel = .init(
+            screen.pages.pin(.{ .active = .{ .x = 0, .y = 0 } }).?,
+            screen.pages.pin(.{ .active = .{ .x = 13, .y = 0 } }).?,
+            false,
+        ),
+        .trim = false,
+    });
+    defer testing.allocator.free(selected);
+    try testing.expectEqualStrings("visible output", selected);
+    f.io.queueMessage(.{ .scroll_viewport = .top }, .unlocked);
+    try f.drainMailbox();
+    try testing.expectEqual(paste.len, try f.finish('P'));
+    try testing.expectEqual(.ready, input.status(token));
+
+    // Delayed producers can publish after READY, including after resume.
+    // Captured old/closed epochs must not acquire the new admission epoch.
+    f.io.mailbox.sendWithEpoch(.{ .write_stable = "late-old" }, null, old_epoch);
+    f.io.mailbox.sendWithEpoch(.{ .write_stable = "late-gated" }, null, closed_epoch);
+    f.io.queueMessage(.{ .size_report = .mode_2048 }, .unlocked);
+    try testing.expect(input.resumeInput(token));
+    try f.drainMailbox();
+    try testing.expectEqual(0, f.cb.data.backend.exec.write_pending);
+    try testing.expectEqual(0, try f.read('N'));
+    f.io.queueMessage(.{ .write_stable = "NNN" }, .unlocked);
+    try f.drainMailbox();
+    try testing.expectEqual(3, try f.finish('N'));
+}
+
+test "input quiescence backend allocation failure and mailbox shutdown" {
+    if (comptime builtin.os.tag == .windows or builtin.os.tag == .ios)
+        return error.SkipZigTest;
+    const testing = std.testing;
+    const f = try TestPty.create();
+    defer f.destroy();
+    var failing: testing.FailingAllocator = .init(testing.allocator, .{ .fail_index = 0 });
+    f.io.alloc = failing.allocator();
+    f.io.queueMessage(.{ .write_stable = "cannot allocate write request" }, .unlocked);
+    try testing.expectError(error.OutOfMemory, f.drainMailbox());
+    const token = f.io.mailbox.quiesce();
+    try f.drainMailbox();
+    try testing.expectEqual(.failed, f.io.mailbox.spsc.input.status(token));
+    try testing.expectEqual(0, f.cb.data.backend.exec.write_pending);
+    f.io.mailbox.close();
+    f.io.mailbox.send(try termio.Message.writeReq(
+        testing.allocator,
+        @as([]const u8, "a message large enough to require an allocation after shutdown"),
+    ), null);
+    try testing.expect(f.io.mailbox.spsc.queue.pop(global.io()) == null);
+}
+
+test "input quiescence child exit cannot report ready" {
+    if (comptime builtin.os.tag == .windows or builtin.os.tag == .ios)
+        return error.SkipZigTest;
+    const f = try TestPty.create();
+    defer f.destroy();
+    f.cb.data.backend.exec.exited = true;
+    const token = f.io.mailbox.quiesce();
+    try f.drainMailbox();
+    try std.testing.expectEqual(.failed, f.io.mailbox.spsc.input.status(token));
+    try std.testing.expect(!f.io.mailbox.spsc.input.resumeInput(token));
+}
+
+test "input quiescence full mailbox and teardown while writer pending" {
+    if (comptime builtin.os.tag == .windows or builtin.os.tag == .ios)
+        return error.SkipZigTest;
+    const testing = std.testing;
+    const f = try TestPty.create();
+    defer f.destroy();
+    const input = &f.io.mailbox.spsc.input;
+    for (0..64) |_| f.io.mailbox.send(.{ .write_stable = "x" }, null);
+    const rejected = f.io.mailbox.quiesce();
+    try testing.expectEqual(.failed, input.status(rejected));
+    try f.drainMailbox();
+    const retry = f.io.mailbox.quiesce();
+    try f.drainMailbox();
+    try testing.expect(input.resumeInput(retry));
+
+    const paste = try testing.allocator.alloc(u8, 128 * 1024);
+    defer testing.allocator.free(paste);
+    @memset(paste, 'P');
+    f.io.queueMessage(try termio.Message.writeReq(testing.allocator, paste), .unlocked);
+    try f.drainMailbox();
+    for (0..128) |_| try f.thread.loop.run(.no_wait);
+    const token = f.io.mailbox.quiesce();
+    try f.drainMailbox();
+    try testing.expectEqual(.pending, input.status(token));
+    f.cb.data.backend.exec.stopWrites(&f.thread.loop);
+    const start = std.Io.Timestamp.now(global.io(), .awake);
+    while (!f.thread.loop.stopped()) {
+        try f.thread.loop.run(.no_wait);
+        if (start.untilNow(global.io(), .awake).toMilliseconds() > 5000)
+            return error.CancellationTimeout;
+    }
+    try testing.expectEqual(0, f.cb.data.backend.exec.write_pending);
+    try testing.expect(!f.cb.data.backend.exec.write_cancel_pending);
+    try testing.expectEqual(.failed, input.status(token));
+    try testing.expect(!input.resumeInput(token));
 }
