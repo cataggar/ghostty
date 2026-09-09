@@ -573,6 +573,8 @@ const TestPty = struct {
     const c = @cImport({
         @cInclude("termios.h");
         @cInclude("fcntl.h");
+        @cInclude("sys/ioctl.h");
+        @cInclude("sys/stat.h");
     });
 
     pty: Pty,
@@ -736,6 +738,76 @@ const TestPty = struct {
                 return error.WriterTimeout;
         }
         return total + try self.read(expected);
+    }
+};
+
+const TestEpollPtyWrite = struct {
+    const c = TestPty.c;
+    const Identity = struct {
+        device: c.dev_t,
+        number: c_uint,
+    };
+
+    fd: std.posix.fd_t,
+    identity: Identity,
+
+    fn identityOf(fd: std.posix.fd_t) !?Identity {
+        var stat: c.struct_stat = undefined;
+        switch (std.posix.errno(c.fstat(fd, &stat))) {
+            .SUCCESS => {},
+            .BADF => return null,
+            else => return error.PtyDescriptorIdentityFailed,
+        }
+        if (stat.st_mode & c.S_IFMT != c.S_IFCHR) return null;
+        var number: c_uint = undefined;
+        switch (std.posix.errno(c.ioctl(fd, c.TIOCGPTN, &number))) {
+            .SUCCESS => {},
+            .BADF, .NOTTY, .INVAL => return null,
+            else => return error.PtyDescriptorIdentityFailed,
+        }
+        return .{ .device = stat.st_dev, .number = number };
+    }
+
+    fn count(identity: Identity) !usize {
+        const io = global.io();
+        var dir = try std.Io.Dir.cwd().openDir(io, "/proc/self/fd", .{ .iterate = true });
+        defer dir.close(io);
+        var iter = dir.iterate();
+        var result: usize = 0;
+        while (try iter.next(io)) |entry| {
+            const fd = try std.fmt.parseInt(std.posix.fd_t, entry.name, 10);
+            const actual = try identityOf(fd) orelse continue;
+            if (std.meta.eql(identity, actual)) result += 1;
+        }
+        return result;
+    }
+
+    fn capture(exec: *termio.Exec.ThreadData, master: std.posix.fd_t) !TestEpollPtyWrite {
+        const head = exec.write_queue.value.epoll.head orelse return error.WriterQueueEmpty;
+        // queueWrite can complete the head and enqueue another during one
+        // tick. The new head is .adding with dup_fd=0, not an owned descriptor.
+        if (head.completion.flags.state != .active) return error.WriterNotRegistered;
+        try std.testing.expect(head.completion.flags.dup);
+        const fd = head.completion.flags.dup_fd;
+        try std.testing.expect(fd != master);
+        const identity = try identityOf(master) orelse return error.MasterPtyMissing;
+        try std.testing.expectEqual(identity, try identityOf(fd) orelse
+            return error.WriterPtyMissing);
+        // Exactly the original master and this registered write duplicate.
+        try std.testing.expectEqual(2, try count(identity));
+        return .{ .fd = fd, .identity = identity };
+    }
+
+    fn expectRetired(self: TestEpollPtyWrite, master: std.posix.fd_t) !void {
+        // The original master remains open, so its devpts index cannot be
+        // recycled. An old fd number may, however, now name an unrelated file.
+        try std.testing.expectEqual(self.identity, try identityOf(master) orelse
+            return error.MasterPtyMissing);
+        if (try identityOf(self.fd)) |actual|
+            try std.testing.expect(!std.meta.eql(self.identity, actual));
+        // Check every descriptor, not just the sampled numeric slot: any
+        // later head's leaked duplicate must fail this assertion as well.
+        try std.testing.expectEqual(1, try count(self.identity));
     }
 };
 
@@ -921,7 +993,7 @@ fn testChildWriterTeardown() !void {
     const App = @import("../App.zig");
     const c = TestPty.c;
     if (comptime @import("../build_config.zig").app_runtime != .none)
-        return error.SkipZigTest;
+        return error.HeadlessRuntimeRequired;
 
     // Exercise ordinary, unopted shutdown too. Starting the production
     // backend before its loop lets the fixture establish backpressure without
@@ -993,16 +1065,36 @@ fn testChildWriterTeardown() !void {
 
         f.io.mailbox.spsc.wakeup.wait(&f.thread.loop, &f.thread.wakeup_c, CallbackData, &f.cb, wakeupCallback);
         f.thread.stop.wait(&f.thread.loop, &f.thread.stop_c, CallbackData, &f.cb, stopCallback);
+        if (comptime builtin.os.tag == .linux) {
+            if (xev.backend == .epoll) {
+                // Reproduce the formerly accepted default descriptor value
+                // deterministically, without depending on write timing.
+                try testing.expectEqual(0, exec.write_queue.value.epoll.head.?.completion.flags.dup_fd);
+                try testing.expectError(error.WriterNotRegistered, TestEpollPtyWrite.capture(exec, fd));
+            }
+        }
         // Submit the real process watch and write before requesting stop.
         try f.thread.loop.run(.no_wait);
         try testing.expect(exec.write_pending > 0);
-        const epoll_write_fd: ?std.posix.fd_t = if (comptime builtin.os.tag == .linux)
-            if (xev.backend == .epoll)
-                exec.write_queue.value.epoll.head.?.completion.flags.dup_fd
-            else
-                null
-        else
-            null;
+        const epoll_write: ?TestEpollPtyWrite = watch: {
+            if (comptime builtin.os.tag == .linux) {
+                if (xev.backend == .epoll) {
+                    const watch_start = std.Io.Timestamp.now(global.io(), .awake);
+                    while (true) {
+                        break :watch TestEpollPtyWrite.capture(exec, fd) catch |err| switch (err) {
+                            error.WriterNotRegistered => {
+                                if (watch_start.untilNow(global.io(), .awake).toMilliseconds() > 5000)
+                                    return error.WriterRegistrationTimeout;
+                                try f.thread.loop.run(.no_wait);
+                                continue;
+                            },
+                            else => return err,
+                        };
+                    }
+                }
+            }
+            break :watch null;
+        };
         const Worker = struct {
             fixture: *TestPty,
             done: std.atomic.Value(bool) = .init(false),
@@ -1035,9 +1127,8 @@ fn testChildWriterTeardown() !void {
         try testing.expectEqual(.CHILD, std.posix.errno(
             std.posix.system.waitpid(pid, null, std.c.W.NOHANG),
         ));
-        if (epoll_write_fd) |dup_fd| {
-            try testing.expectEqual(-1, c.fcntl(dup_fd, c.F_GETFD));
-        }
+        if (comptime builtin.os.tag == .linux)
+            if (epoll_write) |watch| try watch.expectRetired(fd);
         if (quiesce) {
             try testing.expectEqual(.failed, exec.input.status(token));
             try testing.expect(!exec.input.resumeInput(token));
