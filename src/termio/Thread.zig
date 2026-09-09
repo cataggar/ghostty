@@ -745,6 +745,7 @@ const TestEpollPtyWrite = struct {
     const c = TestPty.c;
     const Identity = struct {
         device: c.dev_t,
+        rdevice: c.dev_t,
         number: c_uint,
     };
 
@@ -765,21 +766,35 @@ const TestEpollPtyWrite = struct {
         }
     }
 
-    fn identityOf(fd: std.posix.fd_t) !?Identity {
+    fn identityOf(fd: std.posix.fd_t, expected: ?Identity) !?Identity {
         var stat: c.struct_stat = undefined;
         switch (std.posix.errno(c.fstat(fd, &stat))) {
             .SUCCESS => {},
             .BADF => return null,
-            else => return error.PtyDescriptorIdentityFailed,
+            else => |err| {
+                std.debug.print("PTY descriptor fstat failed: fd={d} errno={s}\n", .{ fd, @tagName(err) });
+                return error.PtyDescriptorIdentityFailed;
+            },
         }
         if (stat.st_mode & c.S_IFMT != c.S_IFCHR) return null;
+        // Other character devices, including hung-up PTY slaves, need not
+        // support a master-only ioctl. Filter them before querying identity.
+        if (expected) |identity| {
+            if (stat.st_dev != identity.device or stat.st_rdev != identity.rdevice)
+                return null;
+        }
         var number: c_uint = undefined;
         switch (std.posix.errno(c.ioctl(fd, c.TIOCGPTN, &number))) {
             .SUCCESS => {},
             .BADF, .NOTTY, .INVAL => return null,
-            else => return error.PtyDescriptorIdentityFailed,
+            else => |err| {
+                std.debug.print("PTY descriptor ioctl failed: fd={d} device={d} rdevice={d} errno={s}\n", .{
+                    fd, stat.st_dev, stat.st_rdev, @tagName(err),
+                });
+                return error.PtyDescriptorIdentityFailed;
+            },
         }
-        return .{ .device = stat.st_dev, .number = number };
+        return .{ .device = stat.st_dev, .rdevice = stat.st_rdev, .number = number };
     }
 
     fn count(identity: Identity) !usize {
@@ -790,7 +805,7 @@ const TestEpollPtyWrite = struct {
         var result: usize = 0;
         while (try iter.next(io)) |entry| {
             const fd = try std.fmt.parseInt(std.posix.fd_t, entry.name, 10);
-            const actual = try identityOf(fd) orelse continue;
+            const actual = try identityOf(fd, identity) orelse continue;
             if (std.meta.eql(identity, actual)) result += 1;
         }
         return result;
@@ -806,8 +821,8 @@ const TestEpollPtyWrite = struct {
         try std.testing.expect(head.completion.flags.dup);
         const fd = head.completion.flags.dup_fd;
         try std.testing.expect(fd != master);
-        const identity = try identityOf(master) orelse return error.MasterPtyMissing;
-        try std.testing.expectEqual(identity, try identityOf(fd) orelse
+        const identity = try identityOf(master, null) orelse return error.MasterPtyMissing;
+        try std.testing.expectEqual(identity, try identityOf(fd, identity) orelse
             return error.WriterPtyMissing);
         // Exactly the original master and this registered write duplicate.
         try std.testing.expectEqual(2, try count(identity));
@@ -821,9 +836,9 @@ const TestEpollPtyWrite = struct {
         );
         // The original master remains open, so its devpts index cannot be
         // recycled. An old fd number may, however, now name an unrelated file.
-        try std.testing.expectEqual(self.identity, try identityOf(master) orelse
+        try std.testing.expectEqual(self.identity, try identityOf(master, null) orelse
             return error.MasterPtyMissing);
-        if (try identityOf(self.fd)) |actual|
+        if (try identityOf(self.fd, self.identity)) |actual|
             try std.testing.expect(!std.meta.eql(self.identity, actual));
         // Check every descriptor, not just the sampled numeric slot: any
         // later head's leaked duplicate must fail this assertion as well.
@@ -835,6 +850,11 @@ fn testEpollFirstTickHeadAdvance() !void {
     const testing = std.testing;
     const f = try TestPty.create();
     defer f.destroy();
+    const identity = (try TestEpollPtyWrite.identityOf(f.pty.master, null)).?;
+    try testing.expect(try TestEpollPtyWrite.identityOf(f.pty.slave, identity) == null);
+    var different_device = identity;
+    different_device.rdevice ^= 1;
+    try testing.expect(try TestEpollPtyWrite.identityOf(f.pty.master, different_device) == null);
     const exec = &f.cb.data.backend.exec;
     errdefer TestEpollPtyWrite.diagnose(exec, f.pty.master, "first-tick head advance");
     f.io.queueMessage(.{ .write_stable = "first" }, .unlocked);
