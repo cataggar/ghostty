@@ -751,6 +751,20 @@ const TestEpollPtyWrite = struct {
     fd: std.posix.fd_t,
     identity: Identity,
 
+    fn diagnose(exec: *termio.Exec.ThreadData, master: std.posix.fd_t, reason: []const u8) void {
+        if (exec.write_queue.value.epoll.head) |head| {
+            const flags = head.completion.flags;
+            std.debug.print(
+                "epoll writer {s}: pending={d} sampled_fd={d} sampled_state={s} dup={} master_fd={d}\n",
+                .{ reason, exec.write_pending, flags.dup_fd, @tagName(flags.state), flags.dup, master },
+            );
+        } else {
+            std.debug.print("epoll writer {s}: pending={d} queue=empty master_fd={d}\n", .{
+                reason, exec.write_pending, master,
+            });
+        }
+    }
+
     fn identityOf(fd: std.posix.fd_t) !?Identity {
         var stat: c.struct_stat = undefined;
         switch (std.posix.errno(c.fstat(fd, &stat))) {
@@ -783,6 +797,8 @@ const TestEpollPtyWrite = struct {
     }
 
     fn capture(exec: *termio.Exec.ThreadData, master: std.posix.fd_t) !TestEpollPtyWrite {
+        errdefer |err| if (err != error.WriterNotRegistered)
+            diagnose(exec, master, @errorName(err));
         const head = exec.write_queue.value.epoll.head orelse return error.WriterQueueEmpty;
         // queueWrite can complete the head and enqueue another during one
         // tick. The new head is .adding with dup_fd=0, not an owned descriptor.
@@ -799,6 +815,10 @@ const TestEpollPtyWrite = struct {
     }
 
     fn expectRetired(self: TestEpollPtyWrite, master: std.posix.fd_t) !void {
+        errdefer |err| std.debug.print(
+            "epoll writer cleanup {s}: sampled_fd={d} sampled_state=active current_fd_flags={d} master_fd={d} pty_device={d} pty_number={d}\n",
+            .{ @errorName(err), self.fd, c.fcntl(self.fd, c.F_GETFD), master, self.identity.device, self.identity.number },
+        );
         // The original master remains open, so its devpts index cannot be
         // recycled. An old fd number may, however, now name an unrelated file.
         try std.testing.expectEqual(self.identity, try identityOf(master) orelse
@@ -810,6 +830,29 @@ const TestEpollPtyWrite = struct {
         try std.testing.expectEqual(1, try count(self.identity));
     }
 };
+
+fn testEpollFirstTickHeadAdvance() !void {
+    const testing = std.testing;
+    const f = try TestPty.create();
+    defer f.destroy();
+    const exec = &f.cb.data.backend.exec;
+    errdefer TestEpollPtyWrite.diagnose(exec, f.pty.master, "first-tick head advance");
+    f.io.queueMessage(.{ .write_stable = "first" }, .unlocked);
+    f.io.queueMessage(.{ .write_stable = "second" }, .unlocked);
+    try f.drainMailbox();
+    try testing.expectEqual(2, exec.write_pending);
+    const first = exec.write_queue.value.epoll.head.?;
+
+    // The empty raw PTY is writable. One tick finishes the first request,
+    // but its callback only queues the second for the NEXT submission pass.
+    try f.thread.loop.run(.no_wait);
+    try testing.expectEqual(1, exec.write_pending);
+    const second = exec.write_queue.value.epoll.head.?;
+    try testing.expect(first != second);
+    try testing.expectEqual(.adding, second.completion.flags.state);
+    try testing.expectEqual(0, second.completion.flags.dup_fd);
+    try testing.expectError(error.WriterNotRegistered, TestEpollPtyWrite.capture(exec, f.pty.master));
+}
 
 test "input quiescence real PTY backpressure, mailbox generations, and output" {
     if (comptime builtin.os.tag == .windows or builtin.os.tag == .ios)
@@ -994,6 +1037,8 @@ fn testChildWriterTeardown() !void {
     const c = TestPty.c;
     if (comptime @import("../build_config.zig").app_runtime != .none)
         return error.HeadlessRuntimeRequired;
+    if (comptime builtin.os.tag == .linux)
+        if (xev.backend == .epoll) try testEpollFirstTickHeadAdvance();
 
     // Exercise ordinary, unopted shutdown too. Starting the production
     // backend before its loop lets the fixture establish backpressure without
@@ -1083,8 +1128,10 @@ fn testChildWriterTeardown() !void {
                     while (true) {
                         break :watch TestEpollPtyWrite.capture(exec, fd) catch |err| switch (err) {
                             error.WriterNotRegistered => {
-                                if (watch_start.untilNow(global.io(), .awake).toMilliseconds() > 5000)
+                                if (watch_start.untilNow(global.io(), .awake).toMilliseconds() > 5000) {
+                                    TestEpollPtyWrite.diagnose(exec, fd, "registration timeout");
                                     return error.WriterRegistrationTimeout;
+                                }
                                 try f.thread.loop.run(.no_wait);
                                 continue;
                             },
