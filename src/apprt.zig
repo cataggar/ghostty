@@ -54,6 +54,7 @@ pub const Surface = runtime.Surface;
 test {
     _ = Runtime;
     _ = runtime;
+    _ = @import("apprt/ClipboardRead.zig");
     _ = action;
     _ = structs;
 }

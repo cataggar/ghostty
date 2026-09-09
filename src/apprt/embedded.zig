@@ -22,6 +22,8 @@ const CoreSurface = @import("../Surface.zig");
 const configpkg = @import("../config.zig");
 const Config = configpkg.Config;
 const String = @import("../main_c.zig").String;
+const InputQuiescence = @import("../termio/InputQuiescence.zig");
+const ClipboardRead = @import("ClipboardRead.zig");
 
 const log = std.log.scoped(.embedded_window);
 
@@ -435,6 +437,7 @@ pub const Surface = struct {
     size: apprt.SurfaceSize,
     cursor_pos: apprt.CursorPos,
     inspector: ?*Inspector = null,
+    clipboard_reads: ClipboardRead.List = .{},
 
     /// The current title of the surface. The embedded apprt saves this so
     /// that getTitle works without the implementer needing to save it.
@@ -614,6 +617,7 @@ pub const Surface = struct {
     }
 
     pub fn deinit(self: *Surface) void {
+        ClipboardRead.destroyAll(self.app.core_app.alloc, &self.clipboard_reads);
         // Shut down our inspector
         self.freeInspector();
 
@@ -698,17 +702,20 @@ pub const Surface = struct {
         // complete_clipboard_request. This sucks but clipboard requests aren't
         // high throughput so it's probably fine.
         const alloc = self.app.core_app.alloc;
-        const state_ptr = try alloc.create(apprt.ClipboardRequest);
-        errdefer alloc.destroy(state_ptr);
-        state_ptr.* = state;
+        const read = try ClipboardRead.create(
+            alloc,
+            &self.clipboard_reads,
+            state,
+            self.core_surface.io.mailbox.spsc.input.snapshot(),
+        );
 
         const started = self.app.opts.read_clipboard(
             self.userdata,
             @intCast(@intFromEnum(clipboard_type)),
-            state_ptr,
+            &read.request,
         );
         if (!started) {
-            alloc.destroy(state_ptr);
+            read.destroy(alloc, &self.clipboard_reads);
             return false;
         }
 
@@ -722,6 +729,15 @@ pub const Surface = struct {
         confirmed: bool,
     ) void {
         const alloc = self.app.core_app.alloc;
+        const read: *ClipboardRead = @alignCast(@fieldParentPtr("request", state));
+
+        // Includes confirmation callbacks, which may arrive after a complete
+        // quiesce/resume cycle. Never reinterpret old data as fresh input.
+        if (read.discardStale(
+            alloc,
+            &self.clipboard_reads,
+            &self.core_surface.io.mailbox.spsc.input,
+        )) return;
 
         // Attempt to complete the request, but we may request
         // confirmation.
@@ -748,7 +764,7 @@ pub const Surface = struct {
 
         // We don't defer this because the clipboard confirmation route
         // preserves the clipboard request.
-        alloc.destroy(state);
+        read.destroy(alloc, &self.clipboard_reads);
     }
 
     pub fn setClipboard(
@@ -1618,6 +1634,29 @@ pub const CAPI = struct {
     /// Returns true if the surface process has exited.
     export fn ghostty_surface_process_exited(surface: *Surface) bool {
         return surface.core_surface.child_exited;
+    }
+
+    export fn ghostty_surface_input_quiesce(surface: ?*Surface) u64 {
+        const ptr = surface orelse return 0;
+        return ptr.core_surface.quiesceInput();
+    }
+
+    export fn ghostty_surface_input_status(
+        surface: ?*Surface,
+        token: u64,
+    ) InputQuiescence.Status {
+        const ptr = surface orelse return .invalid;
+        return ptr.core_surface.io.mailbox.spsc.input.status(token);
+    }
+
+    export fn ghostty_surface_input_resume(surface: ?*Surface, token: u64) bool {
+        const ptr = surface orelse return false;
+        return ptr.core_surface.resumeInput(token);
+    }
+
+    export fn ghostty_surface_input_cancel(surface: ?*Surface, token: u64) bool {
+        const ptr = surface orelse return false;
+        return ptr.core_surface.io.mailbox.spsc.input.cancel(token);
     }
 
     /// Returns true if the surface has a selection.

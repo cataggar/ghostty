@@ -6,6 +6,9 @@ const apprt = @import("../apprt.zig");
 pub const resourcesDir = internal_os.resourcesDir;
 
 pub const App = struct {
+    /// The headless runtime has no event loop to wake.
+    pub fn wakeup(_: *const App) void {}
+
     /// Always return false as there is no apprt to communicate with.
     pub fn performIpc(
         _: Allocator,

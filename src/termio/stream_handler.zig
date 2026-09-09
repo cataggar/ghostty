@@ -72,6 +72,9 @@ pub const StreamHandler = struct {
     /// mailbox. This can be used by callers to determine if they need
     /// to wake up the termio thread.
     termio_messaged: bool = false,
+    /// Captured at the start of each output batch, before any mailbox send
+    /// can release the renderer lock and block across an input transition.
+    input_epoch: u64 = 0,
 
     /// This is set to true when we've seen a title escape sequence. We use
     /// this to determine if we need to default the window title.
@@ -101,7 +104,7 @@ pub const StreamHandler = struct {
     }
 
     /// Change the configuration for this handler.
-    pub fn changeConfig(self: *StreamHandler, config: *termio.DerivedConfig) void {
+    pub fn changeConfig(self: *StreamHandler, config: *termio.DerivedConfig, input_epoch: u64) void {
         self.osc_color_report_format = config.osc_color_report_format;
         self.clipboard_write = config.clipboard_write;
         self.enquiry_response = config.enquiry_response;
@@ -109,7 +112,12 @@ pub const StreamHandler = struct {
         self.terminal.setDefaultCursorBlink(config.cursor_blink);
 
         // The config could have changed any of our colors so update mode 2031
-        self.messageWriter(.{ .color_scheme_report = .{ .force = false } });
+        self.termio_mailbox.sendWithEpoch(
+            .{ .color_scheme_report = .{ .force = false } },
+            self.renderer_state.mutex,
+            input_epoch,
+        );
+        self.termio_messaged = true;
     }
 
     inline fn surfaceMessageWriter(
@@ -126,7 +134,7 @@ pub const StreamHandler = struct {
     }
 
     inline fn messageWriter(self: *StreamHandler, msg: termio.Message) void {
-        self.termio_mailbox.send(msg, self.renderer_state.mutex);
+        self.termio_mailbox.sendWithEpoch(msg, self.renderer_state.mutex, self.input_epoch);
         self.termio_messaged = true;
     }
 
@@ -972,7 +980,10 @@ pub const StreamHandler = struct {
 
         // Get clipboard contents
         if (data.len == 1 and data[0] == '?') {
-            self.surfaceMessageWriter(.{ .clipboard_read = clipboard_type });
+            self.surfaceMessageWriter(.{ .clipboard_read = .{
+                .clipboard = clipboard_type,
+                .input_epoch = self.input_epoch,
+            } });
             return;
         }
 
@@ -1357,7 +1368,10 @@ pub const StreamHandler = struct {
             .csi_14_t => self.messageWriter(.{ .size_report = .csi_14_t }),
             .csi_16_t => self.messageWriter(.{ .size_report = .csi_16_t }),
             .csi_18_t => self.messageWriter(.{ .size_report = .csi_18_t }),
-            .csi_21_t => self.surfaceMessageWriter(.{ .report_title = .csi_21_t }),
+            .csi_21_t => self.surfaceMessageWriter(.{ .report_title = .{
+                .style = .csi_21_t,
+                .input_epoch = self.input_epoch,
+            } }),
         }
     }
 

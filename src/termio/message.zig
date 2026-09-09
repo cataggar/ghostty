@@ -16,6 +16,9 @@ pub const Message = union(enum) {
     /// in the future.
     pub const WriteReq = MessageData(u8, 38);
 
+    /// Observe all previously submitted backend writes before reporting ready.
+    input_barrier: u64,
+
     /// Request a color scheme report is sent to the PTY.
     color_scheme_report: struct {
         /// Force write the current color scheme

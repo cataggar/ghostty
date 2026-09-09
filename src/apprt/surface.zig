@@ -64,13 +64,19 @@ pub const Message = union(enum) {
     set_title: [256]u8,
 
     /// Report the window title back to the terminal
-    report_title: ReportTitleStyle,
+    report_title: struct {
+        style: ReportTitleStyle,
+        input_epoch: u64,
+    },
 
     /// Set the mouse shape.
     set_mouse_shape: terminal.MouseShape,
 
     /// Read the clipboard and write to the pty.
-    clipboard_read: apprt.Clipboard,
+    clipboard_read: struct {
+        clipboard: apprt.Clipboard,
+        input_epoch: u64,
+    },
 
     /// Write the clipboard contents.
     clipboard_write: struct {

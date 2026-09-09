@@ -358,7 +358,7 @@ pub fn threadEnter(
 
     // Setup our backend
     try self.backend.threadEnter(self.alloc, self, data);
-    errdefer self.backend.threadExit(data);
+    data.backend_initialized = true;
 
     // If we have inputs, then queue them all up.
     for (inputs orelse &.{}) |input| switch (input) {
@@ -419,6 +419,7 @@ pub inline fn queueWrite(
     data: []const u8,
     linefeed: bool,
 ) !void {
+    if (!self.mailbox.spsc.input.accepts(td.input_epoch)) return;
     try self.backend.queueWrite(self.alloc, td, data, linefeed);
 }
 
@@ -438,7 +439,7 @@ pub fn changeConfig(self: *Termio, td: *ThreadData, config: *DerivedConfig) !voi
     // Update our stream handler. The stream handler uses the same
     // renderer mutex so this is safe to do despite being executed
     // from another thread.
-    self.terminal_stream.handler.changeConfig(&self.config);
+    self.terminal_stream.handler.changeConfig(&self.config, td.input_epoch);
     td.backend.changeConfig(&self.config);
 
     // Update the configuration that we know about.
@@ -654,6 +655,7 @@ pub fn processOutput(self: *Termio, buf: []const u8) void {
 
 /// Process output from readdata but the lock is already held.
 fn processOutputLocked(self: *Termio, buf: []const u8) void {
+    self.terminal_stream.handler.input_epoch = self.mailbox.spsc.input.snapshot();
     // Schedule a render. We can call this first because we have the lock.
     self.terminal_stream.handler.queueRender() catch unreachable;
 
@@ -772,7 +774,12 @@ pub const ThreadData = struct {
 
     /// Data associated with the backend implementation (i.e. pty/exec state)
     backend: termio.backend.ThreadData,
+    /// The thread owns cleanup once backend startup has succeeded, even if
+    /// queueing configured initial input subsequently fails.
+    backend_initialized: bool = false,
     mailbox: *termio.Mailbox,
+    /// Admission epoch of the message being handled by this thread.
+    input_epoch: u64 = 0,
 
     pub fn deinit(self: *ThreadData) void {
         self.backend.deinit(self.alloc);
