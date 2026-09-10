@@ -476,6 +476,7 @@ pub fn init(
     var config_: ?configpkg.Config = config_original.changeConditionalState(
         app.config_conditional_state,
     ) catch |err| err: {
+        if (config_original.rejectLaunchError(err)) return err;
         log.warn("failed to apply conditional state to config err={}", .{err});
         break :err null;
     };
@@ -490,6 +491,19 @@ pub fn init(
         c.@"working-directory" = config_original.@"working-directory";
         break :config c;
     } else config_original;
+
+    try config.checkLaunchPreparation(builtin.os.tag);
+    const command = try configpkg.launch.selectCommand(
+        config.@"command-launch-policy",
+        config.command,
+        config.@"initial-command",
+        app.first,
+    );
+    if (config.@"command-launch-policy" == .controlled) {
+        try configpkg.launch.validateWorkingDirectory(
+            if (config.@"working-directory") |wd| wd.value() else null,
+        );
+    }
 
     // Get our configuration
     var derived_config = try DerivedConfig.init(alloc, config);
@@ -624,25 +638,22 @@ pub fn init(
         .config_conditional_state = app.config_conditional_state,
     };
 
-    // The command we're going to execute
-    const command: ?configpkg.Command = command: {
-        if (app.first) {
-            if (config.@"initial-command") |command| {
-                break :command command;
-            }
-        }
-        break :command config.command;
-    };
-
     // Start our IO implementation
     // This separate block ({}) is important because our errdefers must
     // be scoped here to be valid.
     {
-        var env = rt_surface.defaultTermioEnv() catch |err| env: {
-            // If an error occurs, we don't want to block surface startup.
-            log.warn("error getting env map for surface err={}", .{err});
-            break :env global.environMap() catch std.process.Environ.Map.init(alloc);
-        };
+        var env = try apprt.surface.launchEnvironment(
+            config.@"command-launch-policy",
+            .{ .surface = rt_surface, .alloc = alloc },
+            struct {
+                pub fn get(ctx: anytype) !std.process.Environ.Map {
+                    return ctx.surface.defaultTermioEnv();
+                }
+                pub fn fallback(ctx: anytype) std.process.Environ.Map {
+                    return global.environMap() catch std.process.Environ.Map.init(ctx.alloc);
+                }
+            },
+        );
         errdefer env.deinit();
 
         // don't leak GHOSTTY_LOG to any subprocesses
@@ -656,8 +667,10 @@ pub fn init(
 
         // Initialize our IO backend
         var io_exec = try termio.Exec.init(alloc, .{
+            .launch_policy = config.@"command-launch-policy",
+            .launch_preparation = config._launch_preparation,
             .command = command,
-            .env = env,
+            .env = &env,
             .env_override = config.env,
             .shell_integration = config.@"shell-integration",
             .shell_integration_features = config.@"shell-integration-features",
@@ -1765,6 +1778,7 @@ pub fn updateConfig(
     var config_: ?configpkg.Config = original.changeConditionalState(
         self.config_conditional_state,
     ) catch |err| err: {
+        if (original.rejectLaunchError(err)) return err;
         log.warn("failed to apply conditional state to config err={}", .{err});
         break :err null;
     };

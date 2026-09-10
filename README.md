@@ -46,6 +46,78 @@ See the [download page](https://ghostty.org/download) on the Ghostty website.
 
 See the [documentation](https://ghostty.org/docs) on the Ghostty website.
 
+### Controlled launch preparation
+
+macOS embedders can opt into `command-launch-policy = controlled` through the
+existing configuration API, without a C ABI layout change. Select it on a fresh
+configuration before finalization, require zero diagnostics and a successful
+`ghostty_config_get` readback of `"controlled"`, then create a fresh app. A void
+configuration update is not a supported way to enable this policy.
+
+Controlled preparation requires `shell-integration = none`, an effective
+nonempty direct command with an absolute executable, and an explicit absolute
+working directory. The existing direct-command parser is unchanged. The C
+surface working-directory option may supply the directory; invalid overrides
+fail, and the C command option must be null because it represents shell input.
+Arguments and paths cannot contain embedded NUL. The initial-command rule still
+applies, but an invalid selected initial command never falls back to the base
+command. Launch inputs, including `input` and the C `initial_input` replacement,
+survive presentation replay and remain immutable for an existing subprocess.
+Startup input is retained, not suppressed or deferred until a child
+acknowledgment. Keep startup input empty when the host protocol requires an
+acknowledgment before sending bytes.
+
+Ghostty constructs `/usr/bin/login -q -flp USER COMMAND ARG...`, without its
+passwd-home `.hushlogin` probe or launch-default fallback. Construction,
+environment acquisition, identity, and checked child CWD/PTY setup failures
+cannot authorize a fallback shell. Failed controlled preparation requires a
+fresh config. Other platforms reject controlled mode. The default `normal`
+policy retains its existing behavior.
+
+This is a Ghostty preparation contract, not a sandbox or executable-format
+attestation. System login/PAM and the explicit program remain trusted
+components: login can retry authentication or choose a shell, and libc can
+substitute a shell after ENOEXEC. Login can overwrite HOME/SHELL even with `-p`.
+Embedders must qualify their system/helper assumptions and obtain a real child
+acknowledgment before admitting input; successful surface creation is not one.
+The detailed option contract is in [`Config.zig`](src/config/Config.zig).
+
+#### Focused launch-policy tests
+
+Use the dedicated artifact, not `test -Dtest-filter=...`: the compiler's
+substring filter also admits unnamed tests, including native/OS tests in the
+ordinary test graph.
+
+```sh
+zig build test-launch-policy-build -Dapp-runtime=none -Demit-lib-vt=false \
+  -Demit-docs=false -Demit-macos-app=false -Demit-xcframework=false
+zig build test-launch-policy -Dapp-runtime=none -Demit-lib-vt=false \
+  -Demit-docs=false -Demit-macos-app=false -Demit-xcframework=false
+```
+
+`test-launch-policy-build` compiles `ghostty-launch-policy-test` without running
+that artifact. Build-time generators, native dependencies, and macOS Metal
+shader compilation still run as needed; it is not a no-process build.
+
+`test-launch-policy` uses a fixed `launch policy pure` compile filter, then
+validates an exact allowlist of **26 full names** before any test body runs:
+23 launch-policy cases plus three memory-only selector regressions. Missing,
+duplicate, or additional unreviewed focused names fail before execution.
+Anonymous and unrelated tests are excluded. The complete inventory is in
+[`launch_policy_test_selector.zig`](src/launch_policy_test_selector.zig);
+new focused cases require review and an explicit inventory update.
+
+The selector and allowlist have one named-module owner shared by the adapter
+and regressions. The three regression declarations stay in
+`launch_policy_test_selection.zig`, imported by the test root, so Zig collects
+them with the other focused cases.
+
+The small adapter delegates execution to the active Zig installation's
+standard test runner, retaining its server protocol, allocation-leak and error
+reporting, and fuzz entry point. It does not copy or reimplement that runner.
+These dedicated steps do not change the ordinary `test` target, and a
+user-supplied `-Dtest-filter` does not narrow or expand their fixed inventory.
+
 ## Contributing and Developing
 
 If you have any ideas, issues, etc. regarding Ghostty, or would like to

@@ -175,6 +175,18 @@ test "ghostty_config_get: enum" {
     try testing.expectEqualStrings("dark", str);
 }
 
+test "launch policy pure generic C getter" {
+    var cfg = try Config.default(std.testing.allocator);
+    defer cfg.deinit();
+    const key = "command-launch-policy";
+    var out: [*:0]const u8 = undefined;
+    try std.testing.expect(ghostty_config_get(&cfg, @ptrCast(&out), key, key.len));
+    try std.testing.expectEqualStrings("normal", std.mem.span(out));
+    cfg.@"command-launch-policy" = .controlled;
+    try std.testing.expect(ghostty_config_get(&cfg, @ptrCast(&out), key, key.len));
+    try std.testing.expectEqualStrings("controlled", std.mem.span(out));
+}
+
 test "ghostty_config_get: optional null returns false" {
     const testing = std.testing;
     const alloc = testing.allocator;

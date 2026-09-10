@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 
 const apprt = @import("../apprt.zig");
@@ -203,6 +204,7 @@ pub const NewSurfaceContext = enum(c_int) {
 };
 
 pub fn shouldInheritWorkingDirectory(context: NewSurfaceContext, config: *const Config) bool {
+    if (config.@"command-launch-policy" == .controlled) return false;
     return switch (context) {
         .window => config.@"window-inherit-working-directory",
         .tab => config.@"tab-inherit-working-directory",
@@ -217,9 +219,15 @@ pub fn newConfig(
     app: *const App,
     config: *const Config,
     context: NewSurfaceContext,
-) Allocator.Error!Config {
-    // Create a shallow clone
-    var copy = config.shallowClone(app.alloc);
+) !Config {
+    try config.checkLaunchPreparation(builtin.os.tag);
+    // Controlled C overrides must not mutate a map or list shared with the app.
+    var copy = if (config.@"command-launch-policy" == .controlled)
+        try config.clone(app.alloc)
+    else
+        config.shallowClone(app.alloc);
+    errdefer copy.deinit();
+    try copy.prepareLaunch(builtin.os.tag);
 
     // Our allocator is our config's arena
     const alloc = copy._arena.?.allocator();
@@ -235,6 +243,132 @@ pub fn newConfig(
     }
 
     return copy;
+}
+
+/// The checker verifies directory accessibility; controlled paths are never
+/// expanded, and a failed explicit override cannot retain an older directory.
+pub fn applyWorkingDirectory(
+    config: *Config,
+    path: []const u8,
+    context: anytype,
+    comptime Checker: type,
+) !void {
+    const controlled = config.@"command-launch-policy" == .controlled;
+    if (controlled) {
+        try Config.launch.validateWorkingDirectory(path);
+    } else if (path.len == 0) return;
+
+    Checker.check(context, path) catch |err| {
+        if (controlled) return err;
+        std.log.scoped(.apprt).warn("error checking requested working directory dir={s} err={}", .{ path, err });
+        return;
+    };
+    var value: Config.WorkingDirectory = .{ .path = path };
+    if (controlled) {
+        value = try value.clone(config.arenaAlloc());
+    } else {
+        value.finalize(config.arenaAlloc()) catch |err| {
+            std.log.scoped(.apprt).warn("error finalizing working directory config dir={s} err={}", .{ path, err });
+            return;
+        };
+    }
+    config.@"working-directory" = value;
+}
+
+pub fn launchEnvironment(
+    policy: Config.launch.Policy,
+    context: anytype,
+    comptime Provider: type,
+) !std.process.Environ.Map {
+    return Provider.get(context) catch |err| {
+        if (policy == .controlled) return err;
+        std.log.scoped(.surface).warn("error getting env map for surface err={}", .{err});
+        return Provider.fallback(context);
+    };
+}
+
+test "launch policy pure working directory override and inheritance" {
+    const testing = std.testing;
+    const log_level = testing.log_level;
+    testing.log_level = .err;
+    defer testing.log_level = log_level;
+    var cfg = try Config.default(testing.allocator);
+    defer cfg.deinit();
+    cfg.@"window-inherit-working-directory" = true;
+    cfg.@"tab-inherit-working-directory" = true;
+    cfg.@"split-inherit-working-directory" = true;
+    inline for (.{ .window, .tab, .split }) |context|
+        try testing.expect(shouldInheritWorkingDirectory(context, &cfg));
+    cfg.@"command-launch-policy" = .controlled;
+    inline for (.{ .window, .tab, .split }) |context|
+        try testing.expect(!shouldInheritWorkingDirectory(context, &cfg));
+
+    const Checker = struct {
+        calls: usize = 0,
+        fail: bool = true,
+        fn check(self: *@This(), _: []const u8) !void {
+            self.calls += 1;
+            if (self.fail) return error.AccessDenied;
+        }
+    };
+    var checker: Checker = .{};
+    cfg.@"working-directory" = .{ .path = "/previous" };
+    try testing.expectError(error.AccessDenied, applyWorkingDirectory(&cfg, "/new", &checker, Checker));
+    try testing.expectEqual(@as(usize, 1), checker.calls);
+    try testing.expectError(error.LaunchWorkingDirectoryMustBeAbsolute, applyWorkingDirectory(&cfg, "", &checker, Checker));
+    try testing.expectEqual(@as(usize, 1), checker.calls);
+    checker.fail = false;
+    try applyWorkingDirectory(&cfg, "/owned space'/child", &checker, Checker);
+    try testing.expectEqualStrings("/owned space'/child", cfg.@"working-directory".?.path);
+    cfg.@"command-launch-policy" = .normal;
+    checker.fail = true;
+    try applyWorkingDirectory(&cfg, "/ignored", &checker, Checker);
+    try testing.expectEqualStrings("/owned space'/child", cfg.@"working-directory".?.path);
+}
+
+test "launch policy pure environment errors never fall back" {
+    const log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = log_level;
+    const Provider = struct {
+        calls: usize = 0,
+        fallbacks: usize = 0,
+        fail: bool = true,
+        fn get(self: *@This()) !std.process.Environ.Map {
+            self.calls += 1;
+            if (self.fail) return error.EnvironmentUnavailable;
+            return .init(std.testing.allocator);
+        }
+        fn fallback(self: *@This()) std.process.Environ.Map {
+            self.fallbacks += 1;
+            return .init(std.testing.allocator);
+        }
+    };
+    var provider: Provider = .{};
+    try std.testing.expectError(error.EnvironmentUnavailable, launchEnvironment(.controlled, &provider, Provider));
+    try std.testing.expectEqual(@as(usize, 1), provider.calls);
+    try std.testing.expectEqual(@as(usize, 0), provider.fallbacks);
+    var normal = try launchEnvironment(.normal, &provider, Provider);
+    defer normal.deinit();
+    try std.testing.expectEqual(@as(usize, 1), provider.fallbacks);
+    provider.fail = false;
+    var controlled = try launchEnvironment(.controlled, &provider, Provider);
+    defer controlled.deinit();
+    try std.testing.expectEqual(@as(usize, 1), provider.fallbacks);
+}
+
+test "launch policy pure cwd override allocation failures" {
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, testWorkingDirectoryAllocation, .{});
+}
+
+fn testWorkingDirectoryAllocation(alloc: Allocator) !void {
+    var cfg = try Config.default(alloc);
+    defer cfg.deinit();
+    cfg.@"command-launch-policy" = .controlled;
+    try applyWorkingDirectory(&cfg, "/owned space'/child", {}, struct {
+        fn check(_: void, _: []const u8) !void {}
+    });
+    try std.testing.expectEqualStrings("/owned space'/child", cfg.@"working-directory".?.path);
 }
 
 test "DesktopNotification init" {

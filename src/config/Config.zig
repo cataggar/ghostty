@@ -42,6 +42,7 @@ const KeyRemapSet = @import("../input/key_mods.zig").RemapSet;
 pub const WindowPaddingBalance = @import("../renderer/size.zig").PaddingBalance;
 const string = @import("string.zig");
 const Limit = @import("limit.zig").Limit;
+pub const launch = @import("launch.zig");
 
 // We do this instead of importing all of terminal/main.zig to
 // limit the dependency graph. This is important because some things
@@ -1153,6 +1154,39 @@ palette: Palette = .{},
 /// This flag sets the `initial-command` configuration, see that for more
 /// information.
 command: ?Command = null,
+
+/// Launch preparation policy. The default, `normal`, retains automatic
+/// shell/CWD selection and existing error fallbacks.
+///
+/// `controlled` is an opt-in macOS-only policy. Select it on a fresh config
+/// before finalization, and create a fresh embedded app from that config.
+/// It requires `shell-integration = none`, a nonempty `direct:` command
+/// whose executable is absolute, and an explicit absolute working directory.
+/// Every argument and the working directory must be free of embedded NUL.
+/// An existing C surface working-directory option may supply the directory;
+/// its command option is shell input and is rejected, even when empty.
+/// Missing values are not inferred from the environment, passwd, or another
+/// surface. Invalid overrides and Ghostty-owned preparation errors are fatal.
+/// After failed controlled preparation, create a new config rather than
+/// ignoring the error or switching back to normal.
+///
+/// Controlled launches use `/usr/bin/login -q -flp USER COMMAND ARG...`.
+/// The current username must be nonempty, at most 255 bytes, and contain
+/// neither a leading dash nor NUL. Ghostty does not inspect passwd home for
+/// `.hushlogin`. Launch inputs, including initial-command, env, and startup
+/// input overrides, are retained across conditional presentation replay and
+/// are immutable for an existing subprocess. Presentation changes cannot opt
+/// in later. Startup input is still queued on launch; leave it empty if the
+/// host requires a child acknowledgment before sending bytes.
+///
+/// This governs Ghostty's preparation, not login, PAM, libc, or the explicit
+/// program. In particular, login may retry authentication or choose a shell,
+/// and libc may execute a shell after ENOEXEC. `-p` does not prevent login
+/// from replacing HOME/SHELL. This is not a sandbox, executable-format
+/// attestation, argv[0] preservation guarantee, or child-start acknowledgment.
+/// Embedders must separately trust/qualify the system login and explicit
+/// program, and use their own child acknowledgment before admitting input.
+@"command-launch-policy": launch.Policy = .normal,
 
 /// This is the same as "command", but only applies to the first terminal
 /// surface created when Ghostty starts. Subsequent terminal surfaces will use
@@ -3906,6 +3940,7 @@ term: []const u8 = "xterm-ghostty",
 
 /// This is set by the CLI parser for deinit.
 _arena: ?ArenaAllocator = null,
+_launch_preparation: launch.Preparation = .fresh,
 
 /// List of diagnostics that were generated during the loading of
 /// the configuration.
@@ -3988,6 +4023,7 @@ pub fn loadIter(
     alloc: Allocator,
     iter: anytype,
 ) !void {
+    errdefer self._launch_preparation.fail(self.@"command-launch-policy");
     try cli.args.parse(Config, alloc, self, iter);
 }
 
@@ -3995,6 +4031,7 @@ pub fn loadIter(
 ///
 /// `path` must be resolved and absolute.
 pub fn loadFile(self: *Config, alloc: Allocator, path: []const u8) !void {
+    errdefer self._launch_preparation.fail(self.@"command-launch-policy");
     assert(std.fs.path.isAbsolute(path));
     var file = file_load.open(global.io(), path) catch |err| switch (err) {
         error.NotAFile => {
@@ -4132,6 +4169,7 @@ fn writeConfigTemplate(path: []const u8) !void {
 /// The legacy `config` file (without extension) is first loaded,
 /// then `config.ghostty`.
 pub fn loadDefaultFiles(self: *Config, alloc: Allocator) !void {
+    errdefer self._launch_preparation.fail(self.@"command-launch-policy");
     // Load XDG first
     const legacy_xdg_path = try file_load.legacyDefaultXdgPath(alloc);
     defer alloc.free(legacy_xdg_path);
@@ -4205,6 +4243,7 @@ pub fn loadDefaultFiles(self: *Config, alloc: Allocator) !void {
 
 /// Load and parse the CLI args.
 pub fn loadCliArgs(self: *Config, alloc_gpa: Allocator) !void {
+    errdefer self._launch_preparation.fail(self.@"command-launch-policy");
     switch (builtin.os.tag) {
         .windows => {},
 
@@ -4297,6 +4336,9 @@ pub fn loadCliArgs(self: *Config, alloc_gpa: Allocator) !void {
             &new_config,
         );
         try new_config.loadIter(alloc_gpa, &it);
+        if (it.failure) |err| return err;
+        if (self._launch_preparation != .fresh)
+            try new_config.retainLaunchInputs(self);
         self.deinit();
         self.* = new_config;
     }
@@ -4313,6 +4355,7 @@ pub fn loadCliArgs(self: *Config, alloc_gpa: Allocator) !void {
 
 /// Load and parse the config files that were added in the "config-file" key.
 pub fn loadRecursiveFiles(self: *Config, alloc_gpa: Allocator) !void {
+    errdefer self._launch_preparation.fail(self.@"command-launch-policy");
     if (self.@"config-file".value.items.len == 0) return;
     const arena_alloc = self._arena.?.allocator();
 
@@ -4443,6 +4486,7 @@ pub fn changeConditionalState(
     self: *const Config,
     new: conditional.State,
 ) !?Config {
+    try self.checkLaunchPreparation(builtin.os.tag);
     // If the conditional state between the old and new is the same,
     // then we don't need to do anything.
     relevant: {
@@ -4466,7 +4510,15 @@ pub fn changeConditionalState(
         return null;
     }
 
-    // Create our new configuration
+    var new_config = try self.replayConditionalState(new);
+    errdefer new_config.deinit();
+    try new_config.finalize();
+    return new_config;
+}
+
+/// Replay and retain launch inputs before finalization can resolve defaults.
+/// Literal replay steps do not require configuration discovery or OS defaults.
+fn replayConditionalState(self: *const Config, new: conditional.State) !Config {
     const alloc_gpa = self._arena.?.child_allocator;
     var new_config = try self.cloneEmpty(alloc_gpa);
     errdefer new_config.deinit();
@@ -4475,11 +4527,340 @@ pub fn changeConditionalState(
     new_config._conditional_state = new;
 
     // Replay all of our steps to rebuild the configuration
-    var it = Replay.iterator(self._replay_steps.items, &new_config);
-    try new_config.loadIter(alloc_gpa, &it);
-    try new_config.finalize();
+    const failure = replay: {
+        var it = Replay.iterator(self._replay_steps.items, &new_config);
+        new_config.loadIter(alloc_gpa, &it) catch |err| break :replay err;
+        if (it.failure) |err| break :replay err;
+        new_config.retainLaunchInputs(self) catch |err| break :replay err;
 
-    return new_config;
+        return new_config;
+    };
+
+    // The caller still has the original config after this temporary is freed.
+    // Carry a newly controlled attempt in the error so normal fallback cannot
+    // lose its provenance. Keep already-fatal errors and their causes intact.
+    if (self.rejectLaunchError(failure) or !new_config.rejectLaunchError(failure))
+        return failure;
+    if (failure == error.OutOfMemory) return error.LaunchReplayOutOfMemory;
+    log.warn("controlled conditional replay failed err={}", .{failure});
+    return error.LaunchReplayFailed;
+}
+
+pub fn checkLaunchPreparation(self: *const Config, os: std.Target.Os.Tag) launch.Error!void {
+    try self._launch_preparation.check(self.@"command-launch-policy", os);
+    if (self.@"command-launch-policy" == .normal) return;
+    if (self._diagnostics.items().len != 0) return error.LaunchConfigDiagnostics;
+    if (self.@"shell-integration" != .none) return error.LaunchShellIntegrationEnabled;
+    if (self.@"working-directory") |wd| try launch.validateWorkingDirectory(wd.value());
+}
+
+/// This is called before theme loading and normal default resolution, including
+/// attempts that subsequently fail. Completeness is checked after C overrides.
+pub fn prepareLaunch(self: *Config, os: std.Target.Os.Tag) launch.Error!void {
+    errdefer self._launch_preparation.fail(self.@"command-launch-policy");
+    try self._launch_preparation.begin(self.@"command-launch-policy", os);
+    try self.checkLaunchPreparation(os);
+}
+
+test "launch policy pure config default parsing and invalid value" {
+    const testing = std.testing;
+    var cfg = try Config.default(testing.allocator);
+    defer cfg.deinit();
+    try testing.expectEqual(launch.Policy.normal, cfg.@"command-launch-policy");
+    var it: TestIterator = .{ .data = &.{
+        "--command-launch-policy=controlled",
+        "--shell-integration=none",
+    } };
+    try cfg.loadIter(testing.allocator, &it);
+    try cfg.prepareLaunch(.macos);
+    try cfg.finalizeLaunchDefaults(cfg.arenaAlloc(), false);
+    try testing.expect(cfg.command == null);
+    try testing.expect(cfg.@"initial-command" == null);
+    try testing.expect(cfg.@"working-directory" == null);
+    try testing.expectEqual(@as(usize, 0), cfg._diagnostics.items().len);
+
+    var invalid = try Config.default(testing.allocator);
+    defer invalid.deinit();
+    var bad: TestIterator = .{ .data = &.{"--command-launch-policy=unknown"} };
+    try invalid.loadIter(testing.allocator, &bad);
+    try testing.expect(invalid._diagnostics.items().len != 0);
+    invalid.@"command-launch-policy" = .controlled;
+    invalid.@"shell-integration" = .none;
+    try testing.expectError(error.LaunchConfigDiagnostics, invalid.checkLaunchPreparation(.macos));
+}
+
+test "launch policy pure config clones and failed normal provenance" {
+    const testing = std.testing;
+    var cfg = try Config.default(testing.allocator);
+    defer cfg.deinit();
+    try cfg.prepareLaunch(.macos);
+    cfg.command = .{ .direct = &.{"/bin/explicit"} };
+    cfg.@"working-directory" = .{ .path = "/explicit" };
+    cfg.@"shell-integration" = .none;
+    cfg._launch_preparation.fail(.normal);
+    cfg.@"command-launch-policy" = .controlled;
+    var deep = try cfg.clone(testing.allocator);
+    defer deep.deinit();
+    var shallow = cfg.shallowClone(testing.allocator);
+    defer shallow.deinit();
+    try testing.expectError(error.LaunchPolicyRequiresFreshConfig, deep.checkLaunchPreparation(.macos));
+    try testing.expectError(error.LaunchPolicyRequiresFreshConfig, shallow.checkLaunchPreparation(.macos));
+    try testing.expectError(error.LaunchPolicyRequiresFreshConfig, cfg.prepareLaunch(.macos));
+    try testing.expectError(error.LaunchPreparationFailed, cfg.checkLaunchPreparation(.macos));
+}
+
+test "launch policy pure config guarded errors and update admission" {
+    const testing = std.testing;
+    var cfg = try Config.default(testing.allocator);
+    defer cfg.deinit();
+    cfg.@"command-launch-policy" = .controlled;
+    try testing.expectError(error.LaunchShellIntegrationEnabled, cfg.prepareLaunch(.macos));
+    cfg.@"shell-integration" = .none;
+    try testing.expectError(error.LaunchPreparationFailed, cfg.checkLaunchPreparation(.macos));
+
+    var fresh = try Config.default(testing.allocator);
+    defer fresh.deinit();
+    fresh.@"command-launch-policy" = .controlled;
+    fresh.@"shell-integration" = .none;
+    fresh.@"working-directory" = .home;
+    try testing.expectError(error.LaunchWorkingDirectoryRequired, fresh.checkLaunchPreparation(.macos));
+    fresh.@"working-directory" = .{ .path = "~/relative" };
+    try testing.expectError(error.LaunchWorkingDirectoryMustBeAbsolute, fresh.checkLaunchPreparation(.macos));
+    fresh.@"working-directory" = null;
+    try fresh.prepareLaunch(.macos);
+    var normal = try Config.default(testing.allocator);
+    defer normal.deinit();
+    try testing.expectError(error.LaunchPolicyRequiresFreshConfig, normal.checkLaunchUpdate(&fresh, .macos));
+    try testing.expectError(error.LaunchPolicyDowngrade, fresh.checkLaunchUpdate(&normal, .macos));
+    try fresh.checkLaunchUpdate(&fresh, .macos);
+}
+
+test "launch policy pure controlled replay ownership and allocation failures" {
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, testControlledReplay, .{});
+}
+
+fn testControlledReplay(alloc: Allocator) !void {
+    var replay = replay: {
+        var cfg = try Config.default(alloc);
+        defer cfg.deinit();
+        var it: TestIterator = .{ .data = &.{
+            "--command-launch-policy=controlled",
+            "--command=direct:/bin/base",
+            "--initial-command=direct:/bin/initial",
+            "--shell-integration=none",
+            "--working-directory=/recorded",
+            "--env=LAUNCH_TEST=recorded",
+        } };
+        try cfg.loadIter(alloc, &it);
+        try cfg.prepareLaunch(.macos);
+        const arena = cfg.arenaAlloc();
+        cfg.@"working-directory" = .{ .path = try arena.dupe(u8, "/owned space'/child") };
+        cfg.@"cursor-style-blink" = false;
+        cfg.term = try arena.dupeZ(u8, "xterm-test");
+        try cfg.env.parseCLI(arena, "LAUNCH_TEST=surface override");
+        const conditions = &[_]Conditional{.{ .key = .theme, .op = .eq, .value = "dark" }};
+        for ([_][]const u8{
+            "--command-launch-policy=normal",
+            "--command=/bin/other",
+            "--initial-command=/bin/other",
+            "--working-directory=home",
+            "--shell-integration=bash",
+            "--env=LAUNCH_TEST=replayed",
+        }) |arg| {
+            try cfg._replay_steps.append(arena, .{ .conditional_arg = .{
+                .conditions = conditions,
+                .arg = arg,
+            } });
+        }
+        break :replay try cfg.replayConditionalState(.{ .theme = .dark });
+    };
+    defer replay.deinit();
+    try replay.checkLaunchPreparation(.macos);
+    try std.testing.expectEqual(launch.Preparation.controlled, replay._launch_preparation);
+    try std.testing.expectEqualStrings("/bin/base", replay.command.?.direct[0]);
+    try std.testing.expectEqualStrings("/bin/initial", replay.@"initial-command".?.direct[0]);
+    try std.testing.expectEqualStrings("/owned space'/child", replay.@"working-directory".?.path);
+    try std.testing.expectEqualStrings("surface override", replay.env.map.get("LAUNCH_TEST").?);
+    try std.testing.expectEqualStrings("xterm-test", replay.term);
+    try std.testing.expectEqual(@as(?bool, false), replay.@"cursor-style-blink");
+    var clone_ = try replay.clone(alloc);
+    defer clone_.deinit();
+    try clone_.checkLaunchPreparation(.macos);
+    try std.testing.expectEqual(launch.Preparation.controlled, clone_._launch_preparation);
+}
+
+test "launch policy pure conditional late opt in rejected" {
+    var cfg = try Config.default(std.testing.allocator);
+    defer cfg.deinit();
+    try cfg.prepareLaunch(.macos);
+    try cfg._replay_steps.append(cfg.arenaAlloc(), .{ .conditional_arg = .{
+        .conditions = &.{.{ .key = .theme, .op = .eq, .value = "dark" }},
+        .arg = "--command-launch-policy=controlled",
+    } });
+    try std.testing.expectError(
+        error.LaunchPolicyRequiresFreshConfig,
+        cfg.replayConditionalState(.{ .theme = .dark }),
+    );
+}
+
+test "launch policy pure late opt in allocation failures prohibit fallback" {
+    // Cover both a throwing parser and an iterator's deferred failure.
+    for ([_]Replay.Step{
+        .{ .arg = "--title=" ++ "x" ** (64 * 1024) },
+        .{ .diagnostic = .{ .message = "x" ** (64 * 1024) } },
+    }) |step| try testLateOptInAllocation(step);
+}
+
+fn testLateOptInAllocation(step: Replay.Step) !void {
+    const testing = std.testing;
+    var cfg = try Config.default(testing.allocator);
+    defer cfg.deinit();
+    try cfg.prepareLaunch(.macos);
+    const arena = cfg.arenaAlloc();
+    try cfg._replay_steps.append(arena, .{ .conditional_arg = .{
+        .conditions = &.{.{ .key = .theme, .op = .eq, .value = "dark" }},
+        .arg = "--command-launch-policy=controlled",
+    } });
+    // Force an allocation after the policy has been assigned, before the
+    // eventual late-opt-in guard. No paths, files, or default resolution.
+    try cfg._replay_steps.append(arena, step);
+
+    var baseline = testing.FailingAllocator.init(testing.allocator, .{ .resize_fail_index = 0 });
+    var source = cfg.shallowClone(baseline.allocator());
+    defer source.deinit();
+    try testing.expectError(
+        error.LaunchPolicyRequiresFreshConfig,
+        source.replayConditionalState(.{ .theme = .dark }),
+    );
+
+    var before_selection: usize = 0;
+    var after_selection: usize = 0;
+    for (0..baseline.alloc_index) |fail_index| {
+        var failing = testing.FailingAllocator.init(testing.allocator, .{
+            .fail_index = fail_index,
+            .resize_fail_index = 0,
+        });
+        var attempt = cfg.shallowClone(failing.allocator());
+        defer attempt.deinit();
+        if (attempt.replayConditionalState(.{ .theme = .dark })) |value| {
+            var unexpected = value;
+            unexpected.deinit();
+            return error.TestUnexpectedResult;
+        } else |err| {
+            try testing.expect(failing.has_induced_failure);
+            switch (err) {
+                error.OutOfMemory => {
+                    // Preserve the original normal-only fallback behavior.
+                    try testing.expect(!cfg.rejectLaunchError(err));
+                    before_selection += 1;
+                },
+                error.LaunchReplayOutOfMemory => {
+                    // This is the exact decision used by Surface.init and App,
+                    // using the ORIGINAL normal config after replay cleanup.
+                    try testing.expect(cfg.rejectLaunchError(err));
+                    after_selection += 1;
+                },
+                else => return err,
+            }
+        }
+    }
+    try testing.expect(before_selection > 0);
+    try testing.expect(after_selection > 0);
+    try testing.expectEqual(launch.Policy.normal, cfg.@"command-launch-policy");
+    try testing.expectEqual(launch.Preparation.normal, cfg._launch_preparation);
+}
+
+test "launch policy pure initial input override survives replay" {
+    for ([_][]const u8{ "replacement\n\"quoted\"\\literal\t'", "" }) |value| {
+        try std.testing.checkAllAllocationFailures(
+            std.testing.allocator,
+            testInitialInputReplay,
+            .{value},
+        );
+    }
+}
+
+fn testInitialInputReplay(alloc: Allocator, value: []const u8) !void {
+    var replay = replay: {
+        var cfg = try Config.default(alloc);
+        defer cfg.deinit();
+        var it: TestIterator = .{ .data = &.{
+            "--command-launch-policy=controlled",
+            "--shell-integration=none",
+            "--input=raw:configured",
+            "--input=path:/never-open-configured-input",
+        } };
+        try cfg.loadIter(alloc, &it);
+        try cfg.prepareLaunch(.macos);
+        const arena = cfg.arenaAlloc();
+        const c_input = try arena.dupeZ(u8, value);
+        // The embedded C initial_input option calls this same preparation seam.
+        try cfg.setInitialInput(std.mem.sliceTo(c_input.ptr, 0));
+        @memset(c_input, 'x');
+        try cfg._replay_steps.append(arena, .{ .conditional_arg = .{
+            .conditions = &.{.{ .key = .theme, .op = .eq, .value = "dark" }},
+            .arg = "--input=raw:conditional",
+        } });
+        break :replay try cfg.replayConditionalState(.{ .theme = .dark });
+    };
+    defer replay.deinit();
+
+    // Both the C source bytes and the overridden config's arena are gone.
+    // Use the same in-memory decoding as Termio, without preparing input files.
+    var arena = ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const parsed = try replay.input.cloneParsed(arena.allocator());
+    try std.testing.expectEqual(@as(usize, 1), parsed.list.items.len);
+    try std.testing.expect(parsed.list.items[0] == .raw);
+    try std.testing.expectEqualStrings(value, parsed.list.items[0].raw);
+}
+
+/// Prepare the C surface initial-input replacement as owned, escaped raw input.
+pub fn setInitialInput(self: *Config, value: []const u8) Allocator.Error!void {
+    const alloc = self.arenaAlloc();
+    var buf: std.Io.Writer.Allocating = .init(alloc);
+    defer buf.deinit();
+    // This memory-only writer can fail only when its buffer cannot grow.
+    std.zig.stringEscape(value, &buf.writer) catch return error.OutOfMemory;
+
+    self.input.list.clearRetainingCapacity();
+    try self.input.list.append(
+        alloc,
+        .{ .raw = try buf.toOwnedSliceSentinel(0) },
+    );
+}
+
+pub fn rejectLaunchError(self: *const Config, err: anyerror) bool {
+    return self.@"command-launch-policy" == .controlled or
+        self._launch_preparation == .controlled or
+        self._launch_preparation == .failed_controlled or launch.isError(err);
+}
+
+pub fn checkLaunchUpdate(self: *const Config, incoming: *const Config, os: std.Target.Os.Tag) launch.Error!void {
+    if (self.@"command-launch-policy" != incoming.@"command-launch-policy")
+        return if (self.@"command-launch-policy" == .controlled)
+            error.LaunchPolicyDowngrade
+        else
+            error.LaunchPolicyRequiresFreshConfig;
+    try incoming.checkLaunchPreparation(os);
+}
+
+fn retainLaunchInputs(self: *Config, original: *const Config) !void {
+    if (original.@"command-launch-policy" == .normal) {
+        if (self.@"command-launch-policy" != .normal)
+            return error.LaunchPolicyRequiresFreshConfig;
+        return;
+    }
+    const alloc = self._arena.?.allocator();
+    inline for (.{
+        "command-launch-policy", "command",           "initial-command",
+        "working-directory",     "shell-integration", "shell-integration-features",
+        "cursor-style-blink",    "term",              "env",
+        "input",
+    }) |field| {
+        @field(self, field) = try cloneValue(alloc, @TypeOf(@field(original, field)), @field(original, field));
+    }
+    self._launch_preparation = original._launch_preparation;
 }
 
 /// Expand the relative paths in config-files to be absolute paths
@@ -4630,6 +5011,8 @@ fn loadTheme(self: *Config, theme: Theme) !void {
     // from the theme.
     var slice_it = Replay.iterator(self._replay_steps.items, &new_config);
     try new_config.loadIter(alloc_gpa, &slice_it);
+    if (slice_it.failure) |err| return err;
+    try new_config.retainLaunchInputs(self);
 
     // Success, swap our new config in and free the old.
     self.deinit();
@@ -4639,6 +5022,8 @@ fn loadTheme(self: *Config, theme: Theme) !void {
 /// Call this once after you are done setting configuration. This
 /// is idempotent but will waste memory if called multiple times.
 pub fn finalize(self: *Config) !void {
+    errdefer self._launch_preparation.fail(self.@"command-launch-policy");
+    try self.prepareLaunch(builtin.os.tag);
     const alloc = self._arena.?.allocator();
 
     // We always load the theme first because it may set other fields
@@ -4665,7 +5050,11 @@ pub fn finalize(self: *Config) !void {
 
     // Used for a variety of defaults. See the function docs as well the
     // specific variable use sites for more details.
-    const probable_cli = probableCliEnvironment();
+    try self.checkLaunchPreparation(builtin.os.tag);
+    const probable_cli = if (self.@"command-launch-policy" == .normal)
+        probableCliEnvironment()
+    else
+        false;
 
     // If we have a font-family set and don't set the others, default
     // the others to the font family. This way, if someone does
@@ -4689,6 +5078,31 @@ pub fn finalize(self: *Config) !void {
         // HACK: See comment above at definition
         self.term = "xterm-ghostty";
     }
+
+    try self.finalizeLaunchDefaults(alloc, probable_cli);
+
+    // Apprt-specific defaults
+    switch (build_config.app_runtime) {
+        .none => {},
+        .gtk => {
+            switch (self.@"gtk-single-instance") {
+                .true, .false => {},
+
+                // For detection, we assume single instance unless we're
+                // in a CLI environment, then we disable single instance.
+                .detect => self.@"gtk-single-instance" = if (probable_cli)
+                    .false
+                else
+                    .true,
+            }
+        },
+    }
+
+    try self.finalizePresentation();
+}
+
+fn finalizeLaunchDefaults(self: *Config, alloc: Allocator, probable_cli: bool) !void {
+    if (self.@"command-launch-policy" == .controlled) return;
 
     // The default for the working directory depends on the system.
     var wd: WorkingDirectory = self.@"working-directory" orelse if (probable_cli)
@@ -4779,24 +5193,9 @@ pub fn finalize(self: *Config) !void {
     }
     try wd.finalize(alloc);
     self.@"working-directory" = wd;
+}
 
-    // Apprt-specific defaults
-    switch (build_config.app_runtime) {
-        .none => {},
-        .gtk => {
-            switch (self.@"gtk-single-instance") {
-                .true, .false => {},
-
-                // For detection, we assume single instance unless we're
-                // in a CLI environment, then we disable single instance.
-                .detect => self.@"gtk-single-instance" = if (probable_cli)
-                    .false
-                else
-                    .true,
-            }
-        },
-    }
-
+fn finalizePresentation(self: *Config) !void {
     // Default our click interval
     if (self.@"click-repeat-interval" == 0 and
         (comptime !builtin.is_test))
@@ -5062,6 +5461,7 @@ pub fn cloneEmpty(
 ) Allocator.Error!Config {
     var result = try default(alloc_gpa);
     result._conditional_state = self._conditional_state;
+    result._launch_preparation = self._launch_preparation;
     return result;
 }
 
@@ -5312,6 +5712,7 @@ const Replay = struct {
         config: *Config,
         slice: []const Replay.Step,
         idx: usize = 0,
+        failure: ?anyerror = null,
 
         pub fn next(self: *Self) ?[]const u8 {
             while (true) {
@@ -5319,6 +5720,10 @@ const Replay = struct {
                 defer self.idx += 1;
                 switch (self.slice[self.idx]) {
                     .expand => |base| self.config.expandPaths(base) catch |err| {
+                        if (self.config.rejectLaunchError(err)) {
+                            self.failure = err;
+                            return null;
+                        }
                         // This shouldn't happen because to reach this step
                         // means that it succeeded before. Its possible since
                         // expanding paths is a side effect process that the
@@ -5332,10 +5737,18 @@ const Replay = struct {
                         // If it fails we log a warning and continue.
                         const arena_alloc = self.config._arena.?.allocator();
                         const cloned = diag.clone(arena_alloc) catch |err| {
+                            if (self.config.rejectLaunchError(err)) {
+                                self.failure = err;
+                                return null;
+                            }
                             log.warn("error cloning diagnostic err={}", .{err});
                             break :diag;
                         };
                         self.config._diagnostics.append(arena_alloc, cloned) catch |err| {
+                            if (self.config.rejectLaunchError(err)) {
+                                self.failure = err;
+                                return null;
+                            }
                             log.warn("error appending diagnostic err={}", .{err});
                             break :diag;
                         };

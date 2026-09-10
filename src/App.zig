@@ -174,6 +174,7 @@ pub fn updateConfig(self: *App, rt_app: *apprt.App, config: *const Config) !void
     var applied_: ?configpkg.Config = config.changeConditionalState(
         self.config_conditional_state,
     ) catch |err| err: {
+        if (config.rejectLaunchError(err)) return err;
         log.warn("failed to apply conditional state to config err={}", .{err});
         break :err null;
     };
