@@ -2359,13 +2359,23 @@ test "launch policy pure controlled login and identity rejection" {
     for ([_]?[:0]const u8{ null, "", "-account", "a\x00b", "a" ** 256 }) |name| {
         TestLaunchAccount.entry.name = name;
         try testing.expectError(error.LaunchIdentityInvalid, prepareCommandArgs(
-            arena.allocator(), cmd, .controlled, .macos, TestLaunchAccount, TestLaunchHush,
+            arena.allocator(),
+            cmd,
+            .controlled,
+            .macos,
+            TestLaunchAccount,
+            TestLaunchHush,
         ));
         try testing.expectEqual(@as(usize, 0), TestLaunchHush.calls);
     }
     TestLaunchAccount.fail = true;
     try testing.expectError(error.IdentityUnavailable, prepareCommandArgs(
-        arena.allocator(), cmd, .controlled, .macos, TestLaunchAccount, TestLaunchHush,
+        arena.allocator(),
+        cmd,
+        .controlled,
+        .macos,
+        TestLaunchAccount,
+        TestLaunchHush,
     ));
     try testing.expectEqual(@as(usize, 0), TestLaunchHush.calls);
 }
@@ -2398,16 +2408,31 @@ test "launch policy pure normal login vectors and mocked hush" {
     const alloc = arena.allocator();
     const direct: configpkg.Command = .{ .direct = &.{ "/bin/program", "arg" } };
     try expectLaunchArgs(&.{ "/usr/bin/login", "-flp", "account", "/bin/program", "arg" }, try prepareCommandArgs(
-        alloc, direct, .normal, .macos, TestLaunchAccount, TestLaunchHush,
+        alloc,
+        direct,
+        .normal,
+        .macos,
+        TestLaunchAccount,
+        TestLaunchHush,
     ));
     TestLaunchHush.quiet = true;
     try expectLaunchArgs(&.{ "/usr/bin/login", "-q", "-flp", "account", "/bin/bash", "--noprofile", "--norc", "-c", "exec -l program --arg" }, try prepareCommandArgs(
-        alloc, .{ .shell = "program --arg" }, .normal, .macos, TestLaunchAccount, TestLaunchHush,
+        alloc,
+        .{ .shell = "program --arg" },
+        .normal,
+        .macos,
+        TestLaunchAccount,
+        TestLaunchHush,
     ));
     try std.testing.expectEqual(@as(usize, 2), TestLaunchHush.calls);
     TestLaunchAccount.fail = true;
     try expectLaunchArgs(&.{ "/bin/program", "arg" }, try prepareCommandArgs(
-        alloc, direct, .normal, .macos, TestLaunchAccount, TestLaunchHush,
+        alloc,
+        direct,
+        .normal,
+        .macos,
+        TestLaunchAccount,
+        TestLaunchHush,
     ));
 }
 
@@ -2426,7 +2451,12 @@ test "launch policy pure successful login argv owns source strings" {
             argv[0] = try alloc.dupeZ(u8, "/owned space'/program");
             argv[1] = try alloc.dupeZ(u8, "owned argument");
             const result = try prepareCommandArgs(
-                arena.allocator(), .{ .direct = argv }, policy, .macos, TestLaunchAccount, TestLaunchHush,
+                arena.allocator(),
+                .{ .direct = argv },
+                policy,
+                .macos,
+                TestLaunchAccount,
+                TestLaunchHush,
             );
             const offset: usize = if (policy == .controlled) 4 else 3;
             try std.testing.expect(result[offset].ptr != argv[0].ptr);
@@ -2451,7 +2481,12 @@ test "launch policy pure argv allocation failures never become a shell" {
     var arena = ArenaAllocator.init(failing.allocator());
     defer arena.deinit();
     try expectLaunchArgs(&.{"/bin/sh"}, try prepareCommandArgs(
-        arena.allocator(), .{ .direct = &.{"/bin/program"} }, .normal, .macos, TestLaunchAccount, TestLaunchHush,
+        arena.allocator(),
+        .{ .direct = &.{"/bin/program"} },
+        .normal,
+        .macos,
+        TestLaunchAccount,
+        TestLaunchHush,
     ));
 }
 

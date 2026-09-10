@@ -4713,9 +4713,9 @@ fn retainLaunchInputs(self: *Config, original: *const Config) !void {
     }
     const alloc = self._arena.?.allocator();
     inline for (.{
-        "command-launch-policy", "command", "initial-command",
-        "working-directory", "shell-integration", "shell-integration-features",
-        "cursor-style-blink", "term", "env",
+        "command-launch-policy", "command",           "initial-command",
+        "working-directory",     "shell-integration", "shell-integration-features",
+        "cursor-style-blink",    "term",              "env",
     }) |field| {
         @field(self, field) = try cloneValue(alloc, @TypeOf(@field(original, field)), @field(original, field));
     }

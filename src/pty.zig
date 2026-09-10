@@ -92,15 +92,6 @@ const NullPty = struct {
     pub const ChildPreExecError = error{};
 
     pub fn childPreExec(self: Pty) ChildPreExecError!void {
-        return self.childPreExecWithLogging(true);
-    }
-
-    /// For fatal pre-exec callbacks that must not enter a logger after fork.
-    pub fn childPreExecQuiet(self: Pty) ChildPreExecError!void {
-        return self.childPreExecWithLogging(false);
-    }
-
-    fn childPreExecWithLogging(self: Pty, comptime log_errors: bool) ChildPreExecError!void {
         _ = self;
     }
 
@@ -237,6 +228,15 @@ const PosixPty = struct {
     /// This should be called prior to exec in the forked child process
     /// in order to setup the tty properly.
     pub fn childPreExec(self: Pty) ChildPreExecError!void {
+        return self.childPreExecWithLogging(true);
+    }
+
+    /// For fatal pre-exec callbacks that must not enter a logger after fork.
+    pub fn childPreExecQuiet(self: Pty) ChildPreExecError!void {
+        return self.childPreExecWithLogging(false);
+    }
+
+    fn childPreExecWithLogging(self: Pty, comptime log_errors: bool) ChildPreExecError!void {
         // Reset our signals
         var sa: posix.Sigaction = .{
             .handler = .{ .handler = posix.SIG.DFL },
