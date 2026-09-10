@@ -646,10 +646,10 @@ pub fn init(
             config.@"command-launch-policy",
             .{ .surface = rt_surface, .alloc = alloc },
             struct {
-                fn get(ctx: anytype) !std.process.Environ.Map {
+                pub fn get(ctx: anytype) !std.process.Environ.Map {
                     return ctx.surface.defaultTermioEnv();
                 }
-                fn fallback(ctx: anytype) std.process.Environ.Map {
+                pub fn fallback(ctx: anytype) std.process.Environ.Map {
                     return global.environMap() catch std.process.Environ.Map.init(ctx.alloc);
                 }
             },
