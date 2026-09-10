@@ -46,6 +46,39 @@ See the [download page](https://ghostty.org/download) on the Ghostty website.
 
 See the [documentation](https://ghostty.org/docs) on the Ghostty website.
 
+### Controlled launch preparation
+
+macOS embedders can opt into `command-launch-policy = controlled` through the
+existing configuration API, without a C ABI layout change. Select it on a fresh
+configuration before finalization, require zero diagnostics and a successful
+`ghostty_config_get` readback of `"controlled"`, then create a fresh app. A void
+configuration update is not a supported way to enable this policy.
+
+Controlled preparation requires `shell-integration = none`, an effective
+nonempty direct command with an absolute executable, and an explicit absolute
+working directory. The existing direct-command parser is unchanged. The C
+surface working-directory option may supply the directory; invalid overrides
+fail, and the C command option must be null because it represents shell input.
+Arguments and paths cannot contain embedded NUL. The initial-command rule still
+applies, but an invalid selected initial command never falls back to the base
+command. Launch inputs survive presentation replay and remain immutable for
+an existing subprocess.
+
+Ghostty constructs `/usr/bin/login -q -flp USER COMMAND ARG...`, without its
+passwd-home `.hushlogin` probe or launch-default fallback. Construction,
+environment acquisition, identity, and checked child CWD/PTY setup failures
+cannot authorize a fallback shell. Failed controlled preparation requires a
+fresh config. Other platforms reject controlled mode. The default `normal`
+policy retains its existing behavior.
+
+This is a Ghostty preparation contract, not a sandbox or executable-format
+attestation. System login/PAM and the explicit program remain trusted
+components: login can retry authentication or choose a shell, and libc can
+substitute a shell after ENOEXEC. Login can overwrite HOME/SHELL even with `-p`.
+Embedders must qualify their system/helper assumptions and obtain a real child
+acknowledgment before admitting input; successful surface creation is not one.
+The detailed option contract is in [`Config.zig`](src/config/Config.zig).
+
 ## Contributing and Developing
 
 If you have any ideas, issues, etc. regarding Ghostty, or would like to

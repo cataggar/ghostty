@@ -143,6 +143,7 @@ pub const App = struct {
         const alloc = core_app.alloc;
         var config_clone = try config.clone(alloc);
         errdefer config_clone.deinit();
+        try config_clone.prepareLaunch(builtin.os.tag);
 
         self.* = .{
             .core_app = core_app,
@@ -292,7 +293,7 @@ pub const App = struct {
     ) !bool {
         // Special case certain actions before they are sent to the
         // embedded apprt.
-        self.performPreAction(target, action, value);
+        try self.performPreAction(target, action, value);
 
         log.debug("dispatching action target={t} action={} value={any}", .{
             target,
@@ -311,7 +312,7 @@ pub const App = struct {
         target: apprt.Target,
         comptime action: apprt.Action.Key,
         value: apprt.Action.Value(action),
-    ) void {
+    ) !void {
         // Special case certain actions before they are sent to the embedder
         switch (action) {
             .set_title => switch (target) {
@@ -330,11 +331,17 @@ pub const App = struct {
 
                 // For app updates, we update our core config. We need to
                 // clone it because the caller owns the param.
-                .app => if (value.config.clone(self.core_app.alloc)) |config| {
+                .app => app: {
+                    try self.config.checkLaunchUpdate(value.config, builtin.os.tag);
+                    var config = value.config.clone(self.core_app.alloc) catch |err| {
+                        if (self.config.@"command-launch-policy" == .controlled) return err;
+                        log.err("error updating app config err={}", .{err});
+                        break :app;
+                    };
+                    errdefer config.deinit();
+                    try config.prepareLaunch(builtin.os.tag);
                     self.config.deinit();
                     self.config = config;
-                } else |err| {
-                    log.err("error updating app config err={}", .{err});
                 },
             },
 
@@ -487,6 +494,8 @@ pub const Surface = struct {
     };
 
     pub fn init(self: *Surface, app: *App, opts: Options) !void {
+        try app.config.checkLaunchPreparation(builtin.os.tag);
+        try configpkg.launch.validateCommandOverride(app.config.@"command-launch-policy", opts.command != null);
         self.* = .{
             .app = app,
             .platform = try .init(opts.platform_tag, opts.platform),
@@ -511,42 +520,14 @@ pub const Surface = struct {
         // If we have a working directory from the options then we set it.
         if (opts.working_directory) |c_wd| {
             const wd = std.mem.sliceTo(c_wd, 0);
-            if (wd.len > 0) wd: {
-                var dir = std.Io.Dir.openDirAbsolute(global.io(), wd, .{}) catch |err| {
-                    log.warn(
-                        "error opening requested working directory dir={s} err={}",
-                        .{ wd, err },
-                    );
-                    break :wd;
-                };
-                defer dir.close(global.io());
-
-                const stat = dir.stat(global.io()) catch |err| {
-                    log.warn(
-                        "failed to stat requested working directory dir={s} err={}",
-                        .{ wd, err },
-                    );
-                    break :wd;
-                };
-
-                if (stat.kind != .directory) {
-                    log.warn(
-                        "requested working directory is not a directory dir={s}",
-                        .{wd},
-                    );
-                    break :wd;
+            try apprt.surface.applyWorkingDirectory(&config, wd, {}, struct {
+                fn check(_: void, path: []const u8) !void {
+                    var dir = try std.Io.Dir.openDirAbsolute(global.io(), path, .{});
+                    defer dir.close(global.io());
+                    if ((try dir.stat(global.io())).kind != .directory)
+                        return error.NotADirectory;
                 }
-
-                var wd_val: configpkg.WorkingDirectory = .{ .path = wd };
-                if (wd_val.finalize(config.arenaAlloc())) |_| {
-                    config.@"working-directory" = wd_val;
-                } else |err| {
-                    log.warn(
-                        "error finalizing working directory config dir={s} err={}",
-                        .{ wd_val.path, err },
-                    );
-                }
-            }
+            });
         }
 
         // If we have a command from the options then we set it.

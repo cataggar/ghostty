@@ -92,6 +92,15 @@ const NullPty = struct {
     pub const ChildPreExecError = error{};
 
     pub fn childPreExec(self: Pty) ChildPreExecError!void {
+        return self.childPreExecWithLogging(true);
+    }
+
+    /// For fatal pre-exec callbacks that must not enter a logger after fork.
+    pub fn childPreExecQuiet(self: Pty) ChildPreExecError!void {
+        return self.childPreExecWithLogging(false);
+    }
+
+    fn childPreExecWithLogging(self: Pty, comptime log_errors: bool) ChildPreExecError!void {
         _ = self;
     }
 
@@ -255,7 +264,7 @@ const PosixPty = struct {
         switch (posix.errno(c.ioctl(self.slave, c.TIOCSCTTY, @as(c_ulong, 0)))) {
             .SUCCESS => {},
             else => |err| {
-                log.err("error setting controlling terminal errno={}", .{err});
+                if (log_errors) log.err("error setting controlling terminal errno={}", .{err});
                 return error.SetControllingTerminalFailed;
             },
         }

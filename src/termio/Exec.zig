@@ -735,8 +735,11 @@ pub fn stopWriter(self: *Exec, td: *termio.Termio.ThreadData) void {
 }
 
 pub const Config = struct {
+    launch_policy: configpkg.launch.Policy = .normal,
+    launch_preparation: configpkg.launch.Preparation = .fresh,
     command: ?configpkg.Command = null,
-    env: EnvMap,
+    /// Updated on error; moved and replaced with an empty map on success.
+    env: *EnvMap,
     env_override: configpkg.RepeatableStringMap = .{},
     shell_integration: configpkg.Config.ShellIntegration = .detect,
     shell_integration_features: configpkg.Config.ShellIntegrationFeatures = .{},
@@ -747,6 +750,14 @@ pub const Config = struct {
 
     rt_pre_exec_info: Command.RtPreExecInfo,
     rt_post_fork_info: Command.RtPostForkInfo,
+
+    fn checkLaunch(self: Config, os: std.Target.Os.Tag) configpkg.launch.Error!void {
+        try self.launch_preparation.check(self.launch_policy, os);
+        if (self.launch_policy == .normal) return;
+        try configpkg.launch.validateCommand(self.command);
+        try configpkg.launch.validateWorkingDirectory(self.working_directory);
+        if (self.shell_integration != .none) return error.LaunchShellIntegrationEnabled;
+    }
 };
 
 const Subprocess = struct {
@@ -760,6 +771,7 @@ const Subprocess = struct {
     cwd: ?[:0]const u8,
     env: ?EnvMap,
     args: []const [:0]const u8,
+    launch_policy: configpkg.launch.Policy = .normal,
     grid_size: renderer.GridSize,
     screen_size: renderer.ScreenSize,
     pty: ?Pty = null,
@@ -791,15 +803,16 @@ const Subprocess = struct {
     /// Initialize the subprocess. This will NOT start it, this only sets
     /// up the internal state necessary to start it later.
     pub fn init(gpa: Allocator, cfg: Config) !Subprocess {
+        try cfg.checkLaunch(builtin.os.tag);
         // We have a lot of maybe-allocations that all share the same lifetime
         // so use an arena so we don't end up in an accounting nightmare.
         var arena = std.heap.ArenaAllocator.init(gpa);
         errdefer arena.deinit();
         const alloc = arena.allocator();
 
-        // Get our env. If a default env isn't provided by the caller
-        // then we get it ourselves.
-        var env = cfg.env;
+        // Keep the caller's map current if preparation fails after a resize.
+        // Successful preparation transfers it into the subprocess below.
+        const env = cfg.env;
 
         // If we have a resources dir then set our env var
         if (cfg.resources_dir) |dir| {
@@ -849,10 +862,14 @@ const Subprocess = struct {
                 global.io(),
                 &exe_buf,
             ) catch |err| {
+                if (cfg.launch_policy == .controlled) return err;
                 log.warn("failed to get ghostty exe path err={}", .{err});
                 break :ghostty_path;
             }];
-            const exe_dir = std.fs.path.dirname(exe_bin_path) orelse break :ghostty_path;
+            const exe_dir = std.fs.path.dirname(exe_bin_path) orelse {
+                if (cfg.launch_policy == .controlled) return error.LaunchExecutableDirectoryUnavailable;
+                break :ghostty_path;
+            };
             log.debug("appending ghostty bin to path dir={s}", .{exe_dir});
 
             // We always set this so that if the shell overwrites the path
@@ -897,6 +914,7 @@ const Subprocess = struct {
                     ),
                 );
             } else |err| {
+                if (cfg.launch_policy == .controlled) return err;
                 log.warn("error building {s}; err={}", .{ xdg_data_dir_key, err });
             }
 
@@ -914,6 +932,7 @@ const Subprocess = struct {
                     ),
                 );
             } else |err| {
+                if (cfg.launch_policy == .controlled) return err;
                 log.warn("error building {s}; man pages may not be available; err={}", .{ manpath_key, err });
             }
         }
@@ -939,7 +958,7 @@ const Subprocess = struct {
             // Always set up shell features (GHOSTTY_SHELL_FEATURES). These are
             // used by both automatic and manual shell integrations.
             try shell_integration.setupFeatures(
-                &env,
+                env,
                 cfg.shell_integration_features,
                 cfg.cursor_blink orelse true,
             );
@@ -970,7 +989,7 @@ const Subprocess = struct {
                 alloc,
                 dir,
                 default_shell_command,
-                &env,
+                env,
                 force,
             ) orelse {
                 log.warn("shell could not be detected, no automatic shell integration will be injected", .{});
@@ -995,30 +1014,14 @@ const Subprocess = struct {
         }
 
         // Build our args list
-        const args: []const [:0]const u8 = execCommand(
+        const args = try prepareCommandArgs(
             alloc,
             shell_command,
+            cfg.launch_policy,
+            builtin.os.tag,
             internal_os.passwd,
-        ) catch |err| switch (err) {
-            // If we fail to allocate space for the command we want to
-            // execute, we'd still like to try to run something so
-            // Ghostty can launch (and maybe the user can debug this further).
-            // Realistically, if you're getting OOM, I think other stuff is
-            // about to crash, but we can try.
-            error.OutOfMemory => oom: {
-                log.warn("failed to allocate space for command args, falling back to basic shell", .{});
-
-                // The comptime here is important to ensure the full slice
-                // is put into the binary data and not the stack.
-                break :oom comptime switch (builtin.os.tag) {
-                    .windows => &.{"cmd.exe"},
-                    else => &.{"/bin/sh"},
-                };
-            },
-
-            // This logs on its own, this is a bad error.
-            error.SystemError => return err,
-        };
+            NativeHush,
+        );
 
         // We have to copy the cwd because there is no guarantee that
         // pointers in full_config remain valid.
@@ -1038,9 +1041,10 @@ const Subprocess = struct {
 
         return .{
             .arena = arena,
-            .env = env,
+            .env = takeEnvironment(env, gpa),
             .cwd = cwd,
             .args = args,
+            .launch_policy = cfg.launch_policy,
 
             .rt_pre_exec_info = cfg.rt_pre_exec_info,
             .rt_post_fork_info = cfg.rt_post_fork_info,
@@ -1114,6 +1118,9 @@ const Subprocess = struct {
         // This is important because our cwd can be set by the shell (OSC 7)
         // and we don't want to break new windows.
         const cwd: ?[:0]const u8 = if (self.cwd) |proposed| cwd: {
+            // The controlled callback owns checked chdir. Do not enter the
+            // generic Command's unchecked chdir or the legacy access fallback.
+            if (self.launch_policy == .controlled) break :cwd null;
             if ((comptime build_config.flatpak) and internal_os.isFlatpak()) {
                 // Flatpak sandboxing prevents access to certain reserved paths
                 // regardless of configured permissions. Perform a test spawn
@@ -1211,11 +1218,7 @@ const Subprocess = struct {
                     const f = struct {
                         fn callback(cmd: *Command) ?u8 {
                             const sp = cmd.getData(Subprocess) orelse unreachable;
-                            sp.childPreExec() catch |err| log.err(
-                                "error initializing child: {}",
-                                .{err},
-                            );
-                            return null;
+                            return sp.childPreExec();
                         }
                     };
                     break :f f.callback;
@@ -1228,22 +1231,8 @@ const Subprocess = struct {
             .data = self,
         };
 
-        cmd.start(alloc) catch |err| {
-            // We have to do this because start on Windows can't
-            // ever return ExecFailedInChild
-            const StartError = error{ExecFailedInChild} || @TypeOf(err);
-            switch (@as(StartError, err)) {
-                // If we fail in our child we need to flag it so our
-                // errdefers don't run.
-                error.ExecFailedInChild => {
-                    in_child = true;
-                    return err;
-                },
-
-                else => return err,
-            }
-        };
-        errdefer killCommand(&cmd) catch |err| {
+        try finishStart(cmd.start(alloc), &in_child);
+        errdefer killCommand(&cmd, self.launch_policy) catch |err| {
             log.warn("error killing command during cleanup err={}", .{err});
         };
         log.info("started subcommand path={s} pid={?}", .{ self.args[0], cmd.pid });
@@ -1265,9 +1254,24 @@ const Subprocess = struct {
     /// This should be called after fork but before exec in the child process.
     /// To repeat: this function RUNS IN THE FORKED CHILD PROCESS before
     /// exec is called; it does NOT run in the main Ghostty process.
-    fn childPreExec(self: *Subprocess) !void {
-        // Setup our pty
-        try self.pty.?.childPreExec();
+    fn childPreExec(self: *Subprocess) ?u8 {
+        return childSetup(self.launch_policy, self, struct {
+            fn chdir(sp: *Subprocess) !void {
+                const cwd = sp.cwd orelse return error.LaunchWorkingDirectoryRequired;
+                if (posix.errno(posix.system.chdir(cwd.ptr)) != .SUCCESS)
+                    return error.LaunchChdirFailed;
+            }
+            fn pty(sp: *Subprocess) !void {
+                if (comptime builtin.os.tag == .macos) {
+                    if (sp.launch_policy == .controlled)
+                        return sp.pty.?.childPreExecQuiet();
+                }
+                try sp.pty.?.childPreExec();
+            }
+            fn report(_: *Subprocess, err: anyerror) void {
+                log.err("error initializing child: {}", .{err});
+            }
+        });
     }
 
     /// Called to notify that we exited externally so we can unset our
@@ -1285,7 +1289,7 @@ const Subprocess = struct {
             .fork_exec => |*cmd| {
                 // Note: this will also wait for the command to exit, so
                 // DO NOT call cmd.wait
-                killCommand(cmd) catch |err|
+                killCommand(cmd, self.launch_policy) catch |err|
                     log.err("error sending SIGHUP to command, may hang: {}", .{err});
             },
 
@@ -1326,7 +1330,7 @@ const Subprocess = struct {
     /// Kill the underlying subprocess. This sends a SIGHUP to the child
     /// process. This also waits for the command to exit and will return the
     /// exit code.
-    fn killCommand(command: *Command) !void {
+    fn killCommand(command: *Command, policy: configpkg.launch.Policy) !void {
         if (command.pid) |pid| {
             switch (builtin.os.tag) {
                 .windows => {
@@ -1337,13 +1341,13 @@ const Subprocess = struct {
                     _ = try command.wait(false);
                 },
 
-                else => try killPid(pid),
+                else => try killPid(pid, policy),
             }
         }
     }
 
-    fn killPid(pid: c.pid_t) !void {
-        const pgid = getpgid(pid) orelse return;
+    fn killPid(pid: c.pid_t, policy: configpkg.launch.Policy) !void {
+        const pgid = try getpgid(pid, policy) orelse return;
 
         // It is possible to send a killpg between the time that
         // our child process calls setsid but before or simultaneous
@@ -1383,7 +1387,7 @@ const Subprocess = struct {
         }
     }
 
-    fn getpgid(pid: c.pid_t) ?c.pid_t {
+    fn getpgid(pid: c.pid_t, policy: configpkg.launch.Policy) !?c.pid_t {
         // Get our process group ID. Before the child pid calls setsid
         // the pgid will be ours because we forked it. Its possible that
         // we may be calling this before setsid if we are killing a surface
@@ -1392,12 +1396,28 @@ const Subprocess = struct {
 
         // We loop while pgid == my_pgid. The expectation if we have a valid
         // pid is that setsid will eventually be called because it is the
-        // FIRST thing the child process does and as far as I can tell,
+        // FIRST thing the normal child setup does and as far as I can tell,
         // setsid cannot fail. I'm sure that's not true, but I'd rather
         // have a bug reported than defensively program against it now.
         while (true) {
             const pgid = c.getpgid(pid);
             if (pgid == my_pgid) {
+                // Controlled chdir can fail before setsid. Cleanup runs after
+                // the process watcher has stopped; reap an exited child here
+                // rather than waiting forever for its process group to change.
+                if (try childExitedBeforeSession(policy, pid, struct {
+                    fn poll(child: c.pid_t) !bool {
+                        while (true) {
+                            const rc = posix.system.waitpid(child, null, std.c.W.NOHANG);
+                            switch (posix.errno(rc)) {
+                                .SUCCESS => return rc != 0,
+                                .INTR => continue,
+                                .CHILD => return true,
+                                else => return error.WaitFailed,
+                            }
+                        }
+                    }
+                })) return null;
                 log.warn("pgid is our own, retrying", .{});
                 std.Io.sleep(global.io(), .fromMilliseconds(10), .awake) catch {};
                 continue;
@@ -1433,6 +1453,33 @@ const Subprocess = struct {
         return pty.getProcessInfo(info);
     }
 };
+
+fn takeEnvironment(env: *EnvMap, alloc: Allocator) EnvMap {
+    const owned = env.*;
+    env.* = .init(alloc);
+    return owned;
+}
+
+fn finishStart(result: anytype, in_child: *bool) @TypeOf(result) {
+    return result catch |err| {
+        const StartError = error{ExecFailedInChild} || @TypeOf(err);
+        if (@as(StartError, err) == error.ExecFailedInChild) in_child.* = true;
+        return err;
+    };
+}
+
+fn childSetup(policy: configpkg.launch.Policy, context: anytype, comptime Ops: type) ?u8 {
+    if (policy == .controlled) Ops.chdir(context) catch return 1;
+    Ops.pty(context) catch |err| {
+        if (policy == .controlled) return 1;
+        Ops.report(context, err);
+    };
+    return null;
+}
+
+fn childExitedBeforeSession(policy: configpkg.launch.Policy, context: anytype, comptime Wait: type) !bool {
+    return policy == .controlled and try Wait.poll(context);
+}
 
 /// The read thread works with a companion gather thread to form a two-stage
 /// pipeline that moves pty output into the terminal:
@@ -2007,41 +2054,76 @@ pub const ReadThread = struct {
 ///
 /// Memory ownership:
 ///
-/// The allocator should be an arena, since the returned value may or
-/// may not be allocated and args may or may not be allocated (or copied).
-/// Pointers in the return value may point to pointers in the command
-/// struct.
+/// Use an arena: partial allocation failures are reclaimed by its owner.
+/// Successful login vectors own all non-static strings. The legacy non-login
+/// shell fallback can still borrow the shell command string.
 fn execCommand(
     alloc: Allocator,
     command: configpkg.Command,
     comptime passwdpkg: type,
-) (Allocator.Error || error{SystemError})![]const [:0]const u8 {
+) ![]const [:0]const u8 {
+    return execCommandWithPolicy(alloc, command, .normal, builtin.os.tag, passwdpkg, NativeHush);
+}
+
+const NativeHush = struct {
+    fn get(home_: ?[:0]const u8) bool {
+        const home = home_ orelse return false;
+        var dir = std.Io.Dir.openDirAbsolute(global.io(), home, .{}) catch |err| {
+            log.warn("failed to open home dir, not checking for hushlogin err={}", .{err});
+            return false;
+        };
+        defer dir.close(global.io());
+        return if (dir.access(global.io(), ".hushlogin", .{})) true else |_| false;
+    }
+};
+
+/// Includes the outer legacy OOM fallback, so controlled errors cannot be
+/// accidentally translated into a successful basic-shell launch.
+fn prepareCommandArgs(
+    alloc: Allocator,
+    command: configpkg.Command,
+    policy: configpkg.launch.Policy,
+    comptime os: std.Target.Os.Tag,
+    comptime passwdpkg: type,
+    comptime hushpkg: type,
+) ![]const [:0]const u8 {
+    return execCommandWithPolicy(alloc, command, policy, os, passwdpkg, hushpkg) catch |err| {
+        if (policy == .controlled or err != error.OutOfMemory) return err;
+        log.warn("failed to allocate space for command args, falling back to basic shell", .{});
+        return comptime switch (os) {
+            .windows => &.{"cmd.exe"},
+            else => &.{"/bin/sh"},
+        };
+    };
+}
+
+fn execCommandWithPolicy(
+    alloc: Allocator,
+    command: configpkg.Command,
+    policy: configpkg.launch.Policy,
+    comptime os: std.Target.Os.Tag,
+    comptime passwdpkg: type,
+    comptime hushpkg: type,
+) ![]const [:0]const u8 {
+    try configpkg.launch.Preparation.fresh.check(policy, os);
+    if (policy == .controlled) try configpkg.launch.validateCommand(command);
     // If we're on macOS, we have to use `login(1)` to get all of
     // the proper environment variables set, a login shell, and proper
     // hushlogin behavior.
-    if (comptime builtin.target.os.tag.isDarwin()) darwin: {
+    if (comptime os.isDarwin()) darwin: {
         const passwd = passwdpkg.get(alloc) catch |err| {
+            if (policy == .controlled) return err;
             log.warn("failed to read passwd, not using a login shell err={}", .{err});
             break :darwin;
         };
 
+        if (policy == .controlled) try configpkg.launch.validateIdentity(passwd.name);
         const username = passwd.name orelse {
             log.warn("failed to get username, not using a login shell", .{});
             break :darwin;
         };
 
-        const hush = if (passwd.home) |home| hush: {
-            var dir = std.Io.Dir.openDirAbsolute(global.io(), home, .{}) catch |err| {
-                log.warn(
-                    "failed to open home dir, not checking for hushlogin err={}",
-                    .{err},
-                );
-                break :hush false;
-            };
-            defer dir.close(global.io());
-
-            break :hush if (dir.access(global.io(), ".hushlogin", .{})) true else |_| false;
-        } else false;
+        const hush = policy == .controlled or hushpkg.get(passwd.home);
 
         // If we made it this far we're going to start building
         // the actual command.
@@ -2103,13 +2185,15 @@ fn execCommand(
         try args.append(alloc, "/usr/bin/login");
         if (hush) try args.append(alloc, "-q");
         try args.append(alloc, "-flp");
-        try args.append(alloc, username);
+        try args.append(alloc, try alloc.dupeZ(u8, username));
 
         switch (command) {
             // Direct args can be passed directly to login, since
             // login uses execvp we don't need to worry about PATH
             // searching.
-            .direct => |v| try args.appendSlice(alloc, v),
+            .direct => |v| for (v) |arg| {
+                try args.append(alloc, try alloc.dupeZ(u8, arg));
+            },
 
             .shell => |v| {
                 // Use "exec" to replace the bash process with
@@ -2145,7 +2229,7 @@ fn execCommand(
             var args: std.ArrayList([:0]const u8) = try .initCapacity(alloc, 4);
             defer args.deinit(alloc);
 
-            if (comptime builtin.os.tag == .windows) {
+            if (comptime os == .windows) {
                 // On Windows we run the shell value directly rather than
                 // wrapping in `cmd.exe /C <shell>`. An intermediate cmd
                 // process is wasteful for the common case (`wsl ~`,
@@ -2194,6 +2278,278 @@ fn execCommand(
             break :shell try args.toOwnedSlice(alloc);
         },
     };
+}
+
+const TestLaunchAccount = struct {
+    var entry: PasswdEntry = .{ .name = "account", .home = "/not-a-home-probe", .shell = "/not-a-shell-default" };
+    var calls: usize = 0;
+    var fail: bool = false;
+
+    fn get(alloc: Allocator) !PasswdEntry {
+        calls += 1;
+        if (fail) return error.IdentityUnavailable;
+        var result = entry;
+        if (entry.name) |name| result.name = try alloc.dupeZ(u8, name);
+        return result;
+    }
+};
+
+test "launch policy pure authoritative exec admission" {
+    var env: EnvMap = .init(std.testing.allocator);
+    defer env.deinit();
+    // Only checkLaunch is invoked; runtime hook data is deliberately unused.
+    var cfg: Config = .{
+        .env = &env,
+        .resources_dir = null,
+        .term = "xterm-test",
+        .rt_pre_exec_info = undefined,
+        .rt_post_fork_info = undefined,
+    };
+    try cfg.checkLaunch(.macos);
+    cfg.launch_policy = .controlled;
+    cfg.launch_preparation = .normal;
+    try std.testing.expectError(error.LaunchPolicyRequiresFreshConfig, cfg.checkLaunch(.macos));
+    cfg.launch_preparation = .fresh;
+    try std.testing.expectError(error.LaunchCommandRequired, cfg.checkLaunch(.macos));
+    cfg.command = .{ .direct = &.{"/bin/program"} };
+    try std.testing.expectError(error.LaunchWorkingDirectoryRequired, cfg.checkLaunch(.macos));
+    cfg.working_directory = "/owned";
+    try std.testing.expectError(error.LaunchShellIntegrationEnabled, cfg.checkLaunch(.macos));
+    cfg.shell_integration = .none;
+    try cfg.checkLaunch(.macos);
+    try std.testing.expectError(error.LaunchUnsupportedPlatform, cfg.checkLaunch(.linux));
+}
+
+const TestLaunchHush = struct {
+    var calls: usize = 0;
+    var quiet: bool = false;
+
+    fn get(home: ?[:0]const u8) bool {
+        calls += 1;
+        std.debug.assert(home != null);
+        return quiet;
+    }
+};
+
+fn resetLaunchProviders() void {
+    TestLaunchAccount.entry = .{ .name = "account", .home = "/not-a-home-probe", .shell = "/not-a-shell-default" };
+    TestLaunchAccount.calls = 0;
+    TestLaunchAccount.fail = false;
+    TestLaunchHush.calls = 0;
+    TestLaunchHush.quiet = false;
+}
+
+fn expectLaunchArgs(expected: []const []const u8, actual: []const [:0]const u8) !void {
+    try std.testing.expectEqual(expected.len, actual.len);
+    for (expected, actual) |e, a| try std.testing.expectEqualStrings(e, a);
+}
+
+test "launch policy pure controlled login and identity rejection" {
+    const testing = std.testing;
+    resetLaunchProviders();
+    defer resetLaunchProviders();
+    var arena = ArenaAllocator.init(testing.allocator);
+    defer arena.deinit();
+    const cmd: configpkg.Command = .{ .direct = &.{ "/bin/program", "space ' argument", "" } };
+    const args = try prepareCommandArgs(arena.allocator(), cmd, .controlled, .macos, TestLaunchAccount, TestLaunchHush);
+    try expectLaunchArgs(&.{ "/usr/bin/login", "-q", "-flp", "account", "/bin/program", "space ' argument", "" }, args);
+    try testing.expectEqual(@as(usize, 1), TestLaunchAccount.calls);
+    try testing.expectEqual(@as(usize, 0), TestLaunchHush.calls);
+
+    for ([_]?[:0]const u8{ null, "", "-account", "a\x00b", "a" ** 256 }) |name| {
+        TestLaunchAccount.entry.name = name;
+        try testing.expectError(error.LaunchIdentityInvalid, prepareCommandArgs(
+            arena.allocator(), cmd, .controlled, .macos, TestLaunchAccount, TestLaunchHush,
+        ));
+        try testing.expectEqual(@as(usize, 0), TestLaunchHush.calls);
+    }
+    TestLaunchAccount.fail = true;
+    try testing.expectError(error.IdentityUnavailable, prepareCommandArgs(
+        arena.allocator(), cmd, .controlled, .macos, TestLaunchAccount, TestLaunchHush,
+    ));
+    try testing.expectEqual(@as(usize, 0), TestLaunchHush.calls);
+}
+
+test "launch policy pure unsupported platform precedes providers" {
+    resetLaunchProviders();
+    defer resetLaunchProviders();
+    inline for (.{ .linux, .windows, .ios }) |os| {
+        try std.testing.expectError(error.LaunchUnsupportedPlatform, prepareCommandArgs(
+            std.testing.allocator,
+            .{ .direct = &.{"/bin/program"} },
+            .controlled,
+            os,
+            TestLaunchAccount,
+            TestLaunchHush,
+        ));
+    }
+    try std.testing.expectEqual(@as(usize, 0), TestLaunchAccount.calls);
+    try std.testing.expectEqual(@as(usize, 0), TestLaunchHush.calls);
+}
+
+test "launch policy pure normal login vectors and mocked hush" {
+    const log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = log_level;
+    resetLaunchProviders();
+    defer resetLaunchProviders();
+    var arena = ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+    const direct: configpkg.Command = .{ .direct = &.{ "/bin/program", "arg" } };
+    try expectLaunchArgs(&.{ "/usr/bin/login", "-flp", "account", "/bin/program", "arg" }, try prepareCommandArgs(
+        alloc, direct, .normal, .macos, TestLaunchAccount, TestLaunchHush,
+    ));
+    TestLaunchHush.quiet = true;
+    try expectLaunchArgs(&.{ "/usr/bin/login", "-q", "-flp", "account", "/bin/bash", "--noprofile", "--norc", "-c", "exec -l program --arg" }, try prepareCommandArgs(
+        alloc, .{ .shell = "program --arg" }, .normal, .macos, TestLaunchAccount, TestLaunchHush,
+    ));
+    try std.testing.expectEqual(@as(usize, 2), TestLaunchHush.calls);
+    TestLaunchAccount.fail = true;
+    try expectLaunchArgs(&.{ "/bin/program", "arg" }, try prepareCommandArgs(
+        alloc, direct, .normal, .macos, TestLaunchAccount, TestLaunchHush,
+    ));
+}
+
+test "launch policy pure successful login argv owns source strings" {
+    resetLaunchProviders();
+    defer resetLaunchProviders();
+    var arena = ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    inline for (.{ configpkg.launch.Policy.normal, configpkg.launch.Policy.controlled }) |policy| {
+        const args = args: {
+            var source = ArenaAllocator.init(std.testing.allocator);
+            defer source.deinit();
+            const alloc = source.allocator();
+            TestLaunchAccount.entry.name = try alloc.dupeZ(u8, "owned-account");
+            const argv = try alloc.alloc([:0]const u8, 2);
+            argv[0] = try alloc.dupeZ(u8, "/owned space'/program");
+            argv[1] = try alloc.dupeZ(u8, "owned argument");
+            const result = try prepareCommandArgs(
+                arena.allocator(), .{ .direct = argv }, policy, .macos, TestLaunchAccount, TestLaunchHush,
+            );
+            const offset: usize = if (policy == .controlled) 4 else 3;
+            try std.testing.expect(result[offset].ptr != argv[0].ptr);
+            try std.testing.expect(result[offset + 1].ptr != argv[1].ptr);
+            break :args result;
+        };
+        const offset: usize = if (policy == .controlled) 4 else 3;
+        try std.testing.expectEqualStrings("owned-account", args[offset - 1]);
+        try std.testing.expectEqualStrings("/owned space'/program", args[offset]);
+        try std.testing.expectEqualStrings("owned argument", args[offset + 1]);
+    }
+}
+
+test "launch policy pure argv allocation failures never become a shell" {
+    const log_level = std.testing.log_level;
+    std.testing.log_level = .err;
+    defer std.testing.log_level = log_level;
+    resetLaunchProviders();
+    defer resetLaunchProviders();
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, testControlledArgAllocations, .{});
+    var failing = std.testing.FailingAllocator.init(std.testing.allocator, .{ .fail_index = 0 });
+    var arena = ArenaAllocator.init(failing.allocator());
+    defer arena.deinit();
+    try expectLaunchArgs(&.{"/bin/sh"}, try prepareCommandArgs(
+        arena.allocator(), .{ .direct = &.{"/bin/program"} }, .normal, .macos, TestLaunchAccount, TestLaunchHush,
+    ));
+}
+
+fn testControlledArgAllocations(alloc: Allocator) !void {
+    var arena = ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const args = try prepareCommandArgs(
+        arena.allocator(),
+        .{ .direct = &.{ "/bin/program", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10" } },
+        .controlled,
+        .macos,
+        TestLaunchAccount,
+        TestLaunchHush,
+    );
+    try std.testing.expectEqualStrings("/usr/bin/login", args[0]);
+    try std.testing.expectEqual(@as(usize, 15), args.len);
+    try std.testing.expectEqual(@as(usize, 0), TestLaunchHush.calls);
+}
+
+test "launch policy pure environment ownership survives allocation errors" {
+    try std.testing.checkAllAllocationFailures(std.testing.allocator, testLaunchEnvironmentOwnership, .{});
+}
+
+fn testLaunchEnvironmentOwnership(alloc: Allocator) !void {
+    var env: EnvMap = .init(alloc);
+    defer env.deinit();
+    try env.put("LAUNCH_TEST", "owned");
+    try env.put("SECOND_TEST", "also owned");
+    var owned = takeEnvironment(&env, alloc);
+    defer owned.deinit();
+    try std.testing.expect(env.get("LAUNCH_TEST") == null);
+    try std.testing.expectEqualStrings("owned", owned.get("LAUNCH_TEST").?);
+}
+
+test "launch policy pure checked child setup and start ownership" {
+    const Ops = struct {
+        cwd_calls: usize = 0,
+        pty_calls: usize = 0,
+        reports: usize = 0,
+        fail_cwd: bool = false,
+        fail_pty: bool = false,
+        fn chdir(self: *@This()) !void {
+            self.cwd_calls += 1;
+            if (self.fail_cwd) return error.AccessDenied;
+        }
+        fn pty(self: *@This()) !void {
+            std.debug.assert(self.cwd_calls != 0 or self.fail_pty);
+            self.pty_calls += 1;
+            if (self.fail_pty) return error.SetControllingTerminalFailed;
+        }
+        fn report(self: *@This(), _: anyerror) void {
+            self.reports += 1;
+        }
+    };
+    var cwd_failure: Ops = .{ .fail_cwd = true };
+    try std.testing.expectEqual(@as(?u8, 1), childSetup(.controlled, &cwd_failure, Ops));
+    try std.testing.expectEqual(@as(usize, 0), cwd_failure.pty_calls);
+    try std.testing.expectEqual(@as(usize, 0), cwd_failure.reports);
+    var pty_failure: Ops = .{ .fail_pty = true };
+    try std.testing.expectEqual(@as(?u8, 1), childSetup(.controlled, &pty_failure, Ops));
+    try std.testing.expectEqual(@as(usize, 1), pty_failure.cwd_calls);
+    try std.testing.expectEqual(@as(usize, 0), pty_failure.reports);
+    var success: Ops = .{};
+    try std.testing.expectEqual(@as(?u8, null), childSetup(.controlled, &success, Ops));
+    var normal: Ops = .{ .fail_pty = true };
+    try std.testing.expectEqual(@as(?u8, null), childSetup(.normal, &normal, Ops));
+    try std.testing.expectEqual(@as(usize, 0), normal.cwd_calls);
+    try std.testing.expectEqual(@as(usize, 1), normal.reports);
+
+    var in_child = false;
+    const Result = error{ ExecFailedInChild, StartFailed }!void;
+    try std.testing.expectError(error.StartFailed, finishStart(@as(Result, error.StartFailed), &in_child));
+    try std.testing.expect(!in_child);
+    try finishStart(@as(Result, {}), &in_child);
+    try std.testing.expect(!in_child);
+    try std.testing.expectError(error.ExecFailedInChild, finishStart(@as(Result, error.ExecFailedInChild), &in_child));
+    try std.testing.expect(in_child);
+}
+
+test "launch policy pure child exits before creating a session" {
+    const Wait = struct {
+        calls: usize = 0,
+        exited: bool = false,
+        fail: bool = false,
+        fn poll(self: *@This()) !bool {
+            self.calls += 1;
+            if (self.fail) return error.WaitFailed;
+            return self.exited;
+        }
+    };
+    var wait: Wait = .{};
+    try std.testing.expect(!try childExitedBeforeSession(.normal, &wait, Wait));
+    try std.testing.expectEqual(@as(usize, 0), wait.calls);
+    try std.testing.expect(!try childExitedBeforeSession(.controlled, &wait, Wait));
+    wait.exited = true;
+    try std.testing.expect(try childExitedBeforeSession(.controlled, &wait, Wait));
+    wait.fail = true;
+    try std.testing.expectError(error.WaitFailed, childExitedBeforeSession(.controlled, &wait, Wait));
 }
 
 /// Append a value to an environment variable such as PATH.
