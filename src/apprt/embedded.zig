@@ -555,22 +555,7 @@ pub const Surface = struct {
 
         // If we have an initial input then we set it.
         if (opts.initial_input) |c_input| {
-            const alloc = config.arenaAlloc();
-
-            // We need to escape the string because the "raw" field
-            // expects a Zig string.
-            var buf: std.Io.Writer.Allocating = .init(alloc);
-            defer buf.deinit();
-            try std.zig.stringEscape(
-                std.mem.sliceTo(c_input, 0),
-                &buf.writer,
-            );
-
-            config.input.list.clearRetainingCapacity();
-            try config.input.list.append(
-                alloc,
-                .{ .raw = try buf.toOwnedSliceSentinel(0) },
-            );
+            try config.setInitialInput(std.mem.sliceTo(c_input, 0));
         }
 
         // Wait after command

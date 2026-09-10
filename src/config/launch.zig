@@ -8,6 +8,8 @@ pub const Error = error{
     LaunchPolicyRequiresFreshConfig,
     LaunchPolicyDowngrade,
     LaunchPreparationFailed,
+    LaunchReplayOutOfMemory,
+    LaunchReplayFailed,
     LaunchConfigDiagnostics,
     LaunchCommandRequired,
     LaunchCommandMustBeDirect,

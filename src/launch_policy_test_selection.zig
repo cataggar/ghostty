@@ -14,6 +14,8 @@ pub const expected_names = [_][]const u8{
     "config.Config.test.launch policy pure config guarded errors and update admission",
     "config.Config.test.launch policy pure controlled replay ownership and allocation failures",
     "config.Config.test.launch policy pure conditional late opt in rejected",
+    "config.Config.test.launch policy pure late opt in allocation failures prohibit fallback",
+    "config.Config.test.launch policy pure initial input override survives replay",
     "config.CApi.test.launch policy pure generic C getter",
     "apprt.surface.test.launch policy pure working directory override and inheritance",
     "apprt.surface.test.launch policy pure environment errors never fall back",

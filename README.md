@@ -61,8 +61,11 @@ surface working-directory option may supply the directory; invalid overrides
 fail, and the C command option must be null because it represents shell input.
 Arguments and paths cannot contain embedded NUL. The initial-command rule still
 applies, but an invalid selected initial command never falls back to the base
-command. Launch inputs survive presentation replay and remain immutable for
-an existing subprocess.
+command. Launch inputs, including `input` and the C `initial_input` replacement,
+survive presentation replay and remain immutable for an existing subprocess.
+Startup input is retained, not suppressed or deferred until a child
+acknowledgment. Keep startup input empty when the host protocol requires an
+acknowledgment before sending bytes.
 
 Ghostty constructs `/usr/bin/login -q -flp USER COMMAND ARG...`, without its
 passwd-home `.hushlogin` probe or launch-default fallback. Construction,
@@ -97,8 +100,8 @@ that artifact. Build-time generators, native dependencies, and macOS Metal
 shader compilation still run as needed; it is not a no-process build.
 
 `test-launch-policy` uses a fixed `launch policy pure` compile filter, then
-validates an exact allowlist of **24 full names** before any test body runs:
-21 launch-policy cases plus three memory-only selector regressions. Missing,
+validates an exact allowlist of **26 full names** before any test body runs:
+23 launch-policy cases plus three memory-only selector regressions. Missing,
 duplicate, or additional unreviewed focused names fail before execution.
 Anonymous and unrelated tests are excluded. The complete inventory is in
 [`launch_policy_test_selection.zig`](src/launch_policy_test_selection.zig);

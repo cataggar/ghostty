@@ -1173,9 +1173,11 @@ command: ?Command = null,
 /// Controlled launches use `/usr/bin/login -q -flp USER COMMAND ARG...`.
 /// The current username must be nonempty, at most 255 bytes, and contain
 /// neither a leading dash nor NUL. Ghostty does not inspect passwd home for
-/// `.hushlogin`. Launch inputs, including initial-command and env overrides,
-/// are retained across conditional presentation replay and are immutable
-/// for an existing subprocess. Presentation changes cannot opt in later.
+/// `.hushlogin`. Launch inputs, including initial-command, env, and startup
+/// input overrides, are retained across conditional presentation replay and
+/// are immutable for an existing subprocess. Presentation changes cannot opt
+/// in later. Startup input is still queued on launch; leave it empty if the
+/// host requires a child acknowledgment before sending bytes.
 ///
 /// This governs Ghostty's preparation, not login, PAM, libc, or the explicit
 /// program. In particular, login may retry authentication or choose a shell,
@@ -4525,12 +4527,23 @@ fn replayConditionalState(self: *const Config, new: conditional.State) !Config {
     new_config._conditional_state = new;
 
     // Replay all of our steps to rebuild the configuration
-    var it = Replay.iterator(self._replay_steps.items, &new_config);
-    try new_config.loadIter(alloc_gpa, &it);
-    if (it.failure) |err| return err;
-    try new_config.retainLaunchInputs(self);
+    const failure = replay: {
+        var it = Replay.iterator(self._replay_steps.items, &new_config);
+        new_config.loadIter(alloc_gpa, &it) catch |err| break :replay err;
+        if (it.failure) |err| break :replay err;
+        new_config.retainLaunchInputs(self) catch |err| break :replay err;
 
-    return new_config;
+        return new_config;
+    };
+
+    // The caller still has the original config after this temporary is freed.
+    // Carry a newly controlled attempt in the error so normal fallback cannot
+    // lose its provenance. Keep already-fatal errors and their causes intact.
+    if (self.rejectLaunchError(failure) or !new_config.rejectLaunchError(failure))
+        return failure;
+    if (failure == error.OutOfMemory) return error.LaunchReplayOutOfMemory;
+    log.warn("controlled conditional replay failed err={}", .{failure});
+    return error.LaunchReplayFailed;
 }
 
 pub fn checkLaunchPreparation(self: *const Config, os: std.Target.Os.Tag) launch.Error!void {
@@ -4690,6 +4703,133 @@ test "launch policy pure conditional late opt in rejected" {
     );
 }
 
+test "launch policy pure late opt in allocation failures prohibit fallback" {
+    // Cover both a throwing parser and an iterator's deferred failure.
+    for ([_]Replay.Step{
+        .{ .arg = "--title=" ++ "x" ** (64 * 1024) },
+        .{ .diagnostic = .{ .message = "x" ** (64 * 1024) } },
+    }) |step| try testLateOptInAllocation(step);
+}
+
+fn testLateOptInAllocation(step: Replay.Step) !void {
+    const testing = std.testing;
+    var cfg = try Config.default(testing.allocator);
+    defer cfg.deinit();
+    try cfg.prepareLaunch(.macos);
+    const arena = cfg.arenaAlloc();
+    try cfg._replay_steps.append(arena, .{ .conditional_arg = .{
+        .conditions = &.{.{ .key = .theme, .op = .eq, .value = "dark" }},
+        .arg = "--command-launch-policy=controlled",
+    } });
+    // Force an allocation after the policy has been assigned, before the
+    // eventual late-opt-in guard. No paths, files, or default resolution.
+    try cfg._replay_steps.append(arena, step);
+
+    var baseline = testing.FailingAllocator.init(testing.allocator, .{ .resize_fail_index = 0 });
+    var source = cfg.shallowClone(baseline.allocator());
+    defer source.deinit();
+    try testing.expectError(
+        error.LaunchPolicyRequiresFreshConfig,
+        source.replayConditionalState(.{ .theme = .dark }),
+    );
+
+    var before_selection: usize = 0;
+    var after_selection: usize = 0;
+    for (0..baseline.alloc_index) |fail_index| {
+        var failing = testing.FailingAllocator.init(testing.allocator, .{
+            .fail_index = fail_index,
+            .resize_fail_index = 0,
+        });
+        var attempt = cfg.shallowClone(failing.allocator());
+        defer attempt.deinit();
+        if (attempt.replayConditionalState(.{ .theme = .dark })) |value| {
+            var unexpected = value;
+            unexpected.deinit();
+            return error.TestUnexpectedResult;
+        } else |err| {
+            try testing.expect(failing.has_induced_failure);
+            switch (err) {
+                error.OutOfMemory => {
+                    // Preserve the original normal-only fallback behavior.
+                    try testing.expect(!cfg.rejectLaunchError(err));
+                    before_selection += 1;
+                },
+                error.LaunchReplayOutOfMemory => {
+                    // This is the exact decision used by Surface.init and App,
+                    // using the ORIGINAL normal config after replay cleanup.
+                    try testing.expect(cfg.rejectLaunchError(err));
+                    after_selection += 1;
+                },
+                else => return err,
+            }
+        }
+    }
+    try testing.expect(before_selection > 0);
+    try testing.expect(after_selection > 0);
+    try testing.expectEqual(launch.Policy.normal, cfg.@"command-launch-policy");
+    try testing.expectEqual(launch.Preparation.normal, cfg._launch_preparation);
+}
+
+test "launch policy pure initial input override survives replay" {
+    for ([_][]const u8{ "replacement\n\"quoted\"\\literal\t'", "" }) |value| {
+        try std.testing.checkAllAllocationFailures(
+            std.testing.allocator,
+            testInitialInputReplay,
+            .{value},
+        );
+    }
+}
+
+fn testInitialInputReplay(alloc: Allocator, value: []const u8) !void {
+    var replay = replay: {
+        var cfg = try Config.default(alloc);
+        defer cfg.deinit();
+        var it: TestIterator = .{ .data = &.{
+            "--command-launch-policy=controlled",
+            "--shell-integration=none",
+            "--input=raw:configured",
+            "--input=path:/never-open-configured-input",
+        } };
+        try cfg.loadIter(alloc, &it);
+        try cfg.prepareLaunch(.macos);
+        const arena = cfg.arenaAlloc();
+        const c_input = try arena.dupeZ(u8, value);
+        // The embedded C initial_input option calls this same preparation seam.
+        try cfg.setInitialInput(std.mem.sliceTo(c_input.ptr, 0));
+        @memset(c_input, 'x');
+        try cfg._replay_steps.append(arena, .{ .conditional_arg = .{
+            .conditions = &.{.{ .key = .theme, .op = .eq, .value = "dark" }},
+            .arg = "--input=raw:conditional",
+        } });
+        break :replay try cfg.replayConditionalState(.{ .theme = .dark });
+    };
+    defer replay.deinit();
+
+    // Both the C source bytes and the overridden config's arena are gone.
+    // Use the same in-memory decoding as Termio, without preparing input files.
+    var arena = ArenaAllocator.init(alloc);
+    defer arena.deinit();
+    const parsed = try replay.input.cloneParsed(arena.allocator());
+    try std.testing.expectEqual(@as(usize, 1), parsed.list.items.len);
+    try std.testing.expect(parsed.list.items[0] == .raw);
+    try std.testing.expectEqualStrings(value, parsed.list.items[0].raw);
+}
+
+/// Prepare the C surface initial-input replacement as owned, escaped raw input.
+pub fn setInitialInput(self: *Config, value: []const u8) Allocator.Error!void {
+    const alloc = self.arenaAlloc();
+    var buf: std.Io.Writer.Allocating = .init(alloc);
+    defer buf.deinit();
+    // This memory-only writer can fail only when its buffer cannot grow.
+    std.zig.stringEscape(value, &buf.writer) catch return error.OutOfMemory;
+
+    self.input.list.clearRetainingCapacity();
+    try self.input.list.append(
+        alloc,
+        .{ .raw = try buf.toOwnedSliceSentinel(0) },
+    );
+}
+
 pub fn rejectLaunchError(self: *const Config, err: anyerror) bool {
     return self.@"command-launch-policy" == .controlled or
         self._launch_preparation == .controlled or
@@ -4716,6 +4856,7 @@ fn retainLaunchInputs(self: *Config, original: *const Config) !void {
         "command-launch-policy", "command",           "initial-command",
         "working-directory",     "shell-integration", "shell-integration-features",
         "cursor-style-blink",    "term",              "env",
+        "input",
     }) |field| {
         @field(self, field) = try cloneValue(alloc, @TypeOf(@field(original, field)), @field(original, field));
     }
