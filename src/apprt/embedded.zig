@@ -521,7 +521,7 @@ pub const Surface = struct {
         if (opts.working_directory) |c_wd| {
             const wd = std.mem.sliceTo(c_wd, 0);
             try apprt.surface.applyWorkingDirectory(&config, wd, {}, struct {
-                fn check(_: void, path: []const u8) !void {
+                pub fn check(_: void, path: []const u8) !void {
                     var dir = try std.Io.Dir.openDirAbsolute(global.io(), path, .{});
                     defer dir.close(global.io());
                     if ((try dir.stat(global.io())).kind != .directory)
