@@ -1,7 +1,7 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const standard = @import("standard_test_runner");
-const selection = @import("launch_policy_test_selection.zig");
+const selection = @import("launch_policy_test_selector");
 
 pub const std_options = standard.std_options;
 pub const fuzz = standard.fuzz;

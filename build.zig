@@ -429,7 +429,7 @@ pub fn build(b: *std.Build) !void {
         };
         const focused_test = b.addTest(.{
             .name = "ghostty-launch-policy-test",
-            .filters = &.{@import("src/launch_policy_test_selection.zig").filter},
+            .filters = &.{@import("src/launch_policy_test_selector.zig").filter},
             .root_module = b.createModule(module_options),
             .use_llvm = true,
             .test_runner = .{
@@ -444,6 +444,12 @@ pub fn build(b: *std.Build) !void {
         focused_test.root_module.addImport(
             "standard_test_runner",
             b.createModule(standard_options),
+        );
+        var selector_options = module_options;
+        selector_options.root_source_file = b.path("src/launch_policy_test_selector.zig");
+        focused_test.root_module.addImport(
+            "launch_policy_test_selector",
+            b.createModule(selector_options),
         );
         _ = try deps.add(focused_test);
         addGhosttyH(b, focused_test.root_module, target, .Debug);

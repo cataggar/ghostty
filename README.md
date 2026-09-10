@@ -104,8 +104,13 @@ validates an exact allowlist of **26 full names** before any test body runs:
 23 launch-policy cases plus three memory-only selector regressions. Missing,
 duplicate, or additional unreviewed focused names fail before execution.
 Anonymous and unrelated tests are excluded. The complete inventory is in
-[`launch_policy_test_selection.zig`](src/launch_policy_test_selection.zig);
+[`launch_policy_test_selector.zig`](src/launch_policy_test_selector.zig);
 new focused cases require review and an explicit inventory update.
+
+The selector and allowlist have one named-module owner shared by the adapter
+and regressions. The three regression declarations stay in
+`launch_policy_test_selection.zig`, imported by the test root, so Zig collects
+them with the other focused cases.
 
 The small adapter delegates execution to the active Zig installation's
 standard test runner, retaining its server protocol, allocation-leak and error
