@@ -65,6 +65,14 @@ pub fn build(b: *std.Build) !void {
         "Run the app under valgrind",
     );
     const test_step = b.step("test", "Run tests");
+    const test_launch_policy_step = b.step(
+        "test-launch-policy",
+        "Run the exact memory-only launch-policy test inventory",
+    );
+    const test_launch_policy_build_step = b.step(
+        "test-launch-policy-build",
+        "Build launch-policy tests without running the test artifact",
+    );
     const test_lib_vt_step = b.step(
         "test-lib-vt",
         "Run libghostty-vt tests",
@@ -399,6 +407,51 @@ pub fn build(b: *std.Build) !void {
         valgrind_run.addArtifactArg(test_exe);
         config.addPatchElf(test_exe, &valgrind_run.step);
         test_valgrind_step.dependOn(&valgrind_run.step);
+    }
+
+    // Keep the focused artifact separate from the ordinary test target.
+    if (config.emit_lib_vt or config.app_runtime != .none) {
+        inline for (.{ test_launch_policy_step, test_launch_policy_build_step }) |step| {
+            try step.addError(
+                "launch-policy tests require -Dapp-runtime=none -Demit-lib-vt=false",
+                .{},
+            );
+        }
+    } else {
+        const target = config.baselineTarget(b.graph.io);
+        const module_options: std.Build.Module.CreateOptions = .{
+            .root_source_file = b.path("src/launch_policy_tests.zig"),
+            .target = target,
+            .optimize = .Debug,
+            .strip = false,
+            .omit_frame_pointer = false,
+            .unwind_tables = .sync,
+        };
+        const focused_test = b.addTest(.{
+            .name = "ghostty-launch-policy-test",
+            .filters = &.{@import("src/launch_policy_test_selection.zig").filter},
+            .root_module = b.createModule(module_options),
+            .use_llvm = true,
+            .test_runner = .{
+                .path = b.path("src/launch_policy_test_runner.zig"),
+                .mode = .server,
+            },
+        });
+        var standard_options = module_options;
+        standard_options.root_source_file = .{ .cwd_relative = b.pathJoin(&.{
+            b.graph.zig_lib_directory.path.?, "compiler", "test_runner.zig",
+        }) };
+        focused_test.root_module.addImport(
+            "standard_test_runner",
+            b.createModule(standard_options),
+        );
+        _ = try deps.add(focused_test);
+        addGhosttyH(b, focused_test.root_module, target, .Debug);
+
+        test_launch_policy_build_step.dependOn(&focused_test.step);
+        const focused_run = b.addRunArtifact(focused_test);
+        config.addPatchElf(focused_test, &focused_run.step);
+        test_launch_policy_step.dependOn(&focused_run.step);
     }
 
     // update-translations does what it sounds like and updates the "pot"

@@ -79,6 +79,37 @@ Embedders must qualify their system/helper assumptions and obtain a real child
 acknowledgment before admitting input; successful surface creation is not one.
 The detailed option contract is in [`Config.zig`](src/config/Config.zig).
 
+#### Focused launch-policy tests
+
+Use the dedicated artifact, not `test -Dtest-filter=...`: the compiler's
+substring filter also admits unnamed tests, including native/OS tests in the
+ordinary test graph.
+
+```sh
+zig build test-launch-policy-build -Dapp-runtime=none -Demit-lib-vt=false \
+  -Demit-docs=false -Demit-macos-app=false -Demit-xcframework=false
+zig build test-launch-policy -Dapp-runtime=none -Demit-lib-vt=false \
+  -Demit-docs=false -Demit-macos-app=false -Demit-xcframework=false
+```
+
+`test-launch-policy-build` compiles `ghostty-launch-policy-test` without running
+that artifact. Build-time generators, native dependencies, and macOS Metal
+shader compilation still run as needed; it is not a no-process build.
+
+`test-launch-policy` uses a fixed `launch policy pure` compile filter, then
+validates an exact allowlist of **24 full names** before any test body runs:
+21 launch-policy cases plus three memory-only selector regressions. Missing,
+duplicate, or additional unreviewed focused names fail before execution.
+Anonymous and unrelated tests are excluded. The complete inventory is in
+[`launch_policy_test_selection.zig`](src/launch_policy_test_selection.zig);
+new focused cases require review and an explicit inventory update.
+
+The small adapter delegates execution to the active Zig installation's
+standard test runner, retaining its server protocol, allocation-leak and error
+reporting, and fuzz entry point. It does not copy or reimplement that runner.
+These dedicated steps do not change the ordinary `test` target, and a
+user-supplied `-Dtest-filter` does not narrow or expand their fixed inventory.
+
 ## Contributing and Developing
 
 If you have any ideas, issues, etc. regarding Ghostty, or would like to
