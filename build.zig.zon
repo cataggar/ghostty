@@ -17,9 +17,14 @@
 
         // Zig libs
         .libxev = .{
-            // mitchellh/libxev
-            .url = "https://deps.files.ghostty.org/libxev-9ce8e8e6ff89e583258a7f8e7adeeeaeae8611bf.tar.gz",
-            .hash = "libxev-0.0.0-86vtcwIRFADbH4hk-EjROXxlrKIRPQdA41XiTSytYO-F",
+            // cataggar/libxev, branch `debug`. That branch is mitchellh/libxev
+            // 9ce8e8e6ff89e583258a7f8e7adeeeaeae8611bf -- the commit this
+            // previously pinned, unchanged -- plus completion diagnostics.
+            // Restore the deps.files.ghostty.org URL and the
+            // libxev-0.0.0-86vtcwIRFADbH4hk-EjROXxlrKIRPQdA41XiTSytYO-F hash
+            // to drop them.
+            .url = "https://github.com/cataggar/libxev/archive/9de0d5d750156130bffac810c516757297072ba8.tar.gz",
+            .hash = "libxev-0.0.0-86vtc2IgFAAdBPftfG8H7xSvq72mBY2D_92OO_TzDYWM",
             .lazy = true,
         },
         .vaxis = .{
