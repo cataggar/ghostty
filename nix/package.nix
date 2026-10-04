@@ -10,10 +10,10 @@
   git,
   ncurses,
   pkg-config,
-  zig_0_16,
+  zig_0_17,
   pandoc,
   revision ? "dirty",
-  optimize ? "Debug",
+  optimize ? "debug",
   enableX11 ? true,
   enableWayland ? true,
   wayland-protocols,
@@ -26,7 +26,7 @@
   buildInputs = import ./build-support/build-inputs.nix {
     inherit pkgs lib stdenv enableX11 enableWayland;
   };
-  strip = optimize != "Debug" && optimize != "ReleaseSafe";
+  strip = optimize != "debug" && optimize != "safe";
 in
   stdenv.mkDerivation (finalAttrs: {
     pname = "ghostty";
@@ -55,7 +55,10 @@ in
       );
     };
 
-    deps = callPackage ../build.zig.zon.nix {name = "ghostty-cache-${finalAttrs.version}";};
+    deps = callPackage ../build.zig.zon.nix {
+      inherit zig_0_17;
+      name = "ghostty-cache-${finalAttrs.version}";
+    };
 
     nativeBuildInputs =
       [
@@ -63,7 +66,7 @@ in
         ncurses
         pandoc
         pkg-config
-        zig_0_16
+        zig_0_17
         gobject-introspection
         wrapGAppsHook4
         blueprint-compiler

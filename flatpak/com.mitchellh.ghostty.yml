@@ -37,7 +37,7 @@ modules:
       append-path: /app/zig
     build-commands:
       - zig build
-        -Doptimize=ReleaseFast
+        -Doptimize=fast
         -Dcpu=baseline
         -Dflatpak=true
         -Dstrip=false

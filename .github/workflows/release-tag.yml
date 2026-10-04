@@ -174,7 +174,7 @@ jobs:
         run: |
           nix develop -c \
             zig build \
-            -Doptimize=ReleaseFast \
+            -Doptimize=fast \
             -Demit-macos-app=false \
             -Dversion-string=${GHOSTTY_VERSION}
 

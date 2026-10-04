@@ -6,8 +6,8 @@
     # glibc versions used by our dependencies from Nix are compatible with the
     # system glibc that the user is building for.
     #
-    # We are currently on nixpkgs-unstable to get Zig 0.15 for our package.nix and
-    # Gnome 49/Gtk 4.20.
+    # We are currently on nixpkgs-unstable for Gnome 49/Gtk 4.20.
+    # The compiler is the SHA-pinned Zig 0.17 release below.
     #
     nixpkgs.url = "https://channels.nixos.org/nixpkgs-unstable/nixexprs.tar.xz";
 
@@ -32,9 +32,10 @@
     };
 
     zon2nix = {
-      url = "github:jcollie/zon2nix?ref=main";
+      url = "github:jcollie/zon2nix/d1c869946e98c380ff474c6bd30e2fe2f5110473";
       inputs = {
         nixpkgs.follows = "nixpkgs";
+        zig.follows = "zig";
       };
     };
 
@@ -68,8 +69,9 @@
     forAllPlatforms = f: lib.genAttrs platforms (s: f legacyPackages.${s});
     forBuildablePlatforms = f: lib.genAttrs buildablePlatforms (s: f legacyPackages.${s});
 
-    mkPkgArgs = optimize: {
+    mkPkgArgs = pkgs: optimize: {
       inherit optimize;
+      zig_0_17 = zig017 pkgs;
       revision = self.shortRev or self.dirtyShortRev or "dirty";
     };
 
@@ -138,23 +140,23 @@
         (
           forAllPlatforms (pkgs: rec {
             # Deps are needed for environmental setup on macOS
-            deps = pkgs.callPackage ./build.zig.zon.nix {};
+            deps = pkgs.callPackage ./build.zig.zon.nix {zig_0_17 = zig017 pkgs;};
 
-            libghostty-vt-debug = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs "Debug");
-            libghostty-vt-releasesafe = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs "ReleaseSafe");
-            libghostty-vt-releasefast = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs "ReleaseFast");
-            libghostty-vt-debug-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs "Debug") // {simd = false;});
-            libghostty-vt-releasesafe-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs "ReleaseSafe") // {simd = false;});
-            libghostty-vt-releasefast-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs "ReleaseFast") // {simd = false;});
+            libghostty-vt-debug = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs pkgs "debug");
+            libghostty-vt-releasesafe = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs pkgs "safe");
+            libghostty-vt-releasefast = pkgs.callPackage ./nix/libghostty-vt.nix (mkPkgArgs pkgs "fast");
+            libghostty-vt-debug-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs pkgs "debug") // {simd = false;});
+            libghostty-vt-releasesafe-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs pkgs "safe") // {simd = false;});
+            libghostty-vt-releasefast-no-simd = pkgs.callPackage ./nix/libghostty-vt.nix ((mkPkgArgs pkgs "fast") // {simd = false;});
 
             libghostty-vt = libghostty-vt-releasefast;
           })
         )
         (
           forBuildablePlatforms (pkgs: rec {
-            ghostty-debug = pkgs.callPackage ./nix/package.nix (mkPkgArgs "Debug");
-            ghostty-releasesafe = pkgs.callPackage ./nix/package.nix (mkPkgArgs "ReleaseSafe");
-            ghostty-releasefast = pkgs.callPackage ./nix/package.nix (mkPkgArgs "ReleaseFast");
+            ghostty-debug = pkgs.callPackage ./nix/package.nix (mkPkgArgs pkgs "debug");
+            ghostty-releasesafe = pkgs.callPackage ./nix/package.nix (mkPkgArgs pkgs "safe");
+            ghostty-releasefast = pkgs.callPackage ./nix/package.nix (mkPkgArgs pkgs "fast");
 
             ghostty = ghostty-releasefast;
             default = ghostty;
@@ -200,10 +202,10 @@
     overlays = {
       default = self.overlays.releasefast;
       releasefast = final: prev: {
-        ghostty = final.callPackage ./nix/package.nix (mkPkgArgs "ReleaseFast");
+        ghostty = final.callPackage ./nix/package.nix (mkPkgArgs final "fast");
       };
       debug = final: prev: {
-        ghostty = final.callPackage ./nix/package.nix (mkPkgArgs "Debug");
+        ghostty = final.callPackage ./nix/package.nix (mkPkgArgs final "debug");
       };
     };
   };

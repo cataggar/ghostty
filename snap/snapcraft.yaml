@@ -44,15 +44,16 @@ parts:
     override-pull: |
       set -ex
       case "$CRAFT_ARCH_BUILD_FOR" in
-        amd64)  arch=x86_64    ;;
-        arm64)  arch=aarch64  ;;
+        amd64)  arch=x86_64; sha256=1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026 ;;
+        arm64)  arch=aarch64; sha256=9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8 ;;
         *)      arch=""     ;;
       esac
 
       rm -rf $CRAFT_PART_SRC/*
 
       if [[ -n $arch ]]; then
-        curl -LO --retry-connrefused --retry 10 https://ziglang.org/download/0.16.0/zig-$arch-linux-0.16.0.tar.xz
+        curl --fail -LO --retry-connrefused --retry 10 https://github.com/cataggar/zig/releases/download/v0.17.0/zig-$arch-linux-0.17.0.tar.xz
+        printf '%s  %s\n' "$sha256" "zig-$arch-linux-0.17.0.tar.xz" | sha256sum --check
       else
         echo "Unsupported arch"
         exit 1
@@ -85,7 +86,7 @@ parts:
       $CRAFT_PART_SRC/../../zig/src/zig build \
         -Dsnap \
         -Dpatch-rpath=\$ORIGIN/../usr/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR:/snap/core24/current/lib/$CRAFT_ARCH_TRIPLET_BUILD_FOR \
-        -Doptimize=ReleaseFast \
+        -Doptimize=fast \
         -Dcpu=baseline \
         -fno-sys=gtk4-layer-shell
       cp -rp zig-out/* $CRAFT_PART_INSTALL/
