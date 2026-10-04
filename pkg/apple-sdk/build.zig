@@ -22,7 +22,8 @@ pub const Cache = struct {
             library: []const u8,
         },
         cross: struct {
-            libc: std.Build.LazyPath,
+            libc: ?std.Build.LazyPath = null,
+            system_include: std.Build.LazyPath,
         },
     };
 
@@ -141,18 +142,10 @@ pub fn pathsForTarget(b: *std.Build, target: std.Target) !Cache.Value {
             zig_lib_path, "libc", "include", "any-darwin-any",
         });
 
-        const wf = b.addWriteFiles();
-        const path = wf.add("libc.txt", b.fmt(
-            \\include_dir={s}
-            \\sys_include_dir={s}
-            \\crt_dir=
-            \\msvc_lib_dir=
-            \\kernel32_lib_dir=
-            \\gcc_dir=
-            \\
-        , .{ include_dir, include_dir }));
-
-        gop.value_ptr.* = .{ .cross = .{ .libc = path } };
+        // Headers alone are not a libc installation with a Darwin SDK.
+        gop.value_ptr.* = .{ .cross = .{
+            .system_include = .{ .cwd_relative = include_dir },
+        } };
     }
 
     return gop.value_ptr.* orelse return switch (target.os.tag) {
@@ -211,7 +204,7 @@ pub fn addPaths(
             step.root_module.addLibraryPath(.{ .cwd_relative = native.library });
         },
         .cross => |cross| {
-            step.setLibCFile(cross.libc);
+            step.root_module.addSystemIncludePath(cross.system_include);
         },
     }
 }

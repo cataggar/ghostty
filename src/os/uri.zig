@@ -15,6 +15,12 @@ pub const ParseOptions = struct {
 
 pub const ParseError = std.Uri.ParseError || error{InvalidMacAddress};
 
+/// OSC 7 also accepts MAC addresses and non-DNS hostnames.
+pub fn rawHost(uri: std.Uri, buffer: []u8) error{ UriMissingHost, HostNameTooLong }![]const u8 {
+    const component = uri.host orelse return error.UriMissingHost;
+    return component.toRaw(buffer) catch return error.HostNameTooLong;
+}
+
 /// Parses a URI from the given string.
 ///
 /// This extends std.Uri.parse with some additional ParseOptions.
@@ -142,6 +148,18 @@ test "parse: mac_address" {
         "file://zz:zz:zz:zz:zz:zz/path",
         .{ .mac_address = true },
     ));
+}
+
+test "raw host preserves OSC 7 hosts without DNS validation" {
+    const testing = std.testing;
+    var buffer: [std.Io.net.HostName.max_len]u8 = undefined;
+    const mac = try parse("file://ab:cd:ef:ab:cd:ef/path", .{ .mac_address = true });
+    try testing.expectEqualStrings("ab:cd:ef:ab:cd:ef", try rawHost(mac, &buffer));
+    const escaped = try parse("file://host%5Fname/path", .{});
+    try testing.expectEqualStrings("host_name", try rawHost(escaped, &buffer));
+    try testing.expectError(error.UriMissingHost, rawHost(try parse("file:/path", .{}), &buffer));
+    var small: [2]u8 = undefined;
+    try testing.expectError(error.HostNameTooLong, rawHost(escaped, &small));
 }
 
 test "parse: raw_path" {

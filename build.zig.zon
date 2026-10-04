@@ -15,26 +15,26 @@
         // Zig libs
         .libxev = .{
             // mitchellh/libxev
-            .url = "git+https://github.com/cataggar/libxev#f4a459f2083b41aa2c390bd95874df2a26c5d166",
+            .url = "git+https://github.com/cataggar/libxev#88b57b3ea7499ce3f63676d43e536a3d4d329732",
             .hash = "libxev-0.0.0-86vtcyERFABbCzzUhLIrgk5YHfQlwvllAmDH2oJ6R9O2",
             .lazy = true,
         },
         .vaxis = .{
             // rockorager/libvaxis
-            .url = "git+https://github.com/cataggar/libvaxis#6acfbb38e01ab97c4d9e78bcdcace31bc2d49e4c",
+            .url = "git+https://github.com/cataggar/libvaxis#ba65f672e6f896d35f5492554ccb6d35669611af",
             .hash = "vaxis-0.6.0-BWNV_GXbCQANIbo3rFBY-oN7PeX9BF2HcnIIv8UAU4YY",
             .lazy = true,
         },
         .z2d = .{
             // vancluever/z2d
-            .url = "git+https://github.com/cataggar/z2d#4e4f7ea5ef5ae9b9b279c976eccd5be93ad6d98c",
+            .url = "git+https://github.com/cataggar/z2d#f95bbb68bc806fada2b6cd2f2fc870e99baa89d2",
             .hash = "z2d-0.12.1-j5P_HrY8EQB5PGNmqaLixFkk-Afa5GIMWEfLVfHBsvp6",
             .lazy = true,
         },
         .zig_objc = .{
             // mitchellh/zig-objc
-            .url = "https://deps.files.ghostty.org/zig_objc-c8de82ff80281215ad92900866dab7103a8efa8b.tar.gz",
-            .hash = "zig_objc-0.0.0-Ir_Sp9gsAQCPAJc0oF5xoWePHWP6Y6tCphDeyNUThJoi",
+            .url = "git+https://github.com/cataggar/zig-objc#65e6be111c4fcf21da8a3fd056933591977224dc",
+            .hash = "zig_objc-0.0.0-Ir_Sp2c1AQBOstFPddSDfLrYvDUTxS3eGtUcSV9RZqYU",
             .lazy = true,
         },
         .zig_js = .{
@@ -56,8 +56,8 @@
         },
         .zf = .{
             // natecraddock/zf
-            .url = "git+https://github.com/cataggar/zf#c6d9122832234e921893a421b7ac74e2c2a2f5a7",
-            .hash = "zf-0.11.0-OIRy8WSRAACC0Q-iJ05HTKKryXbEZnQM53NRFWkZWovS",
+            .url = "git+https://github.com/cataggar/zf#089d6d0f4d3aa798a1dcfa1cd97615baf366c7b2",
+            .hash = "zf-0.11.0-OIRy8WSRAAD8xkFtR8DkwybRkHDEwO4ScQQdUTda_Way",
             .lazy = true,
         },
         .gobject = .{

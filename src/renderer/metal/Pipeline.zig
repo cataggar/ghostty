@@ -152,13 +152,13 @@ pub fn deinit(self: *const Self) void {
 }
 
 fn autoAttribute(T: type, attrs: objc.Object) void {
-    inline for (@typeInfo(T).@"struct".fields, 0..) |field, i| {
-        const offset = @offsetOf(T, field.name);
+    inline for (@typeInfo(T).@"struct".field_names, @typeInfo(T).@"struct".field_types, 0..) |name, Field, i| {
+        const offset = @offsetOf(T, name);
 
-        const FT = switch (@typeInfo(field.type)) {
+        const FT = switch (@typeInfo(Field)) {
             .@"struct" => |e| e.backing_integer.?,
             .@"enum" => |e| e.tag_type,
-            else => field.type,
+            else => Field,
         };
 
         // Very incomplete list, expand as necessary.

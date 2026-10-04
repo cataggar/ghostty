@@ -62,8 +62,8 @@ pub const Preparation = enum {
 };
 
 pub fn isError(err: anyerror) bool {
-    inline for (@typeInfo(Error).error_set.?) |field| {
-        if (err == @field(Error, field.name)) return true;
+    inline for (@typeInfo(Error).error_set.error_names.?) |field| {
+        if (err == @field(Error, field)) return true;
     }
     return false;
 }

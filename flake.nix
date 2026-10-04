@@ -72,6 +72,24 @@
       inherit optimize;
       revision = self.shortRev or self.dirtyShortRev or "dirty";
     };
+
+    zig017 = pkgs: let
+      system = pkgs.stdenv.hostPlatform.system;
+      hashes = {
+        aarch64-linux = "9e8d11661d4ae3bd57702a3832781e23ad151dde5798e16a5ccd503f65234ff8";
+        aarch64-darwin = "b607e9b9234790a008116ae5bdb71c6243b84b9fb42a53a9e70fde41c06c536a";
+        x86_64-linux = "1cbe9df9f27e6b78d14ccbca43b6703a404ef79ef1c463de901d7f088d4e2026";
+        x86_64-darwin = "4f9a1c5269aa17ebda5e6d3c2b89d6cbf36f7d2b22a0306e9ab98f25f95529c6";
+      };
+      archiveSystem = lib.replaceStrings ["darwin"] ["macos"] system;
+    in
+      zig.packages.${system}."0.16.0".overrideAttrs (_: {
+        version = "0.17.0";
+        src = pkgs.fetchurl {
+          url = "https://github.com/cataggar/zig/releases/download/v0.17.0/zig-${archiveSystem}-0.17.0.tar.xz";
+          sha256 = hashes.${system};
+        };
+      });
   in {
     devShells = forAllPlatforms (pkgs: {
       default =
@@ -95,7 +113,7 @@
           libadwaita = pkgs.libadwaita.override {appstream = appstream;};
           blueprint-compiler = pkgs.blueprint-compiler.override {libadwaita = libadwaita;};
         in {
-          zig = zig.packages.${pkgs.stdenv.hostPlatform.system}."0.16.0";
+          zig = zig017 pkgs;
           wraptest = pkgs.callPackage ./nix/pkgs/wraptest.nix {};
           zon2nix = zon2nix;
 

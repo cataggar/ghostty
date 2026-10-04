@@ -90,17 +90,18 @@ pub fn addPaths(b: *std.Build, step: *std.Build.Step.Compile) !void {
             "v1",
         });
 
-        const libc_txt = b.fmt(
-            \\include_dir={s}
-            \\sys_include_dir={s}
-            \\crt_dir={s}
-            \\msvc_lib_dir=
-            \\kernel32_lib_dir=
-            \\gcc_dir=
-        , .{ include_dir, sys_include_dir, c_runtime_dir });
+        const libc: std.zig.LibCInstallation = .{
+            .include_dir = include_dir,
+            .sys_include_dir = sys_include_dir,
+            .crt_dir = c_runtime_dir,
+            .cc_dir = c_runtime_dir,
+        };
+        var libc_txt: std.Io.Writer.Allocating = .init(b.allocator);
+        defer libc_txt.deinit();
+        try libc.render(&libc_txt.writer);
 
         const wf = b.addWriteFiles();
-        const libc_path = wf.add("libc.txt", libc_txt);
+        const libc_path = wf.add("libc.txt", libc_txt.written());
 
         gop.value_ptr.* = .{
             .libc = libc_path,

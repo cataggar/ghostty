@@ -1022,7 +1022,7 @@ const Subprocess = struct {
         // We have to copy the cwd because there is no guarantee that
         // pointers in full_config remain valid.
         const cwd: ?[:0]u8 = if (cfg.working_directory) |cwd|
-            try alloc.dupeZ(u8, cwd)
+            try alloc.dupeSentinel(u8, cwd, 0)
         else
             null;
 
@@ -2181,14 +2181,14 @@ fn execCommandWithPolicy(
         try args.append(alloc, "/usr/bin/login");
         if (hush) try args.append(alloc, "-q");
         try args.append(alloc, "-flp");
-        try args.append(alloc, try alloc.dupeZ(u8, username));
+        try args.append(alloc, try alloc.dupeSentinel(u8, username, 0));
 
         switch (command) {
             // Direct args can be passed directly to login, since
             // login uses execvp we don't need to worry about PATH
             // searching.
             .direct => |v| for (v) |arg| {
-                try args.append(alloc, try alloc.dupeZ(u8, arg));
+                try args.append(alloc, try alloc.dupeSentinel(u8, arg, 0));
             },
 
             .shell => |v| {
@@ -2251,11 +2251,11 @@ fn execCommandWithPolicy(
                             try alloc.dupe(u8, v)
                     else
                         try alloc.dupe(u8, v);
-                    try args.append(alloc, try alloc.dupeZ(u8, argv0));
+                    try args.append(alloc, try alloc.dupeSentinel(u8, argv0, 0));
                 } else {
                     var it = std.mem.tokenizeAny(u8, v, " \t");
                     while (it.next()) |tok| {
-                        try args.append(alloc, try alloc.dupeZ(u8, tok));
+                        try args.append(alloc, try alloc.dupeSentinel(u8, tok, 0));
                     }
                 }
                 break :shell try args.toOwnedSlice(alloc);
@@ -2285,7 +2285,7 @@ const TestLaunchAccount = struct {
         calls += 1;
         if (fail) return error.IdentityUnavailable;
         var result = entry;
-        if (entry.name) |name| result.name = try alloc.dupeZ(u8, name);
+        if (entry.name) |name| result.name = try alloc.dupeSentinel(u8, name, 0);
         return result;
     }
 };
@@ -2442,10 +2442,10 @@ test "launch policy pure successful login argv owns source strings" {
             var source = ArenaAllocator.init(std.testing.allocator);
             defer source.deinit();
             const alloc = source.allocator();
-            TestLaunchAccount.entry.name = try alloc.dupeZ(u8, "owned-account");
+            TestLaunchAccount.entry.name = try alloc.dupeSentinel(u8, "owned-account", 0);
             const argv = try alloc.alloc([:0]const u8, 2);
-            argv[0] = try alloc.dupeZ(u8, "/owned space'/program");
-            argv[1] = try alloc.dupeZ(u8, "owned argument");
+            argv[0] = try alloc.dupeSentinel(u8, "/owned space'/program", 0);
+            argv[1] = try alloc.dupeSentinel(u8, "owned argument", 0);
             const result = try prepareCommandArgs(
                 arena.allocator(),
                 .{ .direct = argv },

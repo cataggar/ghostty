@@ -48,18 +48,21 @@ See the [documentation](https://ghostty.org/docs) on the Ghostty website.
 
 ### Android fork compiler migration
 
-The Zig 0.17 migration is a **draft, not an adoption-ready dependency pin**.
-It preserves the Android branch and its embedded-app fixes. Android
-`ghostty-vt` and macOS `GhosttyKit.xcframework` plus `zig-out/share` must
+This Android branch requires **Zig 0.17.0** and preserves its embedded-app fixes.
+Android `ghostty-vt` and macOS `GhosttyKit.xcframework` plus `zig-out/share` must
 continue to come from the same exact checkout.
 
-The VT libraries and C ABI schema build on x86_64 Linux. The full native
-application still needs configuration/CLI reflection, sentinel-allocation and
-renderer-layout migrations. Full VT test acceptance is also outstanding.
-Android validation requires an installed NDK; macOS acceptance requires a
-native macOS 15+ host, Xcode and the Metal toolchain. Do not treat a Linux VT
-build as GhosttyKit acceptance. See [HACKING.md](HACKING.md) for the compiler,
-dependency and validation details.
+The Linux VT libraries, full embedded C ABI/header/documentation build, native
+headless tests, all four Android API-26 ABI libraries and macOS-15 VT cross
+libraries have been validated locally. Real Android builds require an NDK
+(`ANDROID_NDK_HOME`); the native floors are Linux 5.10 and macOS 15.
+
+GhosttyKit acceptance still requires a native macOS host, Xcode and the Metal
+toolchain. GPU, native macOS/AArch64 and Android-device runtime gates remain
+open in [cataggar/droid#377](https://github.com/cataggar/droid/issues/377).
+Neither a Linux embedded-library build nor a macOS VT cross-build establishes
+those gates. See [HACKING.md](HACKING.md) for exact source pins and validation
+limits.
 
 ### Controlled launch preparation
 
