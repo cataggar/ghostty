@@ -177,6 +177,7 @@ pub fn spirvFromGlsl(
         .forward_compatible = 0,
         .messages = c.GLSLANG_MSG_DEFAULT_BIT,
         .resource = c.glslang_default_resource(),
+        .callbacks = .{},
     };
 
     const shader = try glslang.Shader.create(&input);

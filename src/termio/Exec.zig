@@ -761,11 +761,7 @@ pub const Config = struct {
 };
 
 const Subprocess = struct {
-    const c = @cImport({
-        @cInclude("errno.h");
-        @cInclude("signal.h");
-        @cInclude("unistd.h");
-    });
+    const c = @import("posix-c");
 
     arena: std.heap.ArenaAllocator,
     cwd: ?[:0]const u8,
@@ -2356,7 +2352,7 @@ test "launch policy pure controlled login and identity rejection" {
     try testing.expectEqual(@as(usize, 1), TestLaunchAccount.calls);
     try testing.expectEqual(@as(usize, 0), TestLaunchHush.calls);
 
-    for ([_]?[:0]const u8{ null, "", "-account", "a\x00b", "a" ** 256 }) |name| {
+    for ([_]?[:0]const u8{ null, "", "-account", "a\x00b", @import("../comptime_string.zig").repeat("a", 256) }) |name| {
         TestLaunchAccount.entry.name = name;
         try testing.expectError(error.LaunchIdentityInvalid, prepareCommandArgs(
             arena.allocator(),
@@ -2900,10 +2896,7 @@ test "input quiescence real PTY partial write teardown Linux io_uring" {
 
 fn testPartialWrite(stop_after_partial: bool) !void {
     const testing = std.testing;
-    const c = @cImport({
-        @cInclude("termios.h");
-        @cInclude("fcntl.h");
-    });
+    const c = @import("posix-c");
     var pty = try Pty.open(.{});
     defer pty.deinit();
     defer _ = posix.system.close(pty.slave);

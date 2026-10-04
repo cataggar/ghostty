@@ -23,7 +23,7 @@ pub fn drawArraysInstanced(
     primcount: c.GLsizei,
 ) !void {
     glad.context.DrawArraysInstanced.?(
-        @intCast(@intFromEnum(mode)),
+        @intCast(@backingInt(mode)),
         first,
         count,
         primcount,

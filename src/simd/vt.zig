@@ -209,7 +209,7 @@ test "decode no escape" {
 
     // TODO: many more test cases
     {
-        const str = "hello" ** 128;
+        const str = @import("../comptime_string.zig").repeat("hello", 128);
         try testing.expectEqual(DecodeResult{
             .consumed = str.len,
             .decoded = str.len,
@@ -224,8 +224,8 @@ test "decode ASCII to escape" {
 
     // TODO: many more test cases
     {
-        const prefix = "hello" ** 64;
-        const str = prefix ++ "\x1b" ++ ("world" ** 64);
+        const prefix = @import("../comptime_string.zig").repeat("hello", 64);
+        const str = prefix ++ "\x1b" ++ @import("../comptime_string.zig").repeat("world", 64);
         try testing.expectEqual(DecodeResult{
             .consumed = prefix.len,
             .decoded = prefix.len,

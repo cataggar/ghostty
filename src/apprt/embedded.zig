@@ -677,7 +677,7 @@ pub const Surface = struct {
 
         const started = self.app.opts.read_clipboard(
             self.userdata,
-            @intCast(@intFromEnum(clipboard_type)),
+            @intCast(@backingInt(clipboard_type)),
             &read.request,
         );
         if (!started) {
@@ -751,7 +751,7 @@ pub const Surface = struct {
 
         self.app.opts.write_clipboard(
             self.userdata,
-            @intCast(@intFromEnum(clipboard_type)),
+            @intCast(@backingInt(clipboard_type)),
             array.ptr,
             array.len,
             confirm,

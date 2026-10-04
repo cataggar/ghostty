@@ -432,11 +432,11 @@ inline fn addFloatToInt(int: *u32, float: f64) void {
 
 /// Clamp all metrics to their allowable range.
 fn clamp(self: *Metrics) void {
-    inline for (std.meta.fields(Metrics)) |field| {
-        if (@hasDecl(Minimums, field.name)) {
-            @field(self, field.name) = @max(
-                @field(self, field.name),
-                @field(Minimums, field.name),
+    inline for (@typeInfo(Metrics).@"struct".field_names) |name| {
+        if (@hasDecl(Minimums, name)) {
+            @field(self, name) = @max(
+                @field(self, name),
+                @field(Minimums, name),
             );
         }
     }
@@ -588,13 +588,13 @@ pub const Modifier = union(enum) {
 
 /// Key is an enum of all the available metrics keys.
 pub const Key = key: {
-    const field_infos = std.meta.fields(Metrics);
-    var names: [field_infos.len][]const u8 = undefined;
-    var raw_values: [field_infos.len]comptime_int = undefined;
+    const info = @typeInfo(Metrics).@"struct";
+    var names: [info.field_names.len][]const u8 = undefined;
+    var raw_values: [info.field_names.len]comptime_int = undefined;
     var count: usize = 0;
-    for (field_infos, &names, &raw_values, 0..) |field, *name, *raw, i| {
-        if (field.type != u32 and field.type != i32 and field.type != f64) continue;
-        name.* = field.name;
+    for (info.field_names, info.field_types, &names, &raw_values, 0..) |field_name, TField, *name, *raw, i| {
+        if (TField != u32 and TField != i32 and TField != f64) continue;
+        name.* = field_name;
         raw.* = i;
         count += 1;
     }

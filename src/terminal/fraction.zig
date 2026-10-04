@@ -114,14 +114,14 @@ test parse {
     // equal their 15-digit truncation.
     try testing.expectEqual(
         parse("0.333333333333333").?,
-        parse("0." ++ "3" ** 400).?,
+        parse("0." ++ @import("../comptime_string.zig").repeat("3", 400)).?,
     );
 
     // Out of range
     try testing.expectEqual(null, parse("1.0000001"));
     try testing.expectEqual(null, parse("2"));
     try testing.expectEqual(null, parse("255"));
-    try testing.expectEqual(null, parse("1" ** 400));
+    try testing.expectEqual(null, parse(@import("../comptime_string.zig").repeat("1", 400)));
 
     // Invalid syntax
     try testing.expectEqual(null, parse(""));

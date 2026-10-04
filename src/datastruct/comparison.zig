@@ -55,11 +55,11 @@ pub fn deepEqual(comptime T: type, old: T, new: T) bool {
 
             // If a struct doesn't declare an "equal" function, we fall back
             // to a recursive field-by-field compare.
-            inline for (info.fields) |field_info| {
+            inline for (info.field_names, info.field_types) |name, TField| {
                 if (!deepEqual(
-                    field_info.type,
-                    @field(old, field_info.name),
-                    @field(new, field_info.name),
+                    TField,
+                    @field(old, name),
+                    @field(new, name),
                 )) return false;
             }
             return true;
@@ -73,12 +73,12 @@ pub fn deepEqual(comptime T: type, old: T, new: T) bool {
             const new_tag = std.meta.activeTag(new);
             if (old_tag != new_tag) return false;
 
-            inline for (info.fields) |field_info| {
-                if (@field(tag_type, field_info.name) == old_tag) {
+            inline for (info.field_names, info.field_types) |name, TField| {
+                if (@field(tag_type, name) == old_tag) {
                     return deepEqual(
-                        field_info.type,
-                        @field(old, field_info.name),
-                        @field(new, field_info.name),
+                        TField,
+                        @field(old, name),
+                        @field(new, name),
                     );
                 }
             }
@@ -142,8 +142,8 @@ fn expectApproxEqualInner(comptime T: type, expected: T, actual: T) !void {
             }
         },
         .@"struct" => |structType| {
-            inline for (structType.fields) |field| {
-                try expectApproxEqual(@field(expected, field.name), @field(actual, field.name));
+            inline for (structType.field_names) |name| {
+                try expectApproxEqual(@field(expected, name), @field(actual, name));
             }
         },
 

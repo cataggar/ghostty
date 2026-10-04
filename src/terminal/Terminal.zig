@@ -869,7 +869,7 @@ fn printSliceFill(
                     const v: V = cps[idx..][0..lanes].*;
                     const in_range = (v >= lo) & (v <= hi);
                     if (!@reduce(.And, in_range)) {
-                        const bits: std.meta.Int(.unsigned, lanes) = @bitCast(in_range);
+                        const bits: @Int(.unsigned, lanes) = @bitCast(in_range);
                         idx += @ctz(~bits);
                         break;
                     }
@@ -3712,7 +3712,7 @@ pub fn printAttributes(self: *Terminal, buf: []u8) ![]const u8 {
         // Preserve underline styles. Kind of a hack to special case 4
         // here but its easier than changing how we do all attributes.
         if (attr == 4 and pen.flags.underline != .single) {
-            try writer.print(";4:{}", .{@intFromEnum(pen.flags.underline)});
+            try writer.print(";4:{}", .{@backingInt(pen.flags.underline)});
             continue;
         }
 

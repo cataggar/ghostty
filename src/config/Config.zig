@@ -58,9 +58,7 @@ const terminal = struct {
 const log = std.log.scoped(.config);
 
 /// Used on Unixes for some defaults.
-const c = @cImport({
-    @cInclude("unistd.h");
-});
+const c = @import("posix-c");
 
 pub const compatibility = std.StaticStringMap(
     cli.CompatibilityHandler(Config),
@@ -3696,7 +3694,7 @@ else
 /// debug builds, `false` for all others.
 ///
 /// Available since: 1.1.0
-@"gtk-opengl-debug": bool = builtin.mode == .Debug,
+@"gtk-opengl-debug": bool = builtin.mode == .debug,
 
 /// If `true`, the Ghostty GTK application will run in single-instance mode:
 /// each new `ghostty` process launched will result in a new window if there is
@@ -4706,8 +4704,8 @@ test "launch policy pure conditional late opt in rejected" {
 test "launch policy pure late opt in allocation failures prohibit fallback" {
     // Cover both a throwing parser and an iterator's deferred failure.
     for ([_]Replay.Step{
-        .{ .arg = "--title=" ++ "x" ** (64 * 1024) },
-        .{ .diagnostic = .{ .message = "x" ** (64 * 1024) } },
+        .{ .arg = "--title=" ++ @import("../comptime_string.zig").repeat("x", 64 * 1024) },
+        .{ .diagnostic = .{ .message = @import("../comptime_string.zig").repeat("x", 64 * 1024) } },
     }) |step| try testLateOptInAllocation(step);
 }
 
@@ -6341,7 +6339,7 @@ pub const Palette = struct {
     value: terminal.color.Palette = terminal.color.default,
 
     /// Keep track of which indexes were manually set by the user.
-    mask: terminal.color.PaletteMask = .initEmpty(),
+    mask: terminal.color.PaletteMask = .empty,
 
     /// ghostty_config_palette_s
     pub const C = extern struct {

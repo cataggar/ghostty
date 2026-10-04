@@ -72,9 +72,8 @@ pub fn pathsForTarget(b: *std.Build, target: std.Target) !Cache.Value {
             // SDK with #include_next, then supplies the definitions missing
             // from Zig's float.h. This can be removed once Zig's bundled Clang
             // headers implement __need_infinity_nan.
-            libc.include_dir = b.dependency("apple_sdk", .{})
-                .path("include")
-                .getPath(b);
+            libc.include_dir = try b.dependency("apple_sdk", .{}).builder.root
+                .joinString(b.allocator, "include");
 
             // Render the file compatible with the `--libc` Zig flag.
             var stream: std.Io.Writer.Allocating = .init(b.allocator);
@@ -127,7 +126,17 @@ pub fn pathsForTarget(b: *std.Build, target: std.Target) !Cache.Value {
         }
 
         // Fall back to Zig's bundled Darwin headers for libc resolution.
-        const zig_lib_path = b.graph.zig_lib_directory.path.?;
+        const cwd_path = try std.process.currentPathAlloc(b.graph.io, b.allocator);
+        defer b.allocator.free(cwd_path);
+        const zig_lib = try std.zig.findZigLibDirFromSelfExe(
+            b.allocator,
+            b.graph.io,
+            cwd_path,
+            b.graph.zig_exe,
+        );
+        defer zig_lib.handle.close(b.graph.io);
+        b.graph.poisonCache();
+        const zig_lib_path = b.graph.environ_map.get("ZIG_LIB_DIR") orelse zig_lib.path.?;
         const include_dir = b.pathJoin(&.{
             zig_lib_path, "libc", "include", "any-darwin-any",
         });

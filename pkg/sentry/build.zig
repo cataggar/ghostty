@@ -207,6 +207,23 @@ pub fn build(b: *std.Build) !void {
     }
 
     b.installArtifact(lib);
+    translate: {
+        const tc = b.lazyImport(@This(), "translate_c") orelse break :translate;
+        const dep = b.lazyDependency("translate_c", .{}) orelse break :translate;
+        const c: tc.Translator = .init(dep, .{
+            .c_source_file = b.path("c.h"),
+            .default_init = true,
+            .target = target,
+            .optimize = optimize,
+            .libc_file = if (target.result.os.tag.isDarwin()) blk: {
+                switch (try @import("apple_sdk").pathsForTarget(b, target.result)) {
+                    inline else => |paths| break :blk paths.libc,
+                }
+            } else null,
+        });
+        c.linkLibrary(lib);
+        module.addImport("sentry-c", c.mod);
+    }
 }
 
 const srcs: []const []const u8 = &.{

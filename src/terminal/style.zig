@@ -191,7 +191,7 @@ pub const Style = struct {
             .palette => |idx| palette: {
                 if (self.flags.bold) {
                     if (opts.bold) |_| {
-                        const bright_offset = @intFromEnum(color.Name.bright_black);
+                        const bright_offset = @backingInt(color.Name.bright_black);
                         if (idx < bright_offset) {
                             break :palette opts.palette[idx + bright_offset];
                         }
@@ -262,8 +262,9 @@ pub const Style = struct {
 
         var started = false;
 
-        inline for (std.meta.fields(Style)) |f| {
-            if (std.mem.eql(u8, f.name, "flags")) {
+        const info = @typeInfo(Style).@"struct";
+        inline for (info.field_names, info.field_types) |name, TField| {
+            if (std.mem.eql(u8, name, "flags")) {
                 if (started) {
                     _ = try writer.write(", ");
                 }
@@ -272,15 +273,16 @@ pub const Style = struct {
 
                 started = false;
 
-                inline for (std.meta.fields(@TypeOf(self.flags))) |ff| {
-                    const v = @as(ff.type, @field(self.flags, ff.name));
-                    const d = @as(ff.type, @field(dflt.flags, ff.name));
-                    if (ff.type == bool) {
+                const flags_info = @typeInfo(@TypeOf(self.flags)).@"struct";
+                inline for (flags_info.field_names, flags_info.field_types) |flag_name, TFlag| {
+                    const v = @as(TFlag, @field(self.flags, flag_name));
+                    const d = @as(TFlag, @field(dflt.flags, flag_name));
+                    if (TFlag == bool) {
                         if (v) {
                             if (started) {
                                 _ = try writer.write(", ");
                             }
-                            _ = try writer.print("{s}", .{ff.name});
+                            _ = try writer.print("{s}", .{flag_name});
                             started = true;
                         }
                     } else if (!std.meta.eql(v, d)) {
@@ -289,7 +291,7 @@ pub const Style = struct {
                         }
                         _ = try writer.print(
                             "{s}={any}",
-                            .{ ff.name, v },
+                            .{ flag_name, v },
                         );
                         started = true;
                     }
@@ -299,15 +301,15 @@ pub const Style = struct {
                 started = true;
                 comptime continue;
             }
-            const value = @as(f.type, @field(self, f.name));
-            const d_val = @as(f.type, @field(dflt, f.name));
+            const value = @as(TField, @field(self, name));
+            const d_val = @as(TField, @field(dflt, name));
             if (!std.meta.eql(value, d_val)) {
                 if (started) {
                     _ = try writer.write(", ");
                 }
                 _ = try writer.print(
                     "{s}={any}",
-                    .{ f.name, value },
+                    .{ name, value },
                 );
                 started = true;
             }
@@ -672,8 +674,8 @@ pub const Style = struct {
     comptime {
         assert(@sizeOf(PackedStyle) == 16);
         assert(std.meta.hasUniqueRepresentation(PackedStyle));
-        for (@typeInfo(PackedStyle.Data).@"union".fields) |field| {
-            assert(@bitSizeOf(field.type) == @bitSizeOf(PackedStyle.Data));
+        for (@typeInfo(PackedStyle.Data).@"union".field_types) |TField| {
+            assert(@bitSizeOf(TField) == @bitSizeOf(PackedStyle.Data));
         }
     }
 };

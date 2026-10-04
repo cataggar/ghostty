@@ -4,6 +4,11 @@
     .fingerprint = 0xd177b4a12f6b3b79,
     .paths = .{""},
     .dependencies = .{
+        .translate_c = .{
+            .url = "git+https://github.com/cataggar/translate-c#62d06a5d3e93c82727544e8113e4762a315ca0ed",
+            .hash = "translate_c-2.0.0-Q_BUWlpOBwBWvgGBM20tJq-GXgPio3v3UD39rXEn70KN",
+            .lazy = true,
+        },
         // getsentry/sentry-native
         .sentry = .{
             .url = "https://deps.files.ghostty.org/sentry-1220446be831adcca918167647c06c7b825849fa3fba5f22da394667974537a9c77e.tar.gz",

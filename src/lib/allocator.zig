@@ -92,7 +92,7 @@ pub const Allocator = extern struct {
         return self.vtable.alloc(
             self.ctx,
             len,
-            @intFromEnum(alignment),
+            @backingInt(alignment),
             ra,
         );
     }
@@ -109,7 +109,7 @@ pub const Allocator = extern struct {
             self.ctx,
             old_mem.ptr,
             old_mem.len,
-            @intFromEnum(alignment),
+            @backingInt(alignment),
             new_len,
             ra,
         );
@@ -127,7 +127,7 @@ pub const Allocator = extern struct {
             self.ctx,
             old_mem.ptr,
             old_mem.len,
-            @intFromEnum(alignment),
+            @backingInt(alignment),
             new_len,
             ra,
         );
@@ -144,7 +144,7 @@ pub const Allocator = extern struct {
             self.ctx,
             old_mem.ptr,
             old_mem.len,
-            @intFromEnum(alignment),
+            @backingInt(alignment),
             ra,
         );
     }
@@ -170,7 +170,7 @@ const ZigAllocator = struct {
         return zig_alloc.vtable.alloc(
             zig_alloc.ptr,
             len,
-            @enumFromInt(alignment),
+            @fromBackingInt(@intCast(alignment)),
             ra,
         );
     }
@@ -187,7 +187,7 @@ const ZigAllocator = struct {
         return zig_alloc.vtable.resize(
             zig_alloc.ptr,
             memory[0..memory_len],
-            @enumFromInt(alignment),
+            @fromBackingInt(@intCast(alignment)),
             new_len,
             ra,
         );
@@ -205,7 +205,7 @@ const ZigAllocator = struct {
         return zig_alloc.vtable.remap(
             zig_alloc.ptr,
             memory[0..memory_len],
-            @enumFromInt(alignment),
+            @fromBackingInt(@intCast(alignment)),
             new_len,
             ra,
         );
@@ -222,7 +222,7 @@ const ZigAllocator = struct {
         return zig_alloc.vtable.free(
             zig_alloc.ptr,
             memory[0..memory_len],
-            @enumFromInt(alignment),
+            @fromBackingInt(@intCast(alignment)),
             ra,
         );
     }

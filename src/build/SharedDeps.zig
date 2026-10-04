@@ -11,6 +11,28 @@ const GhosttyFrameData = @import("GhosttyFrameData.zig");
 const DistResource = @import("GhosttyDist.zig").Resource;
 const gtk_helpers = @import("gtk.zig");
 
+fn translateC(
+    b: *std.Build,
+    target: std.Build.ResolvedTarget,
+    optimize: std.lang.Optimize,
+    source: []const u8,
+) !?*std.Build.Module {
+    const translate_c = b.lazyImport(@import("../../build.zig"), "translate_c") orelse return null;
+    const dep = b.lazyDependency("translate_c", .{}) orelse return null;
+    const c: translate_c.Translator = .init(dep, .{
+        .c_source_file = b.path(source),
+        .default_init = true,
+        .target = target,
+        .optimize = optimize,
+        .libc_file = if (target.result.os.tag.isDarwin()) blk: {
+            switch (try @import("apple_sdk").pathsForTarget(b, target.result)) {
+                inline else => |paths| break :blk paths.libc,
+            }
+        } else null,
+    });
+    return c.mod;
+}
+
 config: *const Config,
 
 options: *std.Build.Step.Options,
@@ -184,26 +206,16 @@ pub fn add(
     // Every exe needs the uucode module
     step.root_module.addImport("uucode", self.uucode_mod);
 
-    // C imports for locale constants and functions
-    {
-        const c = b.addTranslateC(.{
-            .root_source_file = b.path("src/os/locale.c"),
-            .target = target,
-            .optimize = optimize,
-        });
-        if (target.result.os.tag.isDarwin()) {
-            const libc = try std.zig.LibCInstallation.findNative(
-                b.allocator,
-                b.graph.io,
-                .{
-                    .environ_map = &b.graph.environ_map,
-                    .target = &target.result,
-                    .verbose = false,
-                },
-            );
-            c.addSystemIncludePath(.{ .cwd_relative = libc.sys_include_dir.? });
+    if (try translateC(b, target, optimize, "src/os/locale.c")) |c| {
+        step.root_module.addImport("locale-c", c);
+    }
+    if (target.result.os.tag != .windows) {
+        if (try translateC(b, target, optimize, "src/os/posix.h")) |c| {
+            step.root_module.addImport("posix-c", c);
         }
-        step.root_module.addImport("locale-c", c.createModule());
+    }
+    if (try translateC(b, target, optimize, "src/stb/stb.h")) |c| {
+        step.root_module.addImport("stb-c", c);
     }
 
     // C imports needed to manage/create PTYs
@@ -212,27 +224,9 @@ pub fn add(
         .linux,
         .macos,
         => {
-            const c = b.addTranslateC(.{
-                .root_source_file = b.path("src/pty.c"),
-                .target = target,
-                .optimize = optimize,
-            });
-            switch (target.result.os.tag) {
-                .macos => {
-                    const libc = try std.zig.LibCInstallation.findNative(
-                        b.allocator,
-                        b.graph.io,
-                        .{
-                            .environ_map = &b.graph.environ_map,
-                            .target = &target.result,
-                            .verbose = false,
-                        },
-                    );
-                    c.addSystemIncludePath(.{ .cwd_relative = libc.sys_include_dir.? });
-                },
-                else => {},
+            if (try translateC(b, target, optimize, "src/pty.c")) |c| {
+                step.root_module.addImport("pty-c", c);
             }
-            step.root_module.addImport("pty-c", c.createModule());
         },
         else => {},
     }
@@ -506,7 +500,7 @@ pub fn add(
     }
 
     // Other dependencies, mostly pure Zig
-    if (b.lazyDependency("opengl", .{})) |dep| {
+    if (b.lazyDependency("opengl", .{ .target = target, .optimize = optimize })) |dep| {
         step.root_module.addImport("opengl", dep.module("opengl"));
     }
     if (b.lazyDependency("vaxis", .{
@@ -708,6 +702,12 @@ fn addGtkNg(
     const b = step.step.owner;
     const target = step.root_module.resolved_target.?;
     const optimize = step.root_module.optimize.?;
+
+    if (self.config.x11) {
+        if (try translateC(b, target, optimize, "src/apprt/gtk/winproto/x11.h")) |c| {
+            step.root_module.addImport("x11-c", c);
+        }
+    }
 
     const gobject_ = b.lazyDependency("gobject", .{
         .target = target,
@@ -1046,7 +1046,7 @@ pub fn gtkNgDistResources(
                     \\#include <adwaita.h>
                 ),
                 .target = b.graph.host,
-                .optimize = .Debug,
+                .optimize = .debug,
                 .link_system_libs = &.{
                     .{ .name = "libadwaita-1", .options = dynamic_link_opts },
                 },

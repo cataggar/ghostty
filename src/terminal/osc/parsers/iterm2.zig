@@ -52,10 +52,10 @@ const Key = enum {
 const Map = std.StaticStringMapWithEql(Key, std.ascii.eqlIgnoreCase);
 const map: Map = .initComptime(
     map: {
-        const fields = @typeInfo(Key).@"enum".fields;
-        var tmp: [fields.len]struct { [:0]const u8, Key } = undefined;
-        for (fields, 0..) |field, i| {
-            tmp[i] = .{ field.name, @enumFromInt(field.value) };
+        const info = @typeInfo(Key).@"enum";
+        var tmp: [info.field_names.len]struct { [:0]const u8, Key } = undefined;
+        for (info.field_names, info.field_values, 0..) |name, value, i| {
+            tmp[i] = .{ name, @fromBackingInt(@intCast(value)) };
         }
         break :map tmp;
     },

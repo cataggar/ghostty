@@ -619,7 +619,7 @@ pub const CellChooser = struct {
                 }
                 break :blk max_len + 4;
             };
-            cimgui.c.ImGui_SetNextItemWidth(cimgui.c.ImGui_CalcTextSize("X" ** combo_width).x);
+            cimgui.c.ImGui_SetNextItemWidth(cimgui.c.ImGui_CalcTextSize(@import("../../comptime_string.zig").repeat("X", combo_width)).x);
             if (cimgui.c.ImGui_BeginCombo(
                 "##grid_region",
                 preview.ptr,

@@ -74,31 +74,31 @@ pub fn build(b: *std.Build) !void {
 
     // Enable our `./configure` options. For bool-type fields we translate
     // it to the `LIBXML_{field}_ENABLED` C define where field is uppercased.
-    inline for (std.meta.fields(Options)) |field| {
-        const opt = b.option(bool, field.name, "Configure flag") orelse
-            @as(*const bool, @ptrCast(field.default_value_ptr.?)).*;
+    const info = @typeInfo(Options).@"struct";
+    inline for (info.field_names, info.field_attrs) |name, attrs| {
+        const opt = b.option(bool, name, "Configure flag") orelse attrs.defaultValue(bool).?;
         if (opt) {
             var nameBuf: [32]u8 = undefined;
-            const name = std.ascii.upperString(&nameBuf, field.name);
-            const define = try std.fmt.allocPrint(b.allocator, "-DLIBXML_{s}_ENABLED=1", .{name});
+            const upper_name = std.ascii.upperString(&nameBuf, name);
+            const define = try std.fmt.allocPrint(b.allocator, "-DLIBXML_{s}_ENABLED=1", .{upper_name});
             try flags.append(b.allocator, define);
 
-            if (std.mem.eql(u8, field.name, "history")) {
+            if (std.mem.eql(u8, name, "history")) {
                 try flags.appendSlice(b.allocator, &.{
                     "-DHAVE_LIBHISTORY=1",
                     "-DHAVE_LIBREADLINE=1",
                 });
             }
-            if (std.mem.eql(u8, field.name, "mem_debug")) {
+            if (std.mem.eql(u8, name, "mem_debug")) {
                 try flags.append(b.allocator, "-DDEBUG_MEMORY_LOCATION=1");
             }
-            if (std.mem.eql(u8, field.name, "regexp")) {
+            if (std.mem.eql(u8, name, "regexp")) {
                 try flags.append(b.allocator, "-DLIBXML_UNICODE_ENABLED=1");
             }
-            if (std.mem.eql(u8, field.name, "run_debug")) {
+            if (std.mem.eql(u8, name, "run_debug")) {
                 try flags.append(b.allocator, "-DLIBXML_DEBUG_RUNTIME=1");
             }
-            if (std.mem.eql(u8, field.name, "thread")) {
+            if (std.mem.eql(u8, name, "thread")) {
                 try flags.append(b.allocator, "-DHAVE_LIBPTHREAD=1");
             }
         }

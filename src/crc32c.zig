@@ -312,7 +312,7 @@ const Software = struct {
 
 /// The standard-library implementation of the same parameter set. This is
 /// the reference the tests compare against.
-const Reference = std.hash.crc.Crc32Iscsi;
+const Reference = std.hash.crc.@"CRC-32/ISCSI";
 
 test "software slicing matches the standard library" {
     // The selected backend may be hardware, so cover the sliced software

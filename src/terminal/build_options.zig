@@ -179,16 +179,16 @@ pub const Options = struct {
 
                 // The special name "all" refers to every feature.
                 if (std.mem.eql(u8, name, "all")) {
-                    inline for (@typeInfo(Features).@"struct".fields) |field| {
-                        @field(result, field.name) = enable;
+                    inline for (@typeInfo(Features).@"struct".field_names) |field| {
+                        @field(result, field) = enable;
                     }
                     continue;
                 }
 
                 var found = false;
-                inline for (@typeInfo(Features).@"struct".fields) |field| {
-                    if (eqlName(name, field.name)) {
-                        @field(result, field.name) = enable;
+                inline for (@typeInfo(Features).@"struct".field_names) |field| {
+                    if (eqlName(name, field)) {
+                        @field(result, field) = enable;
                         found = true;
                     }
                 }
@@ -278,18 +278,18 @@ pub const Options = struct {
 
         // Feature gates, emitted as flat bools (e.g. `options.snapshot`).
         const target = m.resolved_target.?.result;
-        inline for (@typeInfo(Features).@"struct".fields) |field| {
-            var value = @field(self.features, field.name);
+        inline for (@typeInfo(Features).@"struct".field_names) |field| {
+            var value = @field(self.features, field);
 
             // Kitty graphics requires the ability to get timestamps and
             // there is no way to do that on freestanding targets, so it
             // is always disabled there regardless of the feature setting.
-            if (comptime std.mem.eql(u8, field.name, "kitty_graphics")) {
+            if (comptime std.mem.eql(u8, field, "kitty_graphics")) {
                 if (target.cpu.arch == .wasm32 and target.os.tag == .freestanding)
                     value = false;
             }
 
-            opts.addOption(bool, field.name, value);
+            opts.addOption(bool, field, value);
         }
 
         // Version information.

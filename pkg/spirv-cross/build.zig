@@ -31,6 +31,7 @@ pub fn build(b: *std.Build) !void {
         // Uncomment this if we're debugging tests
         // b.installArtifact(test_exe.?);
     }
+    var library: ?*std.Build.Step.Compile = null;
     if (b.systemIntegrationOption("spirv-cross", .{})) {
         module.linkSystemLibrary("spirv-cross-c-shared", dynamic_link_opts);
         if (test_exe) |exe| {
@@ -38,8 +39,28 @@ pub fn build(b: *std.Build) !void {
         }
     } else {
         const lib = try buildSpirvCross(b, module, target, optimize);
+        library = lib;
         b.installArtifact(lib);
         if (test_exe) |exe| exe.root_module.linkLibrary(lib);
+    }
+    translate: {
+        const tc = b.lazyImport(@This(), "translate_c") orelse break :translate;
+        const dep = b.lazyDependency("translate_c", .{}) orelse break :translate;
+        const c: tc.Translator = .init(dep, .{
+            .c_source_file = b.path("c.h"),
+            .default_init = true,
+            .target = target,
+            .optimize = optimize,
+            .libc_file = if (target.result.os.tag.isDarwin()) blk: {
+                switch (try @import("apple_sdk").pathsForTarget(b, target.result)) {
+                    inline else => |paths| break :blk paths.libc,
+                }
+            } else null,
+            .link_system_libs = if (library == null) &.{.{ .name = "spirv-cross-c-shared" }} else &.{},
+        });
+        if (library) |lib| c.linkLibrary(lib);
+        module.addImport("spirv-cross-c", c.mod);
+        if (test_exe) |exe| exe.root_module.addImport("spirv-cross-c", c.mod);
     }
 }
 
@@ -47,7 +68,7 @@ fn buildSpirvCross(
     b: *std.Build,
     module: *std.Build.Module,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
 ) !*std.Build.Step.Compile {
     const lib = b.addLibrary(.{
         .name = "spirv_cross",

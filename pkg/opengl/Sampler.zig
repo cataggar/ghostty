@@ -30,7 +30,7 @@ pub fn parameter(
     switch (@TypeOf(value)) {
         c.GLint => glad.context.SamplerParameteri.?(
             self.id,
-            @intFromEnum(name),
+            @backingInt(name),
             value,
         ),
         else => unreachable,

@@ -1031,7 +1031,7 @@ const KittySequence = struct {
         if (self.event != .none and self.event != .press) {
             try writer.print(
                 ";{d}:{d}",
-                .{ mods, @intFromEnum(self.event) },
+                .{ mods, @backingInt(self.event) },
             );
             emit_prior = true;
         } else if (mods > 1) {
@@ -1076,7 +1076,7 @@ const KittySequence = struct {
         if (self.event != .none) {
             return try writer.print("\x1B[1;{d}:{d}{c}", .{
                 mods,
-                @intFromEnum(self.event),
+                @backingInt(self.event),
                 self.final,
             });
         }

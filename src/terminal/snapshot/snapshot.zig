@@ -325,7 +325,7 @@ pub const Decoder = struct {
             };
         };
 
-        var routed: std.EnumSet(TerminalScreenKey) = .initEmpty();
+        var routed: std.EnumSet(TerminalScreenKey) = .empty;
         var history_rows: std.EnumMap(TerminalScreenKey, u64) = .init(.{});
         for (0..screen_count) |_| {
             var decoded = try screen.decode(
@@ -375,7 +375,7 @@ pub const Decoder = struct {
 
         self.state = .{ .history = .{
             .generations = generations,
-            .routed = .initEmpty(),
+            .routed = .empty,
             .pending = screen_count,
             .current = null,
             .cols = result.cols,

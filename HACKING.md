@@ -26,6 +26,57 @@ When you're developing Ghostty, it's very likely that you will want to build a
 _debug_ build to diagnose issues more easily. This is already the default for
 Zig builds, so simply run `zig build` **without any `-Doptimize` flags**.
 
+## Android fork: Zig 0.17 draft
+
+This compiler migration requires Zig 0.17.0. Optimizer options are now
+`debug`, `safe`, `fast` and `small`. Its approved native floors are macOS 15
+and Linux 5.10; Android API levels and ABIs are not changed.
+
+The Android branch retains the fixes through `7776515e8`, including the
+`84d51b6dc` Metal content-scale fix. Downstream Android and macOS consumers
+must pin the same checkout: the Zig VT module, `macos/GhosttyKit.xcframework`,
+and installed `zig-out/share` resources are not independent dependencies.
+The xcframework/header/resource build paths remain enabled.
+
+All C translation uses the GitHub-only `cataggar/translate-c` revision
+`62d06a5d3e93c82727544e8113e4762a315ca0ed`. New C imports are build-defined
+modules, requesting default scalar field initialization and explicitly
+initializing nested callback records that the former `@cImport` zeroed.
+The compiler-only uucode pin is the already-merged
+`d500967026220f5e283088dc69e95aa79cdaa5a0`, not its Unicode 18 branch.
+The minimal libxev, Vaxis, z2d, zf and zigimg ports are separate scoped PRs;
+the manifest records exact candidate commits and verified hashes.
+
+VT test modules retain every feature and enable their required tracked-pin
+integrity checks even when built with `-Doptimize=safe`. Production module
+options are unchanged. The ordinary unfiltered `test-lib-vt` steps are not
+disabled or narrowed.
+
+Current acceptance on x86_64 Linux, always building with `-j2`:
+
+| Check | Result |
+| --- | --- |
+| Native VT static/shared libraries | Passed |
+| Existing `test-lib-vt-schema` | Passed |
+| Public VT ABI manifest compared with untouched Zig 0.16 baseline | Identical |
+| Relative custom install prefix | Passed; generated metadata records an absolute prefix |
+| VT library helper tests | Passed, 127 tests across both modules |
+| Two focused PageList regression filters | Passed, 61 tests across both modules |
+| Full debug VT suites | Not completed; untouched Zig 0.16 baseline also exceeded a 15-minute run budget |
+| Full optimized VT suites | Compilation exceeded a 15-minute budget; no test pass claimed |
+| libxev | 142 passed, four existing skips |
+| Vaxis | 164 passed |
+| z2d | 176 passed |
+| zf, including TUI | 13 passed |
+| zigimg with upstream fixtures installed | 494 passed, three existing skips |
+| Full native application/test artifact | Still fails in unported configuration/CLI and renderer APIs |
+| Android `aarch64-linux-android.26` VT build | Blocked by `AndroidNDKNotFound` |
+| Native GhosttyKit/Xcode/Metal acceptance | Unavailable on the Linux host; required before adoption |
+
+No hosted workflows were dispatched, no device was modified, and no fetched
+package-cache source was patched. This draft must remain unmerged until the
+missing compiler and native acceptance gates are completed.
+
 There are many more build steps than just `zig build`, some of which are listed
 here:
 

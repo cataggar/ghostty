@@ -449,15 +449,15 @@ fn initLibApple(
         "/bin/ln",
         "-sf",
         real_name,
-        b.getInstallPath(.lib, soname),
     });
+    soname_install.addFileArg(b.graph.path(.install_lib, soname));
     soname_install.step.dependOn(&artifact_install.step);
     const unversioned_install = b.addSystemCommand(&.{
         "/bin/ln",
         "-sf",
         soname,
-        b.getInstallPath(.lib, "libghostty-vt.dylib"),
     });
+    unversioned_install.addFileArg(b.graph.path(.install_lib, "libghostty-vt.dylib"));
     unversioned_install.step.dependOn(&soname_install.step);
 
     // The native link is a Run step rather than a Compile step, so install the
@@ -514,7 +514,7 @@ fn pkgConfigFiles(
     const requires_private = requiresPrivate(b);
 
     return .{
-        .shared = wf.add("libghostty-vt.pc", b.fmt(
+        .shared = @import("InstallPrefix.zig").substitute(b, wf.add("libghostty-vt.pc", b.fmt(
             \\prefix={s}
             \\includedir=${{prefix}}/include
             \\libdir=${{prefix}}/lib
@@ -527,8 +527,8 @@ fn pkgConfigFiles(
             \\Libs: -L${{libdir}} -lghostty-vt
             \\Libs.private: {s}
             \\Requires.private: {s}
-        , .{ b.install_prefix, zig.version, libs_private, requires_private })),
-        .static = wf.add("libghostty-vt-static.pc", b.fmt(
+        , .{ "@GHOSTTY_INSTALL_PREFIX@", zig.version, libs_private, requires_private }))),
+        .static = @import("InstallPrefix.zig").substitute(b, wf.add("libghostty-vt-static.pc", b.fmt(
             \\prefix={s}
             \\includedir=${{prefix}}/include
             \\libdir=${{prefix}}/lib
@@ -542,12 +542,12 @@ fn pkgConfigFiles(
             \\Libs.private: {s}
             \\Requires.private: {s}
         , .{
-            b.install_prefix,
+            "@GHOSTTY_INSTALL_PREFIX@",
             zig.version,
             staticLibraryName(os_tag),
             libs_private,
             requires_private,
-        })),
+        }))),
     };
 }
 
@@ -610,7 +610,7 @@ pub fn xcframework(
 
     return XCFrameworkStep.create(b, .{
         .name = "ghostty-vt",
-        .out_path = b.pathJoin(&.{ b.install_prefix, "lib/ghostty-vt.xcframework" }),
+        .out_path = b.graph.path(.install_lib, "ghostty-vt.xcframework"),
         .libraries = libraries[0..lib_count],
     });
 }

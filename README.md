@@ -46,6 +46,21 @@ See the [download page](https://ghostty.org/download) on the Ghostty website.
 
 See the [documentation](https://ghostty.org/docs) on the Ghostty website.
 
+### Android fork compiler migration
+
+The Zig 0.17 migration is a **draft, not an adoption-ready dependency pin**.
+It preserves the Android branch and its embedded-app fixes. Android
+`ghostty-vt` and macOS `GhosttyKit.xcframework` plus `zig-out/share` must
+continue to come from the same exact checkout.
+
+The VT libraries and C ABI schema build on x86_64 Linux. The full native
+application still needs configuration/CLI reflection, sentinel-allocation and
+renderer-layout migrations. Full VT test acceptance is also outstanding.
+Android validation requires an installed NDK; macOS acceptance requires a
+native macOS 15+ host, Xcode and the Metal toolchain. Do not treat a Linux VT
+build as GhosttyKit acceptance. See [HACKING.md](HACKING.md) for the compiler,
+dependency and validation details.
+
 ### Controlled launch preparation
 
 macOS embedders can opt into `command-launch-policy = controlled` through the

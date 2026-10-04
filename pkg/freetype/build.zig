@@ -36,6 +36,7 @@ pub fn build(b: *std.Build) !void {
 
     module.addIncludePath(b.path(""));
 
+    var library: ?*std.Build.Step.Compile = null;
     if (b.systemIntegrationOption("freetype", .{})) {
         module.linkSystemLibrary("freetype2", dynamic_link_opts);
         if (test_exe) |exe| {
@@ -50,10 +51,32 @@ pub fn build(b: *std.Build) !void {
 
             .dynamic_link_opts = dynamic_link_opts,
         });
+        library = lib;
 
         if (test_exe) |exe| {
             exe.root_module.linkLibrary(lib);
         }
+    }
+
+    translate: {
+        const tc = b.lazyImport(@This(), "translate_c") orelse break :translate;
+        const dep = b.lazyDependency("translate_c", .{}) orelse break :translate;
+        const c: tc.Translator = .init(dep, .{
+            .c_source_file = b.path("c.h"),
+            .default_init = true,
+            .target = target,
+            .optimize = optimize,
+            .libc_file = if (target.result.os.tag.isDarwin()) blk: {
+                switch (try @import("apple_sdk").pathsForTarget(b, target.result)) {
+                    inline else => |paths| break :blk paths.libc,
+                }
+            } else null,
+            .link_system_libs = if (library == null) &.{.{ .name = "freetype2" }} else &.{},
+        });
+        c.addIncludePath(b.path(""));
+        if (library) |lib| c.linkLibrary(lib);
+        module.addImport("freetype-c", c.mod);
+        if (test_exe) |exe| exe.root_module.addImport("freetype-c", c.mod);
     }
 }
 

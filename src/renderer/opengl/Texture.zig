@@ -50,10 +50,10 @@ pub fn init(
     {
         const texbind = tex.bind(opts.target) catch return error.OpenGLFailed;
         defer texbind.unbind();
-        texbind.parameter(.WrapS, @intFromEnum(opts.wrap_s)) catch return error.OpenGLFailed;
-        texbind.parameter(.WrapT, @intFromEnum(opts.wrap_t)) catch return error.OpenGLFailed;
-        texbind.parameter(.MinFilter, @intFromEnum(opts.min_filter)) catch return error.OpenGLFailed;
-        texbind.parameter(.MagFilter, @intFromEnum(opts.mag_filter)) catch return error.OpenGLFailed;
+        texbind.parameter(.WrapS, @backingInt(opts.wrap_s)) catch return error.OpenGLFailed;
+        texbind.parameter(.WrapT, @backingInt(opts.wrap_t)) catch return error.OpenGLFailed;
+        texbind.parameter(.MinFilter, @backingInt(opts.min_filter)) catch return error.OpenGLFailed;
+        texbind.parameter(.MagFilter, @backingInt(opts.mag_filter)) catch return error.OpenGLFailed;
         texbind.image2D(
             0,
             opts.internal_format,

@@ -203,6 +203,24 @@ pub fn build(b: *std.Build) !void {
     const tests_run = b.addRunArtifact(test_exe);
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&tests_run.step);
+    translate: {
+        const tc = b.lazyImport(@This(), "translate_c") orelse break :translate;
+        const dep = b.lazyDependency("translate_c", .{}) orelse break :translate;
+        const c: tc.Translator = .init(dep, .{
+            .c_source_file = b.path("c.h"),
+            .default_init = true,
+            .target = target,
+            .optimize = optimize,
+            .libc_file = if (target.result.os.tag.isDarwin()) blk: {
+                switch (try @import("apple_sdk").pathsForTarget(b, target.result)) {
+                    inline else => |paths| break :blk paths.libc,
+                }
+            } else null,
+        });
+        c.linkLibrary(lib);
+        mod.addImport("dcimgui-c", c.mod);
+        test_exe.root_module.addImport("dcimgui-c", c.mod);
+    }
 }
 
 // For dynamic linking, we prefer dynamic linking and to search by

@@ -611,7 +611,7 @@ test "WriterAdapter buffered batches small writes" {
     try adapter.interface.flush();
     try std.testing.expectEqual(@as(usize, 1), context.calls);
     try std.testing.expectEqualStrings(
-        "ab" ** 16,
+        @import("../../comptime_string.zig").repeat("ab", 16),
         context.data[0..context.len],
     );
     try std.testing.expectEqual(@as(usize, 32), adapter.offset);
@@ -652,7 +652,7 @@ test "WriterAdapter buffered splats and large writes" {
     try adapter.interface.flush();
 
     try std.testing.expectEqualStrings(
-        " " ** 40 ++ "0123456789abcdef0" ++ "xy",
+        @import("../../comptime_string.zig").repeat(" ", 40) ++ "0123456789abcdef0" ++ "xy",
         context.data[0..context.len],
     );
     try std.testing.expectEqual(

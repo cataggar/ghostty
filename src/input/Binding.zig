@@ -285,13 +285,13 @@ pub fn lessThan(_: void, lhs: Binding, rhs: Binding) bool {
 
     const lhs_key: c_int = blk: {
         switch (lhs.trigger.key) {
-            .physical => break :blk @intFromEnum(lhs.trigger.key.physical),
+            .physical => break :blk @backingInt(lhs.trigger.key.physical),
             .unicode => break :blk @intCast(lhs.trigger.key.unicode),
         }
     };
     const rhs_key: c_int = blk: {
         switch (rhs.trigger.key) {
-            .physical => break :blk @intFromEnum(rhs.trigger.key.physical),
+            .physical => break :blk @backingInt(rhs.trigger.key.physical),
             .unicode => break :blk @intCast(rhs.trigger.key.unicode),
         }
     };
@@ -2006,7 +2006,7 @@ pub const Trigger = struct {
         // then I don't want to handle this.
         var buffer: [1]u21 = undefined;
         const slice = uucode.get(.case_folding_full, cp).with(&buffer, cp);
-        var array: [3]u21 = [_]u21{0} ** 3;
+        var array: [3]u21 = @splat(0);
         @memcpy(array[0..slice.len], slice);
         return array;
     }

@@ -418,7 +418,7 @@ pub const std_options: std.Options = opts: {
     if (builtin.target.cpu.arch.isWasm()) {
         // In non-debug modes, we want to ship effectively no logging
         // warn and lower add ~200KB at the time of this comment.
-        if (builtin.mode == .Debug) {
+        if (builtin.mode == .debug) {
             options.log_level = .debug;
             options.logFn = @import("os/wasm/log.zig").log;
         } else {
@@ -456,8 +456,8 @@ pub const std_options: std.Options = opts: {
 /// development, where the roughly 160KB of binary size it costs is
 /// worth it.
 const debug_machinery: bool = builtin.is_test or switch (builtin.mode) {
-    .Debug, .ReleaseSafe => true,
-    .ReleaseFast, .ReleaseSmall => false,
+    .debug, .safe => true,
+    .fast, .small => false,
 };
 
 /// The panic handler for when this file is the root module.

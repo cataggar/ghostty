@@ -475,10 +475,11 @@ pub const Handler = struct {
         // Values are hex-encoded uppercase, matching the static map. The
         // buffer fits any name allowed above, so the print cannot fail.
         var buf: [max_tn_response_bytes]u8 = undefined;
-        self.writePty(std.fmt.bufPrintZ(
+        self.writePty(std.mem.printSentinel(
             &buf,
             "\x1bP1+r" ++ encoded_tn_key ++ "={X}\x1b\\",
             .{name},
+            0,
         ) catch unreachable);
     }
 
@@ -543,8 +544,9 @@ pub const Handler = struct {
         const func = self.effects.device_attributes orelse return;
         const attrs = func(self);
 
-        var stack = std.heap.stackFallback(128, self.terminal.gpa());
-        const alloc = stack.get();
+        var buffer: [128]u8 = undefined;
+        var stack: std.heap.BufferFirstAllocator = .init(&buffer, self.terminal.gpa());
+        const alloc = stack.allocator();
 
         var aw: std.Io.Writer.Allocating = .init(alloc);
         defer aw.deinit();
@@ -573,10 +575,10 @@ pub const Handler = struct {
                 };
 
                 var buf: [64]u8 = undefined;
-                const resp = std.fmt.bufPrintZ(&buf, "\x1B[{};{}R", .{
+                const resp = std.mem.printSentinel(&buf, "\x1B[{};{}R", .{
                     pos.y + 1,
                     pos.x + 1,
-                }) catch return;
+                }, 0) catch return;
                 self.writePty(resp);
             },
 
@@ -621,10 +623,11 @@ pub const Handler = struct {
     fn reportXtversion(self: *Handler) void {
         const version = if (self.effects.xtversion) |func| func(self) else "";
         var buf: [288]u8 = undefined;
-        const resp = std.fmt.bufPrintZ(
+        const resp = std.mem.printSentinel(
             &buf,
             "\x1BP>|{s}\x1B\\",
             .{if (version.len > 0) version else "libghostty"},
+            0,
         ) catch return;
         self.writePty(resp);
     }
@@ -632,11 +635,9 @@ pub const Handler = struct {
     fn reportSize(self: *Handler, style: csi.SizeReportStyle) void {
         // Almost all size reports will fit in 256 bytes so try that
         // on the stack before falling back to a heap allocation.
-        var stack = std.heap.stackFallback(
-            256,
-            self.terminal.gpa(),
-        );
-        const alloc = stack.get();
+        var buffer: [256]u8 = undefined;
+        var stack: std.heap.BufferFirstAllocator = .init(&buffer, self.terminal.gpa());
+        const alloc = stack.allocator();
 
         // Allocating writing to accumulate the response.
         var aw: std.Io.Writer.Allocating = .init(alloc);
@@ -751,9 +752,9 @@ pub const Handler = struct {
     fn queryKittyKeyboard(self: *Handler) void {
         // Max response is "\x1b[?31u\x00" (7 bytes): the flags are a u5 (max 31).
         var buf: [32]u8 = undefined;
-        const resp = std.fmt.bufPrintZ(&buf, "\x1b[?{}u", .{
+        const resp = std.mem.printSentinel(&buf, "\x1b[?{}u", .{
             self.terminal.screens.active.kitty_keyboard.current().int(),
-        }) catch return;
+        }, 0) catch return;
         self.writePty(resp);
     }
 
@@ -864,8 +865,9 @@ pub const Handler = struct {
     ) !void {
         if (requests.count() == 0) return;
 
-        var stack = std.heap.stackFallback(1024, self.terminal.gpa());
-        const alloc = stack.get();
+        var buffer: [1024]u8 = undefined;
+        var stack: std.heap.BufferFirstAllocator = .init(&buffer, self.terminal.gpa());
+        const alloc = stack.allocator();
         var response: std.Io.Writer.Allocating = .init(alloc);
         defer response.deinit();
         const writer = &response.writer;
@@ -924,7 +926,7 @@ pub const Handler = struct {
                         self.terminal.flags.dirty.palette = true;
                         self.terminal.colors.palette.reset(@intCast(i));
                     }
-                    mask.* = .initEmpty();
+                    mask.* = .empty;
                 },
 
                 .query => |target| {
@@ -961,7 +963,7 @@ pub const Handler = struct {
                 .background,
                 .cursor,
                 => {
-                    try writer.print("\x1b]{d};", .{@intFromEnum(dynamic)});
+                    try writer.print("\x1b]{d};", .{@backingInt(dynamic)});
                     try c.encodeRgb16(writer);
                     try writer.writeAll(terminator.string());
                 },
@@ -982,8 +984,9 @@ pub const Handler = struct {
         self: *Handler,
         request: kitty_color.OSC,
     ) !void {
-        var stack = std.heap.stackFallback(1024, self.terminal.gpa());
-        const alloc = stack.get();
+        var buffer: [1024]u8 = undefined;
+        var stack: std.heap.BufferFirstAllocator = .init(&buffer, self.terminal.gpa());
+        const alloc = stack.allocator();
         var response: std.Io.Writer.Allocating = .init(alloc);
         defer response.deinit();
         const writer = &response.writer;
@@ -1752,7 +1755,7 @@ test "XTGETTCAP TN responses" {
         std.fmt.bytesToHex("xterm-256color", .upper) ++ "\x1B\\");
 
     // A maximum-length name is still reported in full.
-    const max_name = "a" ** Handler.max_terminfo_name_bytes;
+    const max_name = @import("../comptime_string.zig").repeat("a", Handler.max_terminfo_name_bytes);
     s.handler.terminfo_name = max_name;
     s.nextSlice(tn_query);
     try S.expectResponse("\x1BP1+r" ++ std.fmt.bytesToHex("TN", .upper) ++ "=" ++
@@ -1766,7 +1769,7 @@ test "XTGETTCAP TN responses" {
         std.fmt.bytesToHex("256", .upper) ++ "\x1B\\");
 
     // As are names beyond the maximum length.
-    s.handler.terminfo_name = "a" ** (Handler.max_terminfo_name_bytes + 1);
+    s.handler.terminfo_name = @import("../comptime_string.zig").repeat("a", Handler.max_terminfo_name_bytes + 1);
     s.nextSlice(tn_query);
     try testing.expectEqual(@as(usize, 0), S.calls);
     try testing.expect(!s.handler.semantic_failure);
@@ -1849,7 +1852,7 @@ test "glyph protocol APC with write_pty callback" {
         var last_response: ?[:0]const u8 = null;
         fn writePty(_: *Handler, data: [:0]const u8) void {
             if (last_response) |old| testing.allocator.free(old);
-            last_response = testing.allocator.dupeZ(u8, data) catch @panic("OOM");
+            last_response = testing.allocator.dupeSentinel(u8, data, 0) catch @panic("OOM");
         }
     };
     S.last_response = null;
@@ -2028,7 +2031,7 @@ test "OSC color query responses" {
 
         fn writePty(_: *Handler, data: [:0]const u8) void {
             reset();
-            last_response = testing.allocator.dupeZ(u8, data) catch @panic("OOM");
+            last_response = testing.allocator.dupeSentinel(u8, data, 0) catch @panic("OOM");
         }
     };
     S.last_response = null;
@@ -2179,7 +2182,7 @@ test "kitty color protocol query responses" {
 
         fn writePty(_: *Handler, data: [:0]const u8) void {
             reset();
-            last_response = testing.allocator.dupeZ(u8, data) catch @panic("OOM");
+            last_response = testing.allocator.dupeSentinel(u8, data, 0) catch @panic("OOM");
         }
     };
     S.last_response = null;
@@ -2677,7 +2680,7 @@ test "request mode DECRQM with write_pty callback" {
             var last_response: ?[:0]const u8 = null;
             fn writePty(_: *Handler, data: [:0]const u8) void {
                 if (last_response) |old| testing.allocator.free(old);
-                last_response = testing.allocator.dupeZ(u8, data) catch @panic("OOM");
+                last_response = testing.allocator.dupeSentinel(u8, data, 0) catch @panic("OOM");
             }
         };
         S.last_response = null;

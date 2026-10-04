@@ -103,7 +103,8 @@ fn createUpdateStep(b: *std.Build) !*std.Build.Step {
             gtk_files.deinit(b.allocator);
         }
 
-        var gtk_dir = try b.build_root.handle.openDir(
+        b.graph.poisonCache();
+        var gtk_dir = try b.root.openDir(
             b.graph.io,
             "src/apprt/gtk",
             .{ .iterate = true },

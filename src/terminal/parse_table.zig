@@ -36,7 +36,7 @@ pub const Transition = struct {
 fn genTableType(comptime optional: bool) type {
     const max_u8 = std.math.maxInt(u8);
     const stateInfo = @typeInfo(State);
-    const max_state = stateInfo.@"enum".fields.len;
+    const max_state = stateInfo.@"enum".field_names.len;
     const Elem = if (optional) ?Transition else Transition;
     return [max_u8 + 1][max_state]Elem;
 }
@@ -55,8 +55,8 @@ fn genTable() Table {
 
     // anywhere transitions
     const stateInfo = @typeInfo(State);
-    inline for (stateInfo.@"enum".fields) |field| {
-        const source: State = @enumFromInt(field.value);
+    inline for (stateInfo.@"enum".field_values) |value| {
+        const source: State = @fromBackingInt(@intCast(value));
 
         // anywhere => ground
         single(&result, 0x18, source, .ground, .execute);
@@ -345,7 +345,7 @@ fn genTable() Table {
     var final: Table = undefined;
     for (0..final.len) |i| {
         for (0..final[0].len) |j| {
-            final[i][j] = result[i][j] orelse transition(@enumFromInt(j), .none);
+            final[i][j] = result[i][j] orelse transition(@fromBackingInt(@intCast(j)), .none);
         }
     }
 
@@ -353,7 +353,7 @@ fn genTable() Table {
 }
 
 fn single(t: *OptionalTable, c: u8, s0: State, s1: State, a: Action) void {
-    const s0_int = @intFromEnum(s0);
+    const s0_int = @backingInt(s0);
 
     // TODO: enable this but it thinks we're in runtime right now
     // if (t[c][s0_int]) |existing| {
