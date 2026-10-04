@@ -158,7 +158,7 @@ On macOS logging to the macOS unified log is available and enabled by default.
 Use the system `log` CLI to view Ghostty's logs: `sudo log stream --level debug --predicate 'subsystem=="com.mitchellh.ghostty"'`.
 
 Ghostty's logging can be configured in two ways. The first is by what
-optimization level Ghostty is compiled with. If Ghostty is compiled with `Debug`
+optimization level Ghostty is compiled with. If Ghostty is compiled with `debug`
 optimizations debug logs will be output to `stderr`. If Ghostty is compiled with
 any other optimization the debug logs will not be output to `stderr`.
 
