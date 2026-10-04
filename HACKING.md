@@ -86,7 +86,7 @@ Current acceptance on x86_64 Linux, always building with `-j2`:
 | VT library helper tests | Passed, 127 tests across both modules |
 | Two focused PageList regression filters | Passed, 61 tests across both modules |
 | Full debug VT suites | Not completed; untouched Zig 0.16 baseline also exceeded a 15-minute run budget |
-| Full optimized VT suites | Rerun pending after the CPU-dependent CRC reference-fixture migration |
+| Full optimized VT suites | Passed, 5594 tests and 54 existing skips; 20/20 build steps |
 | libxev | 142 passed, four existing skips |
 | Vaxis | 164 passed |
 | z2d | 176 unit tests and 85 unchanged image specs passed |
