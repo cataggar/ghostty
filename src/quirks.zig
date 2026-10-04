@@ -47,9 +47,8 @@ pub const inlineAssert = switch (builtin.mode) {
     // fixes up stack traces. `inline` causes broken stack traces. This
     // is probably a Zig compiler bug but until it is fixed we have to
     // do this for development sanity.
-    .Debug => std.debug.assert,
-
-    .ReleaseSmall, .ReleaseSafe, .ReleaseFast => (struct {
+    .debug => std.debug.assert,
+    .small, .safe, .fast => (struct {
         inline fn assert(ok: bool) void {
             if (!ok) unreachable;
         }

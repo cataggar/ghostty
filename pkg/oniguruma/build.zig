@@ -37,6 +37,7 @@ pub fn build(b: *std.Build) !void {
         b.installArtifact(test_exe.?);
     }
 
+    var library: ?*std.Build.Step.Compile = null;
     if (b.systemIntegrationOption("oniguruma", .{})) {
         module.linkSystemLibrary("oniguruma", dynamic_link_opts);
 
@@ -48,10 +49,30 @@ pub fn build(b: *std.Build) !void {
             .target = target,
             .optimize = optimize,
         });
+        library = lib;
 
         if (test_exe) |exe| {
             exe.root_module.linkLibrary(lib);
         }
+    }
+    translate: {
+        const tc = b.lazyImport(@This(), "translate_c") orelse break :translate;
+        const dep = b.lazyDependency("translate_c", .{}) orelse break :translate;
+        const c: tc.Translator = .init(dep, .{
+            .c_source_file = b.path("c.h"),
+            .default_init = true,
+            .target = target,
+            .optimize = optimize,
+            .libc_file = if (target.result.os.tag.isDarwin()) blk: {
+                switch (try @import("apple_sdk").pathsForTarget(b, target.result)) {
+                    inline else => |paths| break :blk paths.libc,
+                }
+            } else null,
+            .link_system_libs = if (library == null) &.{.{ .name = "oniguruma" }} else &.{},
+        });
+        if (library) |lib| c.linkLibrary(lib);
+        module.addImport("oniguruma-c", c.mod);
+        if (test_exe) |exe| exe.root_module.addImport("oniguruma-c", c.mod);
     }
 }
 
@@ -98,7 +119,7 @@ fn buildLib(b: *std.Build, module: *std.Build.Module, options: anytype) !*std.Bu
             .SIZEOF_INT = t.cTypeByteSize(.int),
             .SIZEOF_LONG = t.cTypeByteSize(.long),
             .SIZEOF_LONG_LONG = t.cTypeByteSize(.longlong),
-            .SIZEOF_VOIDP = t.ptrBitWidth() / t.cTypeBitSize(.char),
+            .SIZEOF_VOIDP = t.ptrBitWidth() / t.cTypeBitSize(.char).?,
         }));
 
         var flags: std.ArrayList([]const u8) = .empty;

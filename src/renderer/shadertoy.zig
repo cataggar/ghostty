@@ -177,6 +177,7 @@ pub fn spirvFromGlsl(
         .forward_compatible = 0,
         .messages = c.GLSLANG_MSG_DEFAULT_BIT,
         .resource = c.glslang_default_resource(),
+        .callbacks = .{},
     };
 
     const shader = try glslang.Shader.create(&input);
@@ -225,8 +226,8 @@ pub const SpirvLog = struct {
         const debug = try shader.getDebugInfoLog();
         self.info = "";
         self.debug = "";
-        if (info.len > 0) self.info = try self.alloc.dupeZ(u8, info);
-        if (debug.len > 0) self.debug = try self.alloc.dupeZ(u8, debug);
+        if (info.len > 0) self.info = try self.alloc.dupeSentinel(u8, info, 0);
+        if (debug.len > 0) self.debug = try self.alloc.dupeSentinel(u8, debug, 0);
     }
 
     fn fromProgram(self: *SpirvLog, program: *glslang.Program) !void {
@@ -234,8 +235,8 @@ pub const SpirvLog = struct {
         const debug = try program.getDebugInfoLog();
         self.info = "";
         self.debug = "";
-        if (info.len > 0) self.info = try self.alloc.dupeZ(u8, info);
-        if (debug.len > 0) self.debug = try self.alloc.dupeZ(u8, debug);
+        if (info.len > 0) self.info = try self.alloc.dupeSentinel(u8, info, 0);
+        if (debug.len > 0) self.debug = try self.alloc.dupeSentinel(u8, debug, 0);
     }
 };
 
@@ -343,7 +344,7 @@ fn spvCross(
         return error.SpvcFailed;
     }
 
-    return try alloc.dupeZ(u8, std.mem.sliceTo(result, 0));
+    return try alloc.dupeSentinel(u8, std.mem.sliceTo(result, 0), 0);
 }
 
 /// Convert ShaderToy shader to null-terminated glsl for testing.

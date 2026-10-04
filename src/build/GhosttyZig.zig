@@ -25,7 +25,15 @@ pub fn init(
     cfg: *const Config,
     deps: *const SharedDeps,
 ) !GhosttyZig {
-    return initInner(b, cfg, deps, "ghostty-vt", "ghostty-vt-c");
+    return initInner(b, cfg, deps, "ghostty-vt", "ghostty-vt-c", false);
+}
+
+pub fn initTests(
+    b: *std.Build,
+    cfg: *const Config,
+    deps: *const SharedDeps,
+) !GhosttyZig {
+    return initInner(b, cfg, deps, "ghostty-vt-test", "ghostty-vt-c-test", true);
 }
 
 /// Create a new GhosttyZig with modules retargeted to a different
@@ -53,6 +61,7 @@ pub fn retarget(
         retargeted_deps,
         b.fmt("ghostty-vt-{s}", .{arch_name}),
         b.fmt("ghostty-vt-c-{s}", .{arch_name}),
+        false,
     );
 }
 
@@ -62,10 +71,13 @@ fn initInner(
     deps: *const SharedDeps,
     vt_name: []const u8,
     vt_c_name: []const u8,
+    testing: bool,
 ) !GhosttyZig {
     // Terminal module build options
     var vt_options = cfg.terminalOptions(.lib, cfg.optimize);
     vt_options.artifact = .lib;
+    // Test helpers require tracked-pin integrity checks even in optimized tests.
+    if (testing) vt_options.slow_runtime_safety = true;
     // We presently don't allow Oniguruma in our Zig module at all.
     // We should expose this as a build option in the future so we can
     // conditionally do this.

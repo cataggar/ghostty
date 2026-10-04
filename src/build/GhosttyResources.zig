@@ -95,10 +95,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
                 else => mkdir_step.addArgs(&.{ "mkdir", "-p" }),
             }
 
-            mkdir_step.addArg(b.fmt(
-                "{s}/share/{s}",
-                .{ b.install_path, terminfo_share_dir },
-            ));
+            mkdir_step.addDirectoryArg(b.graph.path(.install_prefix, b.fmt("share/{s}", .{terminfo_share_dir})));
 
             try steps.append(b.allocator, &mkdir_step.step);
 
@@ -108,7 +105,7 @@ pub fn init(b: *std.Build, cfg: *const Config, deps: *const SharedDeps) !Ghostty
             const copy_step = RunStep.create(b, "copy terminfo db");
             copy_step.addArgs(&.{ "cp", "-R" });
             copy_step.addFileArg(path);
-            copy_step.addArg(b.fmt("{s}/share", .{b.install_path}));
+            copy_step.addDirectoryArg(b.graph.path(.install_prefix, "share"));
             copy_step.step.dependOn(&mkdir_step.step);
             try steps.append(b.allocator, &copy_step.step);
         }
@@ -267,21 +264,21 @@ fn addLinuxAppResources(
 
     const name = b.fmt("Ghostty{s}", .{
         switch (cfg.optimize) {
-            .Debug, .ReleaseSafe => " (Debug)",
-            .ReleaseFast, .ReleaseSmall => "",
+            .debug, .safe => " (Debug)",
+            .fast, .small => "",
         },
     });
 
     const app_id = b.fmt("com.mitchellh.ghostty{s}", .{
         switch (cfg.optimize) {
-            .Debug, .ReleaseSafe => "-debug",
-            .ReleaseFast, .ReleaseSmall => "",
+            .debug, .safe => "-debug",
+            .fast, .small => "",
         },
     });
 
     const exe_abs_path = b.fmt(
         "{s}/bin/ghostty",
-        .{b.install_prefix},
+        .{"@GHOSTTY_INSTALL_PREFIX@"},
     );
 
     // The templates that we will process. The templates are in
@@ -361,7 +358,7 @@ fn addLinuxAppResources(
         tail.setStdIn(.{ .lazy_path = tpl.getOutputFile() });
 
         const copy = b.addInstallFile(
-            tail.captureStdOut(.{}),
+            @import("InstallPrefix.zig").substitute(b, tail.captureStdOut(.{})),
             template[1],
         );
 

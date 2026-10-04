@@ -248,7 +248,7 @@ test "OSC 66: overlong UTF-8" {
 
     var p: Parser = .init(null);
 
-    const input = "66;;" ++ "bobr" ** 1025;
+    const input = "66;;" ++ @import("../../../comptime_string.zig").repeat("bobr", 1025);
     for (input) |ch| p.next(ch);
 
     try testing.expect(p.end('\x1b') == null);

@@ -24,9 +24,13 @@ pub fn build(b: *std.Build) !void {
     // If we have a VERSION file (present in source tarballs) then we
     // use that as the version source of truth. Otherwise we fall back
     // to what is in the build.zig.zon.
-    const file_version: ?[]const u8 = if (b.build_root.handle.readFileAlloc(
+    b.dependOnDirectoryContents(b.path(""));
+    if (b.root.statFile(b.graph.io, "VERSION")) |_| {
+        b.dependOnFileContents(b.path("VERSION"));
+    } else |_| {}
+    const file_version: ?[]const u8 = if (std.Io.Dir.cwd().readFileAlloc(
         b.graph.io,
-        "VERSION",
+        try b.root.joinString(b.allocator, "VERSION"),
         b.allocator,
         .limited(128),
     )) |content| std.mem.trim(
@@ -268,17 +272,15 @@ pub fn build(b: *std.Build) !void {
     // Run step
     run: {
         if (config.app_runtime != .none) {
-            const run_cmd = b.addRunArtifact(exe.exe);
-            if (b.args) |args| run_cmd.addArgs(args);
+            const run_cmd = b.addSystemCommand(&.{"env"});
 
             // Set the proper resources dir so things like shell integration
             // work correctly. If we're running `zig build run` in Ghostty,
             // this also ensures it overwrites the release one with our debug
             // build.
-            run_cmd.setEnvironmentVariable(
-                "GHOSTTY_RESOURCES_DIR",
-                b.getInstallPath(.prefix, "share/ghostty"),
-            );
+            run_cmd.addPrefixedDirectoryArg("GHOSTTY_RESOURCES_DIR=", b.graph.path(.install_prefix, "share/ghostty"));
+            run_cmd.addArtifactArg(exe.exe);
+            run_cmd.addPassthruArgs();
 
             run_step.dependOn(&run_cmd.step);
             break :run;
@@ -335,18 +337,19 @@ pub fn build(b: *std.Build) !void {
             "valgrind",
             "--leak-check=full",
             "--num-callers=50",
-            b.fmt("--suppressions={s}", .{b.pathFromRoot("valgrind.supp")}),
             "--gen-suppressions=all",
         });
+        run_cmd.addPrefixedFileArg("--suppressions=", b.path("valgrind.supp"));
         run_cmd.addArtifactArg(valgrind_exe.exe);
-        if (b.args) |args| run_cmd.addArgs(args);
+        run_cmd.addPassthruArgs();
         run_valgrind_step.dependOn(&run_cmd.step);
     }
 
     // Zig module tests
     {
+        const mod_tests = try buildpkg.GhosttyZig.initTests(b, &config, &deps);
         const mod_vt_test = b.addTest(.{
-            .root_module = mod.vt,
+            .root_module = mod_tests.vt,
             .filters = test_filters,
         });
         const mod_vt_test_run = b.addRunArtifact(mod_vt_test);
@@ -354,7 +357,7 @@ pub fn build(b: *std.Build) !void {
         test_lib_vt_build_step.dependOn(&mod_vt_test.step);
 
         const mod_vt_c_test = b.addTest(.{
-            .root_module = mod.vt_c,
+            .root_module = mod_tests.vt_c,
             .filters = test_filters,
         });
         const mod_vt_c_test_run = b.addRunArtifact(mod_vt_c_test);
@@ -371,7 +374,7 @@ pub fn build(b: *std.Build) !void {
             .root_module = b.createModule(.{
                 .root_source_file = b.path("src/main.zig"),
                 .target = config.baselineTarget(b.graph.io),
-                .optimize = .Debug,
+                .optimize = .debug,
                 .strip = false,
                 .omit_frame_pointer = false,
                 .unwind_tables = .sync,
@@ -386,7 +389,7 @@ pub fn build(b: *std.Build) !void {
         }
         _ = try deps.add(test_exe);
 
-        addGhosttyH(b, test_exe.root_module, config.baselineTarget(b.graph.io), .Debug);
+        addGhosttyH(b, test_exe.root_module, config.baselineTarget(b.graph.io), .debug);
 
         // Normal test running
         const test_run = b.addRunArtifact(test_exe);
@@ -401,9 +404,9 @@ pub fn build(b: *std.Build) !void {
             "valgrind",
             "--leak-check=full",
             "--num-callers=50",
-            b.fmt("--suppressions={s}", .{b.pathFromRoot("valgrind.supp")}),
             "--gen-suppressions=all",
         });
+        valgrind_run.addPrefixedFileArg("--suppressions=", b.path("valgrind.supp"));
         valgrind_run.addArtifactArg(test_exe);
         config.addPatchElf(test_exe, &valgrind_run.step);
         test_valgrind_step.dependOn(&valgrind_run.step);
@@ -412,17 +415,16 @@ pub fn build(b: *std.Build) !void {
     // Keep the focused artifact separate from the ordinary test target.
     if (config.emit_lib_vt or config.app_runtime != .none) {
         inline for (.{ test_launch_policy_step, test_launch_policy_build_step }) |step| {
-            try step.addError(
+            step.dependOn(&b.addFail(
                 "launch-policy tests require -Dapp-runtime=none -Demit-lib-vt=false",
-                .{},
-            );
+            ).step);
         }
     } else {
         const target = config.baselineTarget(b.graph.io);
         const module_options: std.Build.Module.CreateOptions = .{
             .root_source_file = b.path("src/launch_policy_tests.zig"),
             .target = target,
-            .optimize = .Debug,
+            .optimize = .debug,
             .strip = false,
             .omit_frame_pointer = false,
             .unwind_tables = .sync,
@@ -438,9 +440,7 @@ pub fn build(b: *std.Build) !void {
             },
         });
         var standard_options = module_options;
-        standard_options.root_source_file = .{ .cwd_relative = b.pathJoin(&.{
-            b.graph.zig_lib_directory.path.?, "compiler", "test_runner.zig",
-        }) };
+        standard_options.root_source_file = b.graph.path(.zig_lib, "compiler/test_runner.zig");
         focused_test.root_module.addImport(
             "standard_test_runner",
             b.createModule(standard_options),
@@ -452,7 +452,7 @@ pub fn build(b: *std.Build) !void {
             b.createModule(selector_options),
         );
         _ = try deps.add(focused_test);
-        addGhosttyH(b, focused_test.root_module, target, .Debug);
+        addGhosttyH(b, focused_test.root_module, target, .debug);
 
         test_launch_policy_build_step.dependOn(&focused_test.step);
         const focused_run = b.addRunArtifact(focused_test);
@@ -465,7 +465,7 @@ pub fn build(b: *std.Build) !void {
     if (i18n) |v| {
         translations_step.dependOn(v.update_step);
     } else {
-        try translations_step.addError("cannot update translations when i18n is disabled", .{});
+        translations_step.dependOn(&b.addFail("cannot update translations when i18n is disabled").step);
     }
 }
 
@@ -473,7 +473,7 @@ fn addGhosttyH(
     b: *std.Build,
     module: *std.Build.Module,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
 ) void {
     const translate_c = b.lazyImport(@This(), "translate_c") orelse return;
     const translate_c_dep = b.lazyDependency("translate_c", .{}) orelse return;

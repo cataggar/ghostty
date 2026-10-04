@@ -72,8 +72,8 @@ pub fn commandData(
     out: ?*anyopaque,
 ) callconv(lib.calling_conv) bool {
     if (comptime std.debug.runtime_safety) {
-        _ = std.enums.fromInt(CommandData, @intFromEnum(data)) orelse {
-            log.warn("commandData invalid data value={d}", .{@intFromEnum(data)});
+        _ = std.enums.fromInt(CommandData, @backingInt(data)) orelse {
+            log.warn("commandData invalid data value={d}", .{@backingInt(data)});
             return false;
         };
     }

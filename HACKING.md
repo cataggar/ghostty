@@ -26,6 +26,83 @@ When you're developing Ghostty, it's very likely that you will want to build a
 _debug_ build to diagnose issues more easily. This is already the default for
 Zig builds, so simply run `zig build` **without any `-Doptimize` flags**.
 
+## Android fork: Zig 0.17
+
+This compiler migration requires Zig 0.17.0. Optimizer options are now
+`debug`, `safe`, `fast` and `small`. Its approved native floors are macOS 15
+and Linux 5.10; Android API levels and ABIs are not changed.
+
+The Android branch retains the fixes through `7776515e8`, including the
+`84d51b6dc` Metal content-scale fix. Downstream Android and macOS consumers
+must pin the same checkout: the Zig VT module, `macos/GhosttyKit.xcframework`,
+and installed `zig-out/share` resources are not independent dependencies.
+The xcframework/header/resource build paths remain enabled.
+
+All C translation uses the GitHub-only `cataggar/translate-c` revision
+`62d06a5d3e93c82727544e8113e4762a315ca0ed`. New C imports are build-defined
+modules, requesting default scalar field initialization and explicitly
+initializing nested callback records that the former `@cImport` zeroed.
+The compiler-only uucode pin is the already-merged
+`d500967026220f5e283088dc69e95aa79cdaa5a0`, not its Unicode 18 branch.
+The minimal libxev, Vaxis, z2d, zf and zigimg ports are merged scoped PRs.
+The manifest pins their verified packages and the separately owned Objective-C
+port. Native Apple SDK/message/block integration acceptance remains open.
+
+| Dependency | Merged revision |
+| --- | --- |
+| libxev | `88b57b3ea7499ce3f63676d43e536a3d4d329732` |
+| Vaxis | `ba65f672e6f896d35f5492554ccb6d35669611af` |
+| z2d | `f95bbb68bc806fada2b6cd2f2fc870e99baa89d2` |
+| zf | `089d6d0f4d3aa798a1dcfa1cd97615baf366c7b2` |
+| zigimg (Vaxis prerequisite) | `049553dcc55b9438793e6924a7d69d50a4b4d5ee` |
+| zig-objc | `65e6be111c4fcf21da8a3fd056933591977224dc` |
+
+The Nix developer shell selects the SHA-256-pinned `cataggar/zig` 0.17.0
+release, overriding the pinned overlay's older binary installer. Its syntax
+was parsed locally, but Nix evaluation is unavailable on this host. The
+separate Nix package derivations and generated dependency cache still target
+the old toolchain and have not been accepted by this source port.
+
+VT test modules retain every feature and enable their required tracked-pin
+integrity checks even when built with `-Doptimize=safe`. Production module
+options are unchanged. The ordinary unfiltered `test-lib-vt` steps are not
+disabled or narrowed.
+
+Allocation-failure fixtures block remapping as well as new allocations, so
+the new allocator cannot satisfy the request without inducing the intended
+failure. CRC fixtures compare public `init`/`final` results, not the internal
+state representation of the standard library's CPU-selected implementation.
+The production CRC algorithm is unchanged. Shader matrices retain their byte
+order and explicit 16-byte uniform alignment; this is not GPU acceptance.
+
+Current acceptance on x86_64 Linux, always building with `-j2`:
+
+| Check | Result |
+| --- | --- |
+| Native VT static/shared libraries | Passed |
+| Existing `test-lib-vt-schema` | Passed |
+| Public VT ABI manifest compared with untouched Zig 0.16 baseline | Identical |
+| Relative custom install prefix | Passed; generated metadata records an absolute prefix |
+| VT library helper tests | Passed, 127 tests across both modules |
+| Two focused PageList regression filters | Passed, 61 tests across both modules |
+| Full debug VT suites | Not completed; untouched Zig 0.16 baseline also exceeded a 15-minute run budget |
+| Full optimized VT suites | Passed, 5594 tests and 54 existing skips; 20/20 build steps |
+| libxev | 142 passed, four existing skips |
+| Vaxis | 164 passed |
+| z2d | 176 unit tests and 85 unchanged image specs passed |
+| zf, including TUI | 23 passed |
+| zigimg with upstream fixtures installed | 494 passed, three existing skips |
+| Full native headless tests | 3428 passed, 35 existing skips; 92/92 build steps |
+| Full embedded C ABI/header and documentation generation | Passed, 133/133 steps |
+| Existing C shared/static VT consumers | Passed; correct shared dependency and no VT dynamic dependency in static consumer |
+| Android API 26 ARMv7/ARM64/x86/x86_64 VT static/shared builds | Passed, 26/26 steps each, official NDK r29 |
+| macOS 15 x86_64 VT cross-build | Passed, 27/27 steps; no native execution claimed |
+| Native GhosttyKit/Xcode/Metal acceptance | Unavailable on the Linux host; remains an open integration gate |
+
+No hosted workflows were dispatched, no device was modified, and no fetched
+package-cache source was patched. The dependency-source merge does not close
+the native/hardware runtime gates or the overall droid migration.
+
 There are many more build steps than just `zig build`, some of which are listed
 here:
 
@@ -107,7 +184,7 @@ On macOS logging to the macOS unified log is available and enabled by default.
 Use the system `log` CLI to view Ghostty's logs: `sudo log stream --level debug --predicate 'subsystem=="com.mitchellh.ghostty"'`.
 
 Ghostty's logging can be configured in two ways. The first is by what
-optimization level Ghostty is compiled with. If Ghostty is compiled with `Debug`
+optimization level Ghostty is compiled with. If Ghostty is compiled with `debug`
 optimizations debug logs will be output to `stderr`. If Ghostty is compiled with
 any other optimization the debug logs will not be output to `stderr`.
 

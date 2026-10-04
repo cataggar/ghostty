@@ -11,7 +11,7 @@
 //!
 //! The resulting value is identical across all backends: this is the
 //! iSCSI CRC32C parameter set (reflected, initial and final XOR
-//! `0xFFFFFFFF`), matching `std.hash.crc.Crc32Iscsi`.
+//! `0xFFFFFFFF`), matching `std.hash.crc.@"CRC-32/ISCSI"`.
 
 const std = @import("std");
 const builtin = @import("builtin");
@@ -312,7 +312,7 @@ const Software = struct {
 
 /// The standard-library implementation of the same parameter set. This is
 /// the reference the tests compare against.
-const Reference = std.hash.crc.Crc32Iscsi;
+const Reference = std.hash.crc.@"CRC-32/ISCSI";
 
 test "software slicing matches the standard library" {
     // The selected backend may be hardware, so cover the sliced software
@@ -325,23 +325,23 @@ test "software slicing matches the standard library" {
     for (0..64 + 1) |len| {
         for (0..4) |offset| {
             const input = bytes[offset..][0..len];
-            var reference: Reference = .{ .crc = 0xFFFF_FFFF };
+            var reference: Reference = .init();
             reference.update(input);
             try std.testing.expectEqual(
-                reference.crc,
-                Software.update(0xFFFF_FFFF, input),
+                reference.final(),
+                Software.update(0xFFFF_FFFF, input) ^ 0xFFFF_FFFF,
             );
         }
     }
 
     const long = bytes[0..512];
-    var reference: Reference = .{ .crc = 0xFFFF_FFFF };
+    var reference: Reference = .init();
     reference.update(long);
     for ([_]usize{ 0, 1, 15, 16, 17, 100, 511, 512 }) |split| {
         const first = Software.update(0xFFFF_FFFF, long[0..split]);
         try std.testing.expectEqual(
-            reference.crc,
-            Software.update(first, long[split..]),
+            reference.final(),
+            Software.update(first, long[split..]) ^ 0xFFFF_FFFF,
         );
     }
 }
@@ -363,18 +363,18 @@ test "software multi-stream matches the standard library" {
         bytes.len,
     }) |len| {
         const input = bytes[0..len];
-        var reference: Reference = .{ .crc = 0xFFFF_FFFF };
+        var reference: Reference = .init();
         reference.update(input);
         try std.testing.expectEqual(
-            reference.crc,
-            Software.update(0xFFFF_FFFF, input),
+            reference.final(),
+            Software.update(0xFFFF_FFFF, input) ^ 0xFFFF_FFFF,
         );
 
         // Continuation across a split inside the multi-stream range.
         const first = Software.update(0xFFFF_FFFF, input[0 .. len / 2]);
         try std.testing.expectEqual(
-            reference.crc,
-            Software.update(first, input[len / 2 ..]),
+            reference.final(),
+            Software.update(first, input[len / 2 ..]) ^ 0xFFFF_FFFF,
         );
     }
 }

@@ -62,8 +62,8 @@ pub const Preparation = enum {
 };
 
 pub fn isError(err: anyerror) bool {
-    inline for (@typeInfo(Error).error_set.?) |field| {
-        if (err == @field(Error, field.name)) return true;
+    inline for (@typeInfo(Error).error_set.error_names.?) |field| {
+        if (err == @field(Error, field)) return true;
     }
     return false;
 }
@@ -158,8 +158,8 @@ test "launch policy pure cwd identity and override validation" {
     }
     try testing.expectError(error.LaunchWorkingDirectoryContainsNul, validateWorkingDirectory("/a\x00b"));
     try validateIdentity("account");
-    try validateIdentity(&([_]u8{'a'} ** 255));
-    for ([_]?[]const u8{ null, "", "-account", "a\x00b", &([_]u8{'a'} ** 256) }) |name| {
+    try validateIdentity(&@as([255]u8, @splat('a')));
+    for ([_]?[]const u8{ null, "", "-account", "a\x00b", &@as([256]u8, @splat('a')) }) |name| {
         try testing.expectError(error.LaunchIdentityInvalid, validateIdentity(name));
     }
     try validateCommandOverride(.normal, true);

@@ -297,7 +297,7 @@ const Node = struct {
 };
 
 /// The memory pool we get page nodes from.
-const NodePool = std.heap.memory_pool.Managed(List.Node);
+const NodePool = @import("../datastruct/managed_pool.zig").Managed(List.Node, null);
 
 /// The standard page capacity that we use as a starting point for
 /// all pages. This is chosen as a sane default that fits most terminal
@@ -321,7 +321,7 @@ const wasm_page_pool = builtin.target.cpu.arch.isWasm() and !builtin.is_test;
 const PagePool = if (wasm_page_pool)
     WasmPagePool([std_size]u8)
 else
-    std.heap.memory_pool.AlignedManaged(
+    @import("../datastruct/managed_pool.zig").Managed(
         [std_size]u8,
         .fromByteUnits(std.heap.page_size_min),
     );
@@ -329,7 +329,7 @@ else
 /// List of pins, known as "tracked" pins. These are pins that are kept
 /// up to date automatically through page-modifying operations.
 const PinSet = std.AutoArrayHashMapUnmanaged(*Pin, void);
-const PinPool = std.heap.memory_pool.Managed(Pin);
+const PinPool = @import("../datastruct/managed_pool.zig").Managed(Pin, null);
 
 /// The pool of memory used for a pagelist. This can be shared between
 /// multiple pagelists but it is not threadsafe.
@@ -16711,7 +16711,7 @@ test "PageList resize reflow exceeds hyperlink memory forcing capacity increase"
         const page = s.pages.first.?.page();
         const id = try page.insertHyperlink(.{
             .id = .{ .implicit = 0 },
-            .uri = "a" ** (pagepkg.string_bytes_default - 1),
+            .uri = @import("../comptime_string.zig").repeat("a", pagepkg.string_bytes_default - 1),
         });
         const rac = page.getRowAndCell(page.size.cols - 1, page.size.rows - 1);
         rac.row.wrap = true;
@@ -16735,7 +16735,7 @@ test "PageList resize reflow exceeds hyperlink memory forcing capacity increase"
         const page = s.pages.last.?.page();
         const id = try page.insertHyperlink(.{
             .id = .{ .implicit = 1 },
-            .uri = "a" ** (pagepkg.string_bytes_default - 1),
+            .uri = @import("../comptime_string.zig").repeat("a", pagepkg.string_bytes_default - 1),
         });
         const rac = page.getRowAndCell(0, 0);
         rac.row.wrap_continuation = true;
@@ -16807,9 +16807,9 @@ test "PageList resize reflow hyperlink dupe string alloc chunk rounding" {
     //  …B | <- B is hyperlinked with a 33-byte URI and 31-byte ID.
     //  +--+
 
-    const uri_a = "a" ** (pagepkg.string_bytes_default - 64);
-    const uri_b = "b" ** 33;
-    const id_b = "i" ** 31;
+    const uri_a = @import("../comptime_string.zig").repeat("a", pagepkg.string_bytes_default - 64);
+    const uri_b = @import("../comptime_string.zig").repeat("b", 33);
+    const id_b = @import("../comptime_string.zig").repeat("i", 31);
 
     // Hyperlink A in the bottom right of the first page. Mark the final
     // row as wrapped.

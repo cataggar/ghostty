@@ -39,7 +39,7 @@ pub fn begin(self: *InputQuiescence) u64 {
 fn beginWithCounter(self: *InputQuiescence, counter: *Atomic(u64)) u64 {
     const token = allocateToken(counter) orelse {
         self.fail();
-        self.epoch.store(@intFromEnum(Phase.failed), .release);
+        self.epoch.store(@backingInt(Phase.failed), .release);
         return 0;
     };
     self.epoch.store(value(token, .pending), .release);
@@ -132,11 +132,11 @@ fn allocateToken(counter: *Atomic(u64)) ?u64 {
 }
 
 fn phase(epoch: u64) Phase {
-    return @enumFromInt(@as(u2, @truncate(epoch)));
+    return @fromBackingInt(@intCast(@as(u2, @truncate(epoch))));
 }
 
 fn value(token: u64, p: Phase) u64 {
-    return (token << 2) | @intFromEnum(p);
+    return (token << 2) | @backingInt(p);
 }
 
 test "input quiescence epochs, stale tokens, and closed-generation clipboard" {

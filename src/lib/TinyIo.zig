@@ -152,9 +152,9 @@ const vtable: Io.VTable = if (!supported) std.Io.failing.vtable.* else .{
     .processSetCurrentDir = Io.failingProcessSetCurrentDir,
     .processSetCurrentPath = Io.failingProcessSetCurrentPath,
     .processReplace = Io.failingProcessReplace,
-    .processReplacePath = Io.failingProcessReplacePath,
     .processSpawn = Io.failingProcessSpawn,
-    .processSpawnPath = Io.failingProcessSpawnPath,
+    .inheritParentDir = Io.failingInheritParentDir,
+    .inheritParentFile = Io.failingInheritParentFile,
     .childWait = Io.unreachableChildWait,
     .childKill = Io.unreachableChildKill,
 
@@ -174,9 +174,6 @@ const vtable: Io.VTable = if (!supported) std.Io.failing.vtable.* else .{
     .netListenUnix = Io.failingNetListenUnix,
     .netConnectUnix = Io.failingNetConnectUnix,
     .netSocketCreatePair = Io.failingNetSocketCreatePair,
-    .netSend = Io.failingNetSend,
-    .netRead = Io.failingNetRead,
-    .netWrite = Io.failingNetWrite,
     .netWriteFile = Io.failingNetWriteFile,
     .netClose = Io.unreachableNetClose,
     .netShutdown = Io.failingNetShutdown,
@@ -559,7 +556,7 @@ fn dirRealPathFile(
                 std.debug.assert(redundant_pointer == out_buffer.ptr);
                 return std.mem.indexOfScalar(u8, out_buffer, 0) orelse out_buffer.len;
             }
-            switch (@as(posix.E, @enumFromInt(std.c._errno().*))) {
+            switch (@as(posix.E, @fromBackingInt(@intCast(std.c._errno().*)))) {
                 .INTR => continue,
                 .ACCES => return error.AccessDenied,
                 .NOENT => return error.FileNotFound,
@@ -720,7 +717,7 @@ fn futexWaitInner(ptr: *const u32, expected: u32, timeout_ns: ?u64) void {
             };
             const status = c.__ulock_wait(flags, ptr, expected, us);
             if (status >= 0) return;
-            switch (@as(c.E, @enumFromInt(-status))) {
+            switch (@as(c.E, @fromBackingInt(@intCast(-status)))) {
                 .INTR => {}, // spurious wake
                 .FAULT => {}, // futex address paged out; caller retries
                 .TIMEDOUT => {},
@@ -729,7 +726,7 @@ fn futexWaitInner(ptr: *const u32, expected: u32, timeout_ns: ?u64) void {
         },
 
         .freebsd => {
-            const flags = @intFromEnum(std.c.UMTX_OP.WAIT_UINT_PRIVATE);
+            const flags = @backingInt(std.c.UMTX_OP.WAIT_UINT_PRIVATE);
             var tm_size: usize = 0;
             var tm: std.c._umtx_time = undefined;
             var tm_ptr: ?*const std.c._umtx_time = null;
@@ -794,7 +791,7 @@ fn futexWake(userdata: ?*anyopaque, ptr: *const u32, max_waiters: u32) void {
             while (true) {
                 const status = c.__ulock_wake(flags, ptr, 0);
                 if (status >= 0) return;
-                switch (@as(c.E, @enumFromInt(-status))) {
+                switch (@as(c.E, @fromBackingInt(@intCast(-status)))) {
                     .INTR, .CANCELED => continue, // spurious wake
                     else => return,
                 }
@@ -804,7 +801,7 @@ fn futexWake(userdata: ?*anyopaque, ptr: *const u32, max_waiters: u32) void {
         .freebsd => {
             _ = std.c._umtx_op(
                 @intFromPtr(ptr),
-                @intFromEnum(std.c.UMTX_OP.WAKE_PRIVATE),
+                @backingInt(std.c.UMTX_OP.WAKE_PRIVATE),
                 @min(max_waiters, std.math.maxInt(c_ulong)),
                 0,
                 0,
@@ -825,7 +822,7 @@ test "read a file through File.Reader" {
     var tmp_dir = testing.tmpDir(.{});
     defer tmp_dir.cleanup();
 
-    const contents = "hello minimal test_io\n" ** 100;
+    const contents = @import("../comptime_string.zig").repeat("hello minimal test_io\n", 100);
     try tmp_dir.dir.writeFile(testing.io, .{
         .sub_path = "test.txt",
         .data = contents,
@@ -1010,7 +1007,7 @@ test "openFile edge cases" {
     ));
 
     // Paths that can't fit in PATH_MAX must not be silently truncated.
-    const long_name = "a" ** (std.fs.max_path_bytes + 1);
+    const long_name = @import("../comptime_string.zig").repeat("a", std.fs.max_path_bytes + 1);
     try testing.expectError(error.NameTooLong, dir.openFile(
         test_io,
         long_name,

@@ -30,10 +30,10 @@ pub fn init(
 ) Error!Self {
     const sampler = gl.Sampler.create() catch return error.OpenGLFailed;
     errdefer sampler.destroy();
-    sampler.parameter(.WrapS, @intFromEnum(opts.wrap_s)) catch return error.OpenGLFailed;
-    sampler.parameter(.WrapT, @intFromEnum(opts.wrap_t)) catch return error.OpenGLFailed;
-    sampler.parameter(.MinFilter, @intFromEnum(opts.min_filter)) catch return error.OpenGLFailed;
-    sampler.parameter(.MagFilter, @intFromEnum(opts.mag_filter)) catch return error.OpenGLFailed;
+    sampler.parameter(.WrapS, @backingInt(opts.wrap_s)) catch return error.OpenGLFailed;
+    sampler.parameter(.WrapT, @backingInt(opts.wrap_t)) catch return error.OpenGLFailed;
+    sampler.parameter(.MinFilter, @backingInt(opts.min_filter)) catch return error.OpenGLFailed;
+    sampler.parameter(.MagFilter, @backingInt(opts.mag_filter)) catch return error.OpenGLFailed;
 
     return .{
         .sampler = sampler,

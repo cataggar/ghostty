@@ -16,6 +16,24 @@ pub fn build(b: *std.Build) !void {
 
     if (upstream) |v| module.addIncludePath(v.path(""));
     module.addIncludePath(b.path("override"));
+    translate: {
+        const tc = b.lazyImport(@This(), "translate_c") orelse break :translate;
+        const dep = b.lazyDependency("translate_c", .{}) orelse break :translate;
+        const c: tc.Translator = .init(dep, .{
+            .c_source_file = b.path("c.h"),
+            .default_init = true,
+            .target = target,
+            .optimize = optimize,
+            .libc_file = if (target.result.os.tag.isDarwin()) blk: {
+                switch (try @import("apple_sdk").pathsForTarget(b, target.result)) {
+                    inline else => |paths| break :blk paths.libc,
+                }
+            } else null,
+        });
+        c.linkLibrary(lib);
+        c.addIncludePath(b.path("override"));
+        module.addImport("glslang-c", c.mod);
+    }
 
     if (target.query.isNative()) {
         const test_exe = b.addTest(.{
@@ -26,6 +44,9 @@ pub fn build(b: *std.Build) !void {
                 .optimize = optimize,
             }),
         });
+        if (module.import_table.get("glslang-c")) |c| {
+            test_exe.root_module.addImport("glslang-c", c);
+        }
         test_exe.root_module.linkLibrary(lib);
         const tests_run = b.addRunArtifact(test_exe);
         const test_step = b.step("test", "Run tests");
@@ -40,7 +61,7 @@ fn buildGlslang(
     b: *std.Build,
     upstream_: ?*std.Build.Dependency,
     target: std.Build.ResolvedTarget,
-    optimize: std.builtin.OptimizeMode,
+    optimize: std.lang.Optimize,
 ) !*std.Build.Step.Compile {
     const lib = b.addLibrary(.{
         .name = "glslang",

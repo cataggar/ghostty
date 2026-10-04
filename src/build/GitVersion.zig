@@ -17,11 +17,13 @@ branch: []const u8,
 /// Initialize the version and detect it from the Git environment. This
 /// allocates using the build allocator and doesn't free.
 pub fn detect(b: *std.Build) !Version {
+    b.graph.poisonCache();
+    const root_path = try b.root.joinString(b.allocator, "");
     // Execute a bunch of git commands to determine the automatic version.
     var code: u8 = 0;
     const branch: []const u8 = b: {
         const tmp: []u8 = b.runAllowFail(
-            &[_][]const u8{ "git", "-C", b.build_root.path orelse ".", "rev-parse", "--abbrev-ref", "HEAD" },
+            &[_][]const u8{ "git", "-C", root_path, "rev-parse", "--abbrev-ref", "HEAD" },
             &code,
             .ignore,
         ) catch |err| switch (err) {
@@ -42,7 +44,7 @@ pub fn detect(b: *std.Build) !Version {
 
     const short_hash = short_hash: {
         const output = b.runAllowFail(
-            &[_][]const u8{ "git", "-C", b.build_root.path orelse ".", "-c", "log.showSignature=false", "log", "--pretty=format:%h", "-n", "1" },
+            &[_][]const u8{ "git", "-C", root_path, "-c", "log.showSignature=false", "log", "--pretty=format:%h", "-n", "1" },
             &code,
             .ignore,
         ) catch |err| switch (err) {
@@ -54,7 +56,7 @@ pub fn detect(b: *std.Build) !Version {
     };
 
     const tag = b.runAllowFail(
-        &[_][]const u8{ "git", "-C", b.build_root.path orelse ".", "describe", "--exact-match", "--tags" },
+        &[_][]const u8{ "git", "-C", root_path, "describe", "--exact-match", "--tags" },
         &code,
         .ignore,
     ) catch |err| switch (err) {
@@ -66,7 +68,7 @@ pub fn detect(b: *std.Build) !Version {
     _ = b.runAllowFail(&[_][]const u8{
         "git",
         "-C",
-        b.build_root.path orelse ".",
+        root_path,
         "diff",
         "--quiet",
         "--exit-code",

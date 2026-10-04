@@ -39,6 +39,7 @@ pub fn build(b: *std.Build) !void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&tests_run.step);
 
+    var library: ?*std.Build.Step.Compile = null;
     if (b.systemIntegrationOption("fontconfig", .{})) {
         module.linkSystemLibrary("fontconfig", dynamic_link_opts);
         test_exe.root_module.linkSystemLibrary("fontconfig", dynamic_link_opts);
@@ -53,8 +54,23 @@ pub fn build(b: *std.Build) !void {
 
             .dynamic_link_opts = dynamic_link_opts,
         });
+        library = lib;
 
         test_exe.root_module.linkLibrary(lib);
+    }
+    translate: {
+        const tc = b.lazyImport(@This(), "translate_c") orelse break :translate;
+        const dep = b.lazyDependency("translate_c", .{}) orelse break :translate;
+        const c: tc.Translator = .init(dep, .{
+            .c_source_file = b.path("c.h"),
+            .default_init = true,
+            .target = target,
+            .optimize = optimize,
+            .link_system_libs = if (library == null) &.{.{ .name = "fontconfig" }} else &.{},
+        });
+        if (library) |lib| c.linkLibrary(lib);
+        module.addImport("fontconfig-c", c.mod);
+        test_exe.root_module.addImport("fontconfig-c", c.mod);
     }
 }
 

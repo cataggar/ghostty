@@ -1466,7 +1466,7 @@ pub const Application = extern struct {
         const priv = self.private();
         assert(priv.signal_source == null);
         priv.signal_source = glibunix.signalAdd(
-            @intFromEnum(std.posix.SIG.USR2),
+            @backingInt(std.posix.SIG.USR2),
             handleSigusr2,
             self,
         );
@@ -1771,10 +1771,11 @@ pub const Application = extern struct {
         };
 
         var body_buf: [512]u8 = undefined;
-        const body = std.fmt.bufPrintZ(
+        const body = std.mem.printSentinel(
             &body_buf,
             "{s}: {s}",
             .{ label, detail },
+            0,
         ) catch return;
 
         Action.desktopNotification(self, .app, .{
@@ -1994,7 +1995,7 @@ pub const Application = extern struct {
             log.debug("argument: {d} {s}", .{ i, str });
 
             if (e_seen) {
-                const copy = arena_alloc.dupeZ(u8, str) catch |err| {
+                const copy = arena_alloc.dupeSentinel(u8, str, 0) catch |err| {
                     log.warn("unable to duplicate argument {d} {s}: {t}", .{ i, str, err });
                     return err;
                 };
@@ -2033,14 +2034,14 @@ pub const Application = extern struct {
                 continue;
             }
             if (std.mem.cutPrefix(u8, str, "--working-directory=")) |v| {
-                working_directory = arena_alloc.dupeZ(u8, std.mem.trim(u8, v, &std.ascii.whitespace)) catch |err| {
+                working_directory = arena_alloc.dupeSentinel(u8, std.mem.trim(u8, v, &std.ascii.whitespace), 0) catch |err| {
                     log.warn("unable to duplicate working directory: {t}", .{err});
                     return err;
                 };
                 continue;
             }
             if (std.mem.cutPrefix(u8, str, "--title=")) |v| {
-                title = arena_alloc.dupeZ(u8, std.mem.trim(u8, v, &std.ascii.whitespace)) catch |err| {
+                title = arena_alloc.dupeSentinel(u8, std.mem.trim(u8, v, &std.ascii.whitespace), 0) catch |err| {
                     log.warn("unable to duplicate title: {t}", .{err});
                     return err;
                 };
@@ -2315,7 +2316,7 @@ const Action = struct {
         ) callconv(.c) void {
             defer dialog.unref();
 
-            if (response_id != @intFromEnum(gtk.ResponseType.accept)) return;
+            if (response_id != @backingInt(gtk.ResponseType.accept)) return;
 
             const file = dialog.as(gtk.FileChooser).getFile() orelse {
                 log.warn("inspector export dialog returned no file", .{});
@@ -2467,7 +2468,7 @@ const Action = struct {
                     .previous => .previous,
                     .next => .next,
                     .last => .last,
-                    else => .{ .n = @intCast(@intFromEnum(tab)) },
+                    else => .{ .n = @intCast(@backingInt(tab)) },
                 });
             },
         }
@@ -3444,10 +3445,10 @@ fn setGtkEnv(config: *const CoreConfig) std.Io.Writer.Error!void {
         var buf: [1024]u8 = undefined;
         var writer: std.Io.Writer = .fixed(&buf);
         var first: bool = true;
-        inline for (@typeInfo(@TypeOf(gdk_debug)).@"struct".fields) |field| {
-            if (@field(gdk_debug, field.name)) {
+        inline for (@typeInfo(@TypeOf(gdk_debug)).@"struct".field_names) |field| {
+            if (@field(gdk_debug, field)) {
                 if (!first) try writer.writeAll(",");
-                try writer.writeAll(field.name);
+                try writer.writeAll(field);
                 first = false;
             }
         }
@@ -3461,10 +3462,10 @@ fn setGtkEnv(config: *const CoreConfig) std.Io.Writer.Error!void {
         var buf: [1024]u8 = undefined;
         var writer: std.Io.Writer = .fixed(&buf);
         var first: bool = true;
-        inline for (@typeInfo(@TypeOf(gdk_disable)).@"struct".fields) |field| {
-            if (@field(gdk_disable, field.name)) {
+        inline for (@typeInfo(@TypeOf(gdk_disable)).@"struct".field_names) |field| {
+            if (@field(gdk_disable, field)) {
                 if (!first) try writer.writeAll(",");
-                try writer.writeAll(field.name);
+                try writer.writeAll(field);
                 first = false;
             }
         }

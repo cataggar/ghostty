@@ -1082,9 +1082,13 @@ pub const StreamHandler = struct {
         }
 
         var host_buffer: [std.Io.net.HostName.max_len]u8 = undefined;
-        const host = uri.getHost(&host_buffer) catch |err| switch (err) {
+        const host = internal_os.uri.rawHost(uri, &host_buffer) catch |err| switch (err) {
             error.UriMissingHost => {
                 log.warn("OSC 7 uri must contain a hostname: {}", .{err});
+                return;
+            },
+            error.HostNameTooLong => {
+                log.warn("OSC 7 hostname is too long: {}", .{err});
                 return;
             },
         };
@@ -1092,7 +1096,7 @@ pub const StreamHandler = struct {
         // OSC 7 is a little sketchy because anyone can send any value from
         // any host (such an SSH session). The best practice terminals follow
         // is to valid the hostname to be local.
-        const host_valid = internal_os.hostname.isLocal(host.bytes) catch |err| switch (err) {
+        const host_valid = internal_os.hostname.isLocal(host) catch |err| switch (err) {
             error.PermissionDenied,
             error.Unexpected,
             => {
@@ -1101,16 +1105,17 @@ pub const StreamHandler = struct {
             },
         };
         if (!host_valid) {
-            log.warn("OSC 7 host ({s}) must be local", .{host.bytes});
+            log.warn("OSC 7 host ({s}) must be local", .{host});
             return;
         }
 
         // We need the raw path, which might require unescaping. We try to
         // avoid making any heap allocations by using the stack first.
         var arena_alloc: std.heap.ArenaAllocator = .init(self.alloc);
-        var stack_alloc = std.heap.stackFallback(1024, arena_alloc.allocator());
+        var stack_buffer: [1024]u8 = undefined;
+        var stack_alloc = std.heap.BufferFirstAllocator.init(&stack_buffer, arena_alloc.allocator());
         defer arena_alloc.deinit();
-        const path = try uri.path.toRawMaybeAlloc(stack_alloc.get());
+        const path = try uri.path.toRawMaybeAlloc(stack_alloc.allocator());
 
         log.debug("terminal pwd: {s}", .{path});
         try self.terminal.setPwd(path);
@@ -1252,7 +1257,7 @@ pub const StreamHandler = struct {
                             },
                         });
                     }
-                    mask.* = .initEmpty();
+                    mask.* = .empty;
                 },
 
                 .reset_special => log.warn(
@@ -1305,7 +1310,7 @@ pub const StreamHandler = struct {
                             .dynamic => |dynamic| try response.writer.print(
                                 "\x1b]{d};rgb:{x:0>4}/{x:0>4}/{x:0>4}",
                                 .{
-                                    @intFromEnum(dynamic),
+                                    @backingInt(dynamic),
                                     @as(u16, color.r) * 257,
                                     @as(u16, color.g) * 257,
                                     @as(u16, color.b) * 257,
@@ -1327,7 +1332,7 @@ pub const StreamHandler = struct {
                             .dynamic => |dynamic| try response.writer.print(
                                 "\x1b]{d};rgb:{x:0>2}/{x:0>2}/{x:0>2}",
                                 .{
-                                    @intFromEnum(dynamic),
+                                    @backingInt(dynamic),
                                     @as(u16, color.r),
                                     @as(u16, color.g),
                                     @as(u16, color.b),

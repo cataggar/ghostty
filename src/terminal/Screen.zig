@@ -2358,11 +2358,11 @@ pub fn setAttribute(
         },
 
         .@"8_fg" => |n| {
-            self.cursor.style.fg_color = .{ .palette = @intFromEnum(n) };
+            self.cursor.style.fg_color = .{ .palette = @backingInt(n) };
         },
 
         .@"8_bg" => |n| {
-            self.cursor.style.bg_color = .{ .palette = @intFromEnum(n) };
+            self.cursor.style.bg_color = .{ .palette = @backingInt(n) };
         },
 
         .reset_fg => self.cursor.style.fg_color = .none,
@@ -2370,11 +2370,11 @@ pub fn setAttribute(
         .reset_bg => self.cursor.style.bg_color = .none,
 
         .@"8_bright_fg" => |n| {
-            self.cursor.style.fg_color = .{ .palette = @intFromEnum(n) };
+            self.cursor.style.fg_color = .{ .palette = @backingInt(n) };
         },
 
         .@"8_bright_bg" => |n| {
-            self.cursor.style.bg_color = .{ .palette = @intFromEnum(n) };
+            self.cursor.style.bg_color = .{ .palette = @backingInt(n) };
         },
 
         .@"256_fg" => |idx| {
@@ -2924,7 +2924,7 @@ pub fn selectionString(
     const text = try aw.toOwnedSliceSentinel(0);
     errdefer alloc.free(text);
     if (opts.map) |map| {
-        const map_string = try alloc.dupeZ(u8, text);
+        const map_string = try alloc.dupeSentinel(u8, text, 0);
         errdefer alloc.free(map_string);
         try selectionString_tw.check(.copy_map);
         map.* = .{
@@ -10974,7 +10974,7 @@ test "Screen: cursorSetHyperlink OOM + URI too large for string alloc" {
     // Start a hyperlink with a URI that just barely fits in the string alloc.
     // This will ensure that additional string alloc space is needed for the
     // redundant copy of the URI when the page is re-alloced.
-    const uri = "a" ** (pagepkg.std_capacity.string_bytes - 8);
+    const uri = @import("../comptime_string.zig").repeat("a", pagepkg.std_capacity.string_bytes - 8);
     try s.startHyperlink(uri, null);
 
     // Figure out how many cells should can have hyperlinks in this page,

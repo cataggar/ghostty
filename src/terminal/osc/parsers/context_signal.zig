@@ -423,7 +423,7 @@ test "OSC 3008: max length context ID" {
     const testing = std.testing;
 
     var p: Parser = .init(null);
-    const id = "a" ** 64;
+    const id = @import("../../../comptime_string.zig").repeat("a", 64);
     const input = "3008;start=" ++ id;
     for (input) |ch| p.next(ch);
 
@@ -436,7 +436,7 @@ test "OSC 3008: over-length context ID" {
     const testing = std.testing;
 
     var p: Parser = .init(null);
-    const id = "a" ** 65;
+    const id = @import("../../../comptime_string.zig").repeat("a", 65);
     const input = "3008;start=" ++ id;
     for (input) |ch| p.next(ch);
     try testing.expect(p.end(null) == null);

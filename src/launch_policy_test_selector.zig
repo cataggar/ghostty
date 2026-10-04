@@ -60,7 +60,7 @@ pub fn select(
         }
     }
 
-    var seen = [_]bool{false} ** expected_names.len;
+    var seen: [expected_names.len]bool = @splat(false);
     var count: usize = 0;
     for (available) |entry| {
         const index = index: {

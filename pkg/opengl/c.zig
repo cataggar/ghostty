@@ -1,3 +1,1 @@
-pub const c = @cImport({
-    @cInclude("glad/gl.h");
-});
+pub const c = @import("opengl-c");

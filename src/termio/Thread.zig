@@ -570,12 +570,7 @@ fn selectionScrollCallback(
 const TestPty = struct {
     const terminal = @import("../terminal/main.zig");
     const Pty = @import("../pty.zig").Pty;
-    const c = @cImport({
-        @cInclude("termios.h");
-        @cInclude("fcntl.h");
-        @cInclude("sys/ioctl.h");
-        @cInclude("sys/stat.h");
-    });
+    const c = @import("posix-c");
 
     pty: Pty,
     thread: Thread,
@@ -812,8 +807,13 @@ const TestEpollPtyWrite = struct {
     }
 
     fn capture(exec: *termio.Exec.ThreadData, master: std.posix.fd_t) !TestEpollPtyWrite {
-        errdefer |err| if (err != error.WriterNotRegistered)
-            diagnose(exec, master, @errorName(err));
+        return captureInner(exec, master) catch |err| {
+            if (err != error.WriterNotRegistered) diagnose(exec, master, @errorName(err));
+            return err;
+        };
+    }
+
+    fn captureInner(exec: *termio.Exec.ThreadData, master: std.posix.fd_t) !TestEpollPtyWrite {
         const head = exec.write_queue.value.epoll.head orelse return error.WriterQueueEmpty;
         // queueWrite can complete the head and enqueue another during one
         // tick. The new head is .adding with dup_fd=0, not an owned descriptor.
@@ -830,10 +830,16 @@ const TestEpollPtyWrite = struct {
     }
 
     fn expectRetired(self: TestEpollPtyWrite, master: std.posix.fd_t) !void {
-        errdefer |err| std.debug.print(
-            "epoll writer cleanup {s}: sampled_fd={d} sampled_state=active current_fd_flags={d} master_fd={d} pty_device={d} pty_number={d}\n",
-            .{ @errorName(err), self.fd, c.fcntl(self.fd, c.F_GETFD), master, self.identity.device, self.identity.number },
-        );
+        return self.expectRetiredInner(master) catch |err| {
+            std.debug.print(
+                "epoll writer cleanup {s}: sampled_fd={d} sampled_state=active current_fd_flags={d} master_fd={d} pty_device={d} pty_number={d}\n",
+                .{ @errorName(err), self.fd, c.fcntl(self.fd, c.F_GETFD), master, self.identity.device, self.identity.number },
+            );
+            return err;
+        };
+    }
+
+    fn expectRetiredInner(self: TestEpollPtyWrite, master: std.posix.fd_t) !void {
         // The original master remains open, so its devpts index cannot be
         // recycled. An old fd number may, however, now name an unrelated file.
         try std.testing.expectEqual(self.identity, try identityOf(master, null) orelse
