@@ -1,9 +1,9 @@
 [
   {
-    "type": "archive",
-    "url": "https://github.com/vancluever/arocc/archive/ecbc5c799574e0da2758a961b12efa586007f03c.tar.gz",
-    "dest": "vendor/p/aro-0.0.0-JSD1Qk8rOQDnuVcD4jAwMpHitA6pADRKzQ7M7hKRwxvD",
-    "sha256": "aa54487bd727e8fa36744ff0a824dedb2f4ca45f4c2d4d9d2437cf5fd3d0ad1a"
+    "type": "git",
+    "url": "https://github.com/cataggar/arocc",
+    "commit": "d0c8c4d9c55daa7ef6e40cf0f630a5b5e900989b",
+    "dest": "vendor/p/aro-0.0.0-JSD1QtuBNwCASyBtNF3pqTl_W3oAJQGEVyFAtrBSE_Pa"
   },
   {
     "type": "archive",
@@ -90,10 +90,10 @@
     "sha256": "fecc95b46cf05e8e3fc8a414750e0ba5aad00d89e9fdf175e94ff041caf1a03a"
   },
   {
-    "type": "archive",
-    "url": "https://deps.files.ghostty.org/libxev-9ce8e8e6ff89e583258a7f8e7adeeeaeae8611bf.tar.gz",
-    "dest": "vendor/p/libxev-0.0.0-86vtcwIRFADbH4hk-EjROXxlrKIRPQdA41XiTSytYO-F",
-    "sha256": "e2b9b224cd78101156abb8f46479a51f6cce66c4815c632856e20a1440dd02b7"
+    "type": "git",
+    "url": "https://github.com/cataggar/libxev",
+    "commit": "88b57b3ea7499ce3f63676d43e536a3d4d329732",
+    "dest": "vendor/p/libxev-0.0.0-86vtcyERFABbCzzUhLIrgk5YHfQlwvllAmDH2oJ6R9O2"
   },
   {
     "type": "archive",
@@ -138,28 +138,22 @@
     "sha256": "b52b6fcfc45e7fa69b1f06a1362c155473444e2cc09995556b156c53ba6657e3"
   },
   {
-    "type": "archive",
-    "url": "https://deps.files.ghostty.org/translate_c-80f8b6e4f45a303268717d8e5f4f91d7837138bb.tar.gz",
-    "dest": "vendor/p/translate_c-0.0.0-Q_BUWmU6BwB_9JKG2l2W7i_mhmYWeRseTGBEHi_YlV5f",
-    "sha256": "38c9e59d58f36e3481f6fa38f11fe59c63c12492fccf399ca56f3dfcce17b53e"
-  },
-  {
-    "type": "archive",
-    "url": "https://deps.files.ghostty.org/uucode-2826a37a4562284fdacd8fa029d49509cc9bffcd.tar.gz",
-    "dest": "vendor/p/uucode-0.2.0-ZZjBPlK5VADj7fdoq7G8LIHzD5o6FSkcBXXrRWr4jnrA",
-    "sha256": "7e76fc7fab1e7ac728c52b35bbb3e5b8c639841abfc7fe1a4bcb13050594bc9e"
+    "type": "git",
+    "url": "https://github.com/cataggar/translate-c",
+    "commit": "62d06a5d3e93c82727544e8113e4762a315ca0ed",
+    "dest": "vendor/p/translate_c-2.0.0-Q_BUWlpOBwBWvgGBM20tJq-GXgPio3v3UD39rXEn70KN"
   },
   {
     "type": "git",
-    "url": "https://github.com/rockorager/libvaxis.git",
-    "commit": "c1e1f23be38951c425cdf31af455ba23ef178940",
-    "dest": "vendor/p/vaxis-0.6.0-BWNV_MjFCQCs9UDHiRkrgw_ayeiPkzOe4xVbaAqXkUWW"
+    "url": "https://github.com/jacobsandlund/uucode",
+    "commit": "d500967026220f5e283088dc69e95aa79cdaa5a0",
+    "dest": "vendor/p/uucode-0.2.0-ZZjBPu-5VACkwtcoxV7AgM3tL8oCU4JE4GKNE5tIUpRK"
   },
   {
-    "type": "archive",
-    "url": "https://deps.files.ghostty.org/vaxis-1dbbe575dff4586fe51e3217aa5c3fecdcbb6089.tar.gz",
-    "dest": "vendor/p/vaxis-0.6.0-BWNV_CrbCQCscGpzsAlR402rYQ_tV3aAl081c2iRRkka",
-    "sha256": "3ea050e905887c46bca1a2c18e41d6edf574c1aa6ebfbc5cf3c52846275e4fa8"
+    "type": "git",
+    "url": "https://github.com/cataggar/libvaxis",
+    "commit": "ba65f672e6f896d35f5492554ccb6d35669611af",
+    "dest": "vendor/p/vaxis-0.6.0-BWNV_GXbCQANIbo3rFBY-oN7PeX9BF2HcnIIv8UAU4YY"
   },
   {
     "type": "archive",
@@ -186,16 +180,16 @@
     "dest": "vendor/p/N-V-__8AAP5JWgCGP_AD0teWpa4krRvE9VPZzvviGdbmN4jI"
   },
   {
-    "type": "archive",
-    "url": "https://deps.files.ghostty.org/z2d-7dbae85c81784dba9988320bf9543ed9a81350c8.tar.gz",
-    "dest": "vendor/p/z2d-0.12.1-j5P_Hsw8EQAKyZTQICCQnAH2xYkLDW8k9uefbsYdfPZ-",
-    "sha256": "e55c9d0b156edaddfea32fb1c0e3597e1b6306b9a4ec1888e2f8008c598bced8"
+    "type": "git",
+    "url": "https://github.com/cataggar/z2d",
+    "commit": "f95bbb68bc806fada2b6cd2f2fc870e99baa89d2",
+    "dest": "vendor/p/z2d-0.12.1-j5P_HrY8EQB5PGNmqaLixFkk-Afa5GIMWEfLVfHBsvp6"
   },
   {
-    "type": "archive",
-    "url": "https://deps.files.ghostty.org/zf-c35c421f84895193246db06c40683c1a30e616ef.tar.gz",
-    "dest": "vendor/p/zf-0.11.0-OIRy8X-RAAAwaRXHMYpj2uvBnuGTZWEE_3V7acqHQNtW",
-    "sha256": "ca4bc109fd9d97cedae2f5bdb879cc78c346d43c14a34e3a2abd2ee9208c8547"
+    "type": "git",
+    "url": "https://github.com/cataggar/zf",
+    "commit": "089d6d0f4d3aa798a1dcfa1cd97615baf366c7b2",
+    "dest": "vendor/p/zf-0.11.0-OIRy8WSRAAD8xkFtR8DkwybRkHDEwO4ScQQdUTda_Way"
   },
   {
     "type": "archive",
@@ -204,10 +198,10 @@
     "sha256": "a2ff488a244301f4e59469a5232aad6869b01acc50f7d7ed2647c029a57d4b3b"
   },
   {
-    "type": "archive",
-    "url": "https://deps.files.ghostty.org/zig_objc-c8de82ff80281215ad92900866dab7103a8efa8b.tar.gz",
-    "dest": "vendor/p/zig_objc-0.0.0-Ir_Sp9gsAQCPAJc0oF5xoWePHWP6Y6tCphDeyNUThJoi",
-    "sha256": "831eaec554bb23ef20229f1e705d8f53e8a29c829840bb8d0f5edb05c76d6df0"
+    "type": "git",
+    "url": "https://github.com/cataggar/zig-objc",
+    "commit": "65e6be111c4fcf21da8a3fd056933591977224dc",
+    "dest": "vendor/p/zig_objc-0.0.0-Ir_Sp2c1AQBOstFPddSDfLrYvDUTxS3eGtUcSV9RZqYU"
   },
   {
     "type": "archive",
@@ -217,9 +211,9 @@
   },
   {
     "type": "git",
-    "url": "https://github.com/zigimg/zigimg",
-    "commit": "d695acd97c02e57bb151e8f659d1280f5cd6ca70",
-    "dest": "vendor/p/zigimg-0.1.0-8_eo2oyaFwBZwJpmqPkCfVXWBrHcqbYwmrp1I6bTD3lI"
+    "url": "https://github.com/cataggar/zigimg",
+    "commit": "59d962090de9bea08efad7f1c12f9836bf07f43d",
+    "dest": "vendor/p/zigimg-0.1.0-8_eo2qacFwDFIkRSlLyJ-GkP_WjaGDSep3MUcQ5mFbkv"
   },
   {
     "type": "archive",

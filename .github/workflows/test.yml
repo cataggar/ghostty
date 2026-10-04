@@ -331,6 +331,9 @@ jobs:
 
       - name: Install zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+          mirror: https://github.com/cataggar/zig/releases/download/v0.17.0
 
       - name: Build Example
         shell: pwsh
@@ -680,7 +683,7 @@ jobs:
           nix develop -c zig build \
             -Demit-lib-vt \
             -Dtarget=wasm32-freestanding \
-            -Doptimize=ReleaseFast
+            -Doptimize=fast
 
       - name: Optimize ReleaseFast WASM
         run: |
@@ -699,13 +702,13 @@ jobs:
           nix develop -c zig build \
             -Demit-lib-vt \
             -Dtarget=wasm32-freestanding \
-            -Doptimize=ReleaseSmall
+            -Doptimize=small
 
       - name: Validate WASM ABI manifest
         run: |
           nix develop -c zig build test-lib-vt-schema \
             -Dtarget=wasm32-freestanding \
-            -Doptimize=ReleaseSmall
+            -Doptimize=small
 
       - name: Optimize ReleaseSmall WASM
         run: |
@@ -858,7 +861,7 @@ jobs:
     env:
       ZIG_LOCAL_CACHE_DIR: /zig/local-cache
       ZIG_GLOBAL_CACHE_DIR: /zig/global-cache
-      ANDROID_NDK_VERSION: r29
+      ANDROID_NDK_VERSION: r29-beta1
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -883,7 +886,7 @@ jobs:
         uses: nttld/setup-ndk@ed92fe6cadad69be94a966a7ee3271275e62f779 # v1.6.0
         id: setup-ndk
         with:
-          ndk-version: r29
+          ndk-version: r29-beta1
           add-to-path: false
           link-to-sdk: false
           local-cache: true
@@ -905,6 +908,9 @@ jobs:
 
       - name: Setup Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+          mirror: https://github.com/cataggar/zig/releases/download/v0.17.0
 
       - name: Test libghostty-vt
         run: zig build test-lib-vt
@@ -926,6 +932,9 @@ jobs:
 
       - name: Setup Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+          mirror: https://github.com/cataggar/zig/releases/download/v0.17.0
 
       - name: Build libghostty (GNU ABI)
         run: zig build -Dtarget=native-native-gnu -Dapp-runtime=none
@@ -1026,7 +1035,7 @@ jobs:
         run: nix build .#ghostty-releasefast
 
       - name: Check version
-        run: result/bin/ghostty +version | grep -q '.ReleaseFast'
+        run: result/bin/ghostty +version | grep -q '.fast'
 
       - name: Check to see if the binary has been stripped
         run: nm result/bin/.ghostty-wrapped 2>&1 | grep -q 'no symbols'
@@ -1679,6 +1688,9 @@ jobs:
 
       - name: Setup Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
+        with:
+          version: 0.17.0
+          mirror: https://github.com/cataggar/zig/releases/download/v0.17.0
 
       - name: Test
         run: zig build -Dapp-runtime=none test

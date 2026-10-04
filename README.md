@@ -54,8 +54,9 @@ continue to come from the same exact checkout.
 
 The Linux VT libraries, full embedded C ABI/header/documentation build, native
 headless tests, all four Android API-26 ABI libraries and macOS-15 VT cross
-libraries have been validated locally. Real Android builds require an NDK
-(`ANDROID_NDK_HOME`); the native floors are Linux 5.10 and macOS 15.
+libraries have been validated locally. Android acceptance uses the approved
+NDK r29-beta1, base revision `29.0.13113456`, via `ANDROID_NDK_HOME`; the native
+floors are Linux 5.10 and macOS 15.
 
 GhosttyKit acceptance still requires a native macOS host, Xcode and the Metal
 toolchain. GPU, native macOS/AArch64 and Android-device runtime gates remain

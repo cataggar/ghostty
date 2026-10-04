@@ -113,7 +113,7 @@ in
         scdoc
         zig
         zip
-        zon2nix.packages.${stdenv.hostPlatform.system}.zon2nix
+        (zon2nix.packages.${stdenv.hostPlatform.system}.zon2nix.override {inherit zig;})
 
         # For web and wasm stuff
         nodejs
