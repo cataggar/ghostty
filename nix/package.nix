@@ -10,6 +10,7 @@
   git,
   ncurses,
   pkg-config,
+  python3,
   zig_0_17,
   pandoc,
   revision ? "dirty",
@@ -66,6 +67,7 @@ in
         ncurses
         pandoc
         pkg-config
+        python3
         zig_0_17
         gobject-introspection
         wrapGAppsHook4
@@ -86,16 +88,24 @@ in
 
     dontSetZigDefaultFlags = true;
 
-    zigBuildFlags = [
-      "--system"
-      "${finalAttrs.deps}"
-      "-Dversion-string=${finalAttrs.version}"
-      "-Dgtk-x11=${lib.boolToString enableX11}"
-      "-Dgtk-wayland=${lib.boolToString enableWayland}"
-      "-Dcpu=baseline"
-      "-Doptimize=${optimize}"
-      "-Dstrip=${lib.boolToString strip}"
-    ];
+    zigBuildFlags =
+      [
+        "--system"
+        "${finalAttrs.deps}"
+        "-Dversion-string=${finalAttrs.version}"
+        "-Dgtk-x11=${lib.boolToString enableX11}"
+        "-Dgtk-wayland=${lib.boolToString enableWayland}"
+        "-Dcpu=baseline"
+        "-Doptimize=${optimize}"
+        "-Dstrip=${lib.boolToString strip}"
+      ]
+      ++ lib.optionals stdenv.hostPlatform.isLinux [
+        "-Dtarget=${stdenv.hostPlatform.parsed.cpu.name}-linux-${
+          if stdenv.hostPlatform.isMusl
+          then "musl"
+          else "gnu"
+        }"
+      ];
 
     outputs = [
       "out"
