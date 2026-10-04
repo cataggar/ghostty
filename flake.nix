@@ -85,12 +85,24 @@
       };
       archiveSystem = lib.replaceStrings ["darwin"] ["macos"] system;
     in
-      zig.packages.${system}."0.16.0".overrideAttrs (_: {
+      zig.packages.${system}."0.16.0".overrideAttrs (prev: {
         version = "0.17.0";
         src = pkgs.fetchurl {
           url = "https://github.com/cataggar/zig/releases/download/v0.17.0/zig-${archiveSystem}-0.17.0.tar.xz";
           sha256 = hashes.${system};
         };
+        setupHook = "${nixpkgs}/pkgs/development/compilers/zig/setup-hook.sh";
+        dontFixup = false;
+        dontStrip = true;
+        env =
+          (prev.env or {})
+          // {
+            zig_default_cpu_flag = "-Dcpu=baseline";
+            zig_default_optimize_flag = "--release=safe";
+          };
+        propagatedNativeBuildInputs =
+          (prev.propagatedNativeBuildInputs or [])
+          ++ lib.optionals pkgs.stdenv.hostPlatform.isDarwin [pkgs.xcbuild];
       });
   in {
     devShells = forAllPlatforms (pkgs: {

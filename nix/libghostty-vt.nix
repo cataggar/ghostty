@@ -4,6 +4,7 @@
   lib,
   llvmPackages,
   pkg-config,
+  python3,
   runCommand,
   stdenv,
   testers,
@@ -60,6 +61,7 @@ stdenv.mkDerivation (finalAttrs: {
     [
       git
       pkg-config
+      python3
       zig_0_17
     ]
     ++ lib.optionals stdenv.hostPlatform.isDarwin [
@@ -83,6 +85,13 @@ stdenv.mkDerivation (finalAttrs: {
       "-Dapp-runtime=none"
       "-Demit-lib-vt=true"
       "-Dsimd=${lib.boolToString simd}"
+    ]
+    ++ lib.optionals stdenv.hostPlatform.isLinux [
+      "-Dtarget=${stdenv.hostPlatform.parsed.cpu.name}-linux-${
+        if stdenv.hostPlatform.isMusl
+        then "musl"
+        else "gnu"
+      }"
     ]
     ++ lib.optionals stdenv.hostPlatform.isDarwin [
       "-Demit-xcframework=false"
