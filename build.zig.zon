@@ -3,7 +3,7 @@
     .version = "1.3.2-dev",
     .paths = .{""},
     .fingerprint = 0x64407a2a0b4147e5,
-    .minimum_zig_version = "0.17.0",
+    .minimum_zig_version = "0.17.1",
     .dependencies = .{
         // External C translation, using the GitHub-only Aro mirror.
         .translate_c = .{
@@ -33,8 +33,8 @@
         },
         .zig_objc = .{
             // mitchellh/zig-objc
-            .url = "git+https://github.com/cataggar/zig-objc#65e6be111c4fcf21da8a3fd056933591977224dc",
-            .hash = "zig_objc-0.0.0-Ir_Sp2c1AQBOstFPddSDfLrYvDUTxS3eGtUcSV9RZqYU",
+            .url = "git+https://github.com/cataggar/zig-objc#abbbd6233aef59528c264da7dafb1ab03a0a51d9",
+            .hash = "zig_objc-0.0.0-Ir_Sp28zAQAqOVGumZm87uO5VuNseCIVXGKabRBcNZ-H",
             .lazy = true,
         },
         .zig_js = .{

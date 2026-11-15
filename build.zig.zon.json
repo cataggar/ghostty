@@ -164,10 +164,10 @@
     "url": "https://deps.files.ghostty.org/zig_js-3c23860e47fdcdc5af805efb7fd0bdac5fd3e9bc.tar.gz",
     "hash": "sha256-Q1643wb/MCX0QkPa9QEY9xeQbqpC2IOrjER0ZyL3mH0="
   },
-  "zig_objc-0.0.0-Ir_Sp2c1AQBOstFPddSDfLrYvDUTxS3eGtUcSV9RZqYU": {
+  "zig_objc-0.0.0-Ir_Sp28zAQAqOVGumZm87uO5VuNseCIVXGKabRBcNZ-H": {
     "name": "zig_objc",
-    "url": "git+https://github.com/cataggar/zig-objc#65e6be111c4fcf21da8a3fd056933591977224dc",
-    "hash": "sha256-H6dKIUdQKhxzYzB8lio/D2DjIt3jYmEmhCAB1gT/KMk="
+    "url": "git+https://github.com/cataggar/zig-objc#abbbd6233aef59528c264da7dafb1ab03a0a51d9",
+    "hash": "sha256-Z7lzv9pxLFCVD6Nstl6jmtNbACGnpQLT4cIwspRh1Mc="
   },
   "wayland-0.6.0-lQa1kqz8AQADQmdNJsNhLoNHcnEGEUjrOaPV-dtEnEmX": {
     "name": "zig_wayland",

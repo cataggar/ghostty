@@ -28,7 +28,7 @@ Zig builds, so simply run `zig build` **without any `-Doptimize` flags**.
 
 ## Android fork: Zig 0.17
 
-This compiler migration requires Zig 0.17.0. Optimizer options are now
+This compiler migration requires Zig 0.17.1. Optimizer options are now
 `debug`, `safe`, `fast` and `small`. Its approved native floors are macOS 15
 and Linux 5.10; Android API levels and ABIs are not changed.
 
@@ -55,10 +55,10 @@ port. Native Apple SDK/message/block integration acceptance remains open.
 | z2d | `f95bbb68bc806fada2b6cd2f2fc870e99baa89d2` |
 | zf | `089d6d0f4d3aa798a1dcfa1cd97615baf366c7b2` |
 | zigimg (Vaxis prerequisite) | `049553dcc55b9438793e6924a7d69d50a4b4d5ee` |
-| zig-objc | `65e6be111c4fcf21da8a3fd056933591977224dc` |
+| zig-objc | `abbbd6233aef59528c264da7dafb1ab03a0a51d9` |
 
 The Nix developer shell and package/VT derivations select the SHA-256-pinned
-`cataggar/zig` 0.17.0 release, overriding the pinned overlay's older binary
+`cataggar/zig` 0.17.1 release, overriding the pinned overlay's older binary
 installer. Windows workflows retain the existing setup action and its
 minisign verification, but explicitly select this release's GitHub mirror.
 Snap and Flatpak use the same checksum-pinned compiler. Existing workflow

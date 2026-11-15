@@ -4,7 +4,7 @@ git+https://github.com/cataggar/libxev#88b57b3ea7499ce3f63676d43e536a3d4d329732
 git+https://github.com/cataggar/translate-c#62d06a5d3e93c82727544e8113e4762a315ca0ed
 git+https://github.com/cataggar/z2d#f95bbb68bc806fada2b6cd2f2fc870e99baa89d2
 git+https://github.com/cataggar/zf#089d6d0f4d3aa798a1dcfa1cd97615baf366c7b2
-git+https://github.com/cataggar/zig-objc#65e6be111c4fcf21da8a3fd056933591977224dc
+git+https://github.com/cataggar/zig-objc#abbbd6233aef59528c264da7dafb1ab03a0a51d9
 git+https://github.com/cataggar/zigimg#59d962090de9bea08efad7f1c12f9836bf07f43d
 git+https://github.com/google/wuffs-mirror-release-c.git?rev=v0.4.0-alpha.10#7411f488fe2e2c205c3d3b3d28638b7356522930
 git+https://github.com/jacobsandlund/uucode#d500967026220f5e283088dc69e95aa79cdaa5a0

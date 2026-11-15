@@ -27,6 +27,10 @@ set -eu
 
 in="$1"
 out="$2"
+case "$out" in
+    /*) ;;
+    *) out="$PWD/$out" ;;
+esac
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
