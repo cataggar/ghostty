@@ -200,8 +200,8 @@
   {
     "type": "git",
     "url": "https://github.com/cataggar/zig-objc",
-    "commit": "65e6be111c4fcf21da8a3fd056933591977224dc",
-    "dest": "vendor/p/zig_objc-0.0.0-Ir_Sp2c1AQBOstFPddSDfLrYvDUTxS3eGtUcSV9RZqYU"
+    "commit": "abbbd6233aef59528c264da7dafb1ab03a0a51d9",
+    "dest": "vendor/p/zig_objc-0.0.0-Ir_Sp28zAQAqOVGumZm87uO5VuNseCIVXGKabRBcNZ-H"
   },
   {
     "type": "archive",

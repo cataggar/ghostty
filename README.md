@@ -48,7 +48,7 @@ See the [documentation](https://ghostty.org/docs) on the Ghostty website.
 
 ### Android fork compiler migration
 
-This Android branch requires **Zig 0.17.0** and preserves its embedded-app fixes.
+This Android branch requires **Zig 0.17.1** and preserves its embedded-app fixes.
 Android `ghostty-vt` and macOS `GhosttyKit.xcframework` plus `zig-out/share` must
 continue to come from the same exact checkout.
 

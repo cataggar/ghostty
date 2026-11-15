@@ -332,8 +332,8 @@ jobs:
       - name: Install zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.17.0
-          mirror: https://github.com/cataggar/zig/releases/download/v0.17.0
+          version: 0.17.1
+          mirror: https://github.com/cataggar/zig/releases/download/v0.17.1
 
       - name: Build Example
         shell: pwsh
@@ -909,8 +909,8 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.17.0
-          mirror: https://github.com/cataggar/zig/releases/download/v0.17.0
+          version: 0.17.1
+          mirror: https://github.com/cataggar/zig/releases/download/v0.17.1
 
       - name: Test libghostty-vt
         run: zig build test-lib-vt
@@ -933,8 +933,8 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.17.0
-          mirror: https://github.com/cataggar/zig/releases/download/v0.17.0
+          version: 0.17.1
+          mirror: https://github.com/cataggar/zig/releases/download/v0.17.1
 
       - name: Build libghostty (GNU ABI)
         run: zig build -Dtarget=native-native-gnu -Dapp-runtime=none
@@ -1689,8 +1689,8 @@ jobs:
       - name: Setup Zig
         uses: mlugg/setup-zig@d1434d08867e3ee9daa34448df10607b98908d29 # v2.2.1
         with:
-          version: 0.17.0
-          mirror: https://github.com/cataggar/zig/releases/download/v0.17.0
+          version: 0.17.1
+          mirror: https://github.com/cataggar/zig/releases/download/v0.17.1
 
       - name: Test
         run: zig build -Dapp-runtime=none test
