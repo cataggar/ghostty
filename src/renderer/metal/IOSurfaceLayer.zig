@@ -14,6 +14,8 @@ const log = std.log.scoped(.IOSurfaceLayer);
 /// We subclass CALayer with a custom display handler, we only need
 /// to make the subclass once, and then we can use it as a singleton.
 var Subclass: ?objc.Class = null;
+var display_cb_slot: objc.IvarSlot(DisplayCallback) = .{};
+var display_ctx_slot: objc.IvarSlot(?*anyopaque) = .{};
 
 /// The underlying CALayer
 layer: objc.Object,
@@ -33,8 +35,8 @@ pub fn init() !IOSurfaceLayer {
     // stretched during resize operations before a new frame has been drawn.
     layer.setProperty("contentsGravity", macos.animation.kCAGravityTopLeft);
 
-    layer.setInstanceVariable("display_cb", .{ .value = null });
-    layer.setInstanceVariable("display_ctx", .{ .value = null });
+    display_cb_slot.store(layer, null);
+    display_ctx_slot.store(layer, null);
 
     return .{ .layer = layer };
 }
@@ -165,14 +167,8 @@ pub fn setDisplayCallback(
     display_cb: DisplayCallback,
     display_ctx: ?*anyopaque,
 ) void {
-    self.layer.setInstanceVariable(
-        "display_cb",
-        objc.Object.fromId(@constCast(display_cb)),
-    );
-    self.layer.setInstanceVariable(
-        "display_ctx",
-        objc.Object.fromId(display_ctx),
-    );
+    display_cb_slot.store(self.layer, display_cb);
+    display_ctx_slot.store(self.layer, display_ctx);
 }
 
 fn getSubclass() error{ObjCFailed}!objc.Class {
@@ -185,24 +181,21 @@ fn getSubclass() error{ObjCFailed}!objc.Class {
         objc.allocateClassPair(CALayer, "IOSurfaceLayer") orelse return error.ObjCFailed;
     errdefer objc.disposeClassPair(subclass);
 
-    if (!subclass.addIvar("display_cb")) return error.ObjCFailed;
-    if (!subclass.addIvar("display_ctx")) return error.ObjCFailed;
+    if (!subclass.addIvar(DisplayCallback, "display_cb")) return error.ObjCFailed;
+    if (!subclass.addIvar(?*anyopaque, "display_ctx")) return error.ObjCFailed;
 
-    subclass.replaceMethod("display", struct {
+    _ = subclass.replaceMethod("display", struct {
         fn display(target: objc.c.id, sel: objc.c.SEL) callconv(.c) void {
             _ = sel;
             const self = objc.Object.fromId(target);
-            const display_cb: DisplayCallback = @ptrFromInt(@intFromPtr(
-                self.getInstanceVariable("display_cb").value,
-            ));
-            if (display_cb) |cb| cb(
-                @ptrCast(self.getInstanceVariable("display_ctx").value),
+            if (display_cb_slot.load(self)) |cb| cb(
+                display_ctx_slot.load(self),
             );
         }
     }.display);
 
     // Disable all animations for this layer by returning null for all actions.
-    subclass.replaceMethod("actionForKey:", struct {
+    _ = subclass.replaceMethod("actionForKey:", struct {
         fn actionForKey(
             target: objc.c.id,
             sel: objc.c.SEL,
@@ -211,11 +204,14 @@ fn getSubclass() error{ObjCFailed}!objc.Class {
             _ = target;
             _ = sel;
             _ = key;
-            return objc.getClass("NSNull").?.msgSend(objc.c.id, "null", .{});
+            return objc.getClassCached("NSNull").?.msgSend(objc.c.id, objc.S("null"), .{});
         }
     }.actionForKey);
 
     objc.registerClassPair(subclass);
+
+    display_cb_slot = objc.IvarSlot(DisplayCallback).fromClass(subclass, "display_cb") orelse return error.ObjCFailed;
+    display_ctx_slot = objc.IvarSlot(?*anyopaque).fromClass(subclass, "display_ctx") orelse return error.ObjCFailed;
 
     Subclass = subclass;
 

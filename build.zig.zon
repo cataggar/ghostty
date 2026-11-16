@@ -33,8 +33,8 @@
         },
         .zig_objc = .{
             // mitchellh/zig-objc
-            .url = "git+https://github.com/cataggar/zig-objc#abbbd6233aef59528c264da7dafb1ab03a0a51d9",
-            .hash = "zig_objc-0.0.0-Ir_Sp28zAQAqOVGumZm87uO5VuNseCIVXGKabRBcNZ-H",
+            .url = "git+https://github.com/cataggar/zig-objc#357026ce8ae6fef03f92b4dd1449486df9d85773",
+            .hash = "zig_objc-0.0.0-Ir_Sp5uhCQALpfPvw-g9qh0EhGzC8zYg5RkblkUXIhjq",
             .lazy = true,
         },
         .zig_js = .{
